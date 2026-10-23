@@ -1,7 +1,7 @@
 import Foundation
 import Postbox
 import SwiftSignalKit
-import TelegramApi
+internal import TelegramApi
 
 public struct GhostModeChatState: Equatable {
     public let settings: GhostModeSettings

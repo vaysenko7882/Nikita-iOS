@@ -59,7 +59,7 @@ public final class ListTextFieldItemComponent: Component {
         onReturn: (() -> Void)? = nil,
         tag: AnyObject? = nil
     ) {
-        self.style = style
+        self.style = ClassicDesign.isEnabled ? .legacy : style
         self.theme = theme
         self.initialText = initialText
         self.resetText = resetText

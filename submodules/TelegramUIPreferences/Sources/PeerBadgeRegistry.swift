@@ -1,6 +1,5 @@
 import Foundation
 import CryptoKit
-import Postbox
 import SwiftSignalKit
 import TelegramCore
 
@@ -19,7 +18,7 @@ public struct PeerBadgeTarget: Codable, Hashable {
         self.peerId = peerId
     }
 
-    public init?(peerId: PeerId) {
+    public init?(peerId: EnginePeer.Id) {
         let peerType: PeerBadgePeerType
         switch peerId.namespace {
         case Namespaces.Peer.CloudUser:
@@ -366,7 +365,7 @@ public final class PeerBadgeRegistryStore {
         return value
     }
 
-    public func badge(peerId: PeerId, now: Int64 = Int64(Date().timeIntervalSince1970)) -> PeerBadge? {
+    public func badge(peerId: EnginePeer.Id, now: Int64 = Int64(Date().timeIntervalSince1970)) -> PeerBadge? {
         guard let target = PeerBadgeTarget(peerId: peerId) else {
             return nil
         }

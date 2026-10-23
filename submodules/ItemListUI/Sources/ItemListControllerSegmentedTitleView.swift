@@ -5,6 +5,7 @@ import TelegramPresentationData
 import ComponentFlow
 import GlassBackgroundComponent
 import HorizontalTabsComponent
+import TabSelectorComponent
 
 public final class ItemListControllerSegmentedTitleView: UIView {
     private let backgroundContainer: GlassBackgroundContainerView
@@ -50,8 +51,10 @@ public final class ItemListControllerSegmentedTitleView: UIView {
         
         super.init(frame: CGRect())
         
-        self.addSubview(self.backgroundContainer)
-        self.backgroundContainer.contentView.addSubview(self.backgroundView)
+        if !ClassicDesign.isEnabled {
+            self.addSubview(self.backgroundContainer)
+            self.backgroundContainer.contentView.addSubview(self.backgroundView)
+        }
     }
     
     required public init?(coder aDecoder: NSCoder) {
@@ -68,6 +71,11 @@ public final class ItemListControllerSegmentedTitleView: UIView {
     
     private func update(transition: ComponentTransition) {
         guard let size = self.validLayout else {
+            return
+        }
+        
+        if ClassicDesign.isEnabled {
+            self.updateClassic(size: size, transition: transition)
             return
         }
         
@@ -121,6 +129,53 @@ public final class ItemListControllerSegmentedTitleView: UIView {
                 tabSelectorView.setOverlayContainerView(overlayContainerView: self)
             }
             transition.setFrame(view: tabSelectorView, frame: CGRect(origin: CGPoint(), size: tabSelectorFrame.size))
+        }
+    }
+    
+    private func updateClassic(size: CGSize, transition: ComponentTransition) {
+        let mappedItems = zip(0 ..< self.segments.count, self.segments).map { index, segment in
+            return TabSelectorComponent.Item(
+                id: AnyHashable(index),
+                title: segment
+            )
+        }
+        
+        var transition = transition
+        if self.animateLayout {
+            transition = .spring(duration: 0.4)
+            self.animateLayout = false
+        }
+        
+        let tabSelectorSize = self.tabSelector.update(
+            transition: transition,
+            component: AnyComponent(TabSelectorComponent(
+                colors: TabSelectorComponent.Colors(
+                    foreground: self.theme.list.itemPrimaryTextColor.withMultipliedAlpha(0.8),
+                    selection: self.theme.list.itemPrimaryTextColor.withMultipliedAlpha(0.05)
+                ),
+                theme: self.theme,
+                customLayout: TabSelectorComponent.CustomLayout(
+                    font: Font.medium(15.0),
+                    spacing: 8.0
+                ),
+                items: mappedItems,
+                selectedId: AnyHashable(self.index),
+                setSelectedId: { [weak self] id in
+                    guard let self, let index = id.base as? Int else {
+                        return
+                    }
+                    self.indexUpdated?(index)
+                }
+            )),
+            environment: {},
+            containerSize: CGSize(width: size.width, height: 44.0)
+        )
+        let tabSelectorFrame = CGRect(origin: CGPoint(x: floor((size.width - tabSelectorSize.width) / 2.0), y: floor((size.height - tabSelectorSize.height) / 2.0)), size: tabSelectorSize)
+        if let tabSelectorView = self.tabSelector.view {
+            if tabSelectorView.superview == nil {
+                self.addSubview(tabSelectorView)
+            }
+            transition.setFrame(view: tabSelectorView, frame: tabSelectorFrame)
         }
     }
 }

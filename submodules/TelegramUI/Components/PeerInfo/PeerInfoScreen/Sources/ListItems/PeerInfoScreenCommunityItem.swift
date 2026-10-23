@@ -183,7 +183,7 @@ private final class PeerInfoScreenCommunityItemNode: PeerInfoScreenItemNode {
         self.selectionNode.update(size: CGSize(width: width, height: height + highlightNodeOffset), theme: presentationData.theme, transition: transition)
         transition.updateFrame(node: self.selectionNode, frame: CGRect(origin: CGPoint(x: 0.0, y: -highlightNodeOffset), size: CGSize(width: width, height: height + highlightNodeOffset)))
 
-        transition.updateFrame(node: self.bottomSeparatorNode, frame: CGRect(origin: CGPoint(x: textLeftInset, y: height - UIScreenPixel), size: CGSize(width: width - textLeftInset - 16.0 - safeInsets.right, height: UIScreenPixel)))
+        transition.updateFrame(node: self.bottomSeparatorNode, frame: CGRect(origin: CGPoint(x: textLeftInset, y: height - UIScreenPixel), size: CGSize(width: width - textLeftInset - PeerInfoClassicMetrics.separatorRightInset - safeInsets.right, height: UIScreenPixel)))
         transition.updateAlpha(node: self.bottomSeparatorNode, alpha: bottomItem == nil ? 0.0 : 1.0)
 
         self.activateArea.accessibilityLabel = item.community.title

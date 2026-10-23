@@ -2,13 +2,10 @@ import Foundation
 import Postbox
 import SwiftSignalKit
 
-/// Per-account controls for the on-device deleted-message archive.
 public struct DeletedMessageArchiveSettings: Codable, Equatable {
     public static let defaultDeletedMessageMarker = "🧹"
     public static let deletedMessageMarkerLimit = 32
     public static let allowedMediaLimitGigabytes: [Int32] = [1, 5, 10, 20, 50]
-    /// Disappearing media is capped separately so that a handful of large one-off videos cannot
-    /// crowd out the ordinary archive.
     public static let allowedDisappearingMediaLimitGigabytes: [Int32] = [1, 2, 5, 10]
     public static let defaultSettings = DeletedMessageArchiveSettings(
         saveDeletedMessages: true,
@@ -72,8 +69,6 @@ public struct DeletedMessageArchiveSettings: Codable, Equatable {
         self.sessionId = sessionId
     }
 
-    // Decoded explicitly so that archives stored before the disappearing-media limit existed keep
-    // their configuration instead of resetting to defaults.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let legacyIsEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true

@@ -1,4 +1,5 @@
 import Foundation
+import LottieSettings
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -198,7 +199,7 @@ private enum LocationPickerEntry: Comparable, Identifiable {
                 return LocationSectionHeaderItem(presentationData: ItemListPresentationData(presentationData), systemStyle: .legacy, title: title)
             case let .venue(_, venue, queryId, resultId, _):
                 let venueType = venue?.venue?.type ?? ""
-                return ItemListVenueItem(presentationData: ItemListPresentationData(presentationData), systemStyle: .glass, engine: engine, venue: venue, style: .plain, action: venue.flatMap { venue in
+                return ItemListVenueItem(presentationData: ItemListPresentationData(presentationData), systemStyle: ClassicDesign.isEnabled ? .legacy : .glass, engine: engine, venue: venue, style: .plain, action: venue.flatMap { venue in
                     return { interaction?.sendVenue(venue, queryId, resultId) }
                 }, infoAction: ["home", "work"].contains(venueType) ? {
                     interaction?.openHomeWorkInfo()
@@ -344,6 +345,7 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
     private let listNode: ListView
     private let emptyResultsTextNode: ImmediateTextNode
     private let headerNode: LocationMapHeaderNode
+    private let classicOptionsNode: ClassicLocationOptionsNode?
     private let shadeNode: ASDisplayNode
     private let innerShadeNode: ASDisplayNode
     
@@ -410,13 +412,19 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
         
         self.headerNode = LocationMapHeaderNode(
             presentationData: presentationData,
-            glass: true,
+            glass: !ClassicDesign.isEnabled,
             toggleMapModeSelection: interaction.toggleMapModeSelection,
             updateMapMode: interaction.updateMapMode,
             goToUserLocation: interaction.goToUserLocation,
             showPlacesInThisArea: interaction.showPlacesInThisArea
         )
         self.headerNode.mapNode.isRotateEnabled = false
+        
+        if ClassicDesign.isEnabled {
+            self.classicOptionsNode = ClassicLocationOptionsNode(presentationData: presentationData, updateMapMode: interaction.updateMapMode)
+        } else {
+            self.classicOptionsNode = nil
+        }
                         
         self.shadeNode = ASDisplayNode()
         self.shadeNode.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
@@ -436,6 +444,9 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
         
         self.addSubnode(self.listNode)
         self.addSubnode(self.headerNode)
+        if let classicOptionsNode = self.classicOptionsNode {
+            self.addSubnode(classicOptionsNode)
+        }
         
         self.listNode.addSubnode(self.emptyResultsTextNode)
         self.shadeNode.addSubnode(self.innerShadeNode)
@@ -797,6 +808,7 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
                 }
                 
                 strongSelf.headerNode.updateState(mapMode: state.mapMode, trackingMode: .none, displayingMapModeOptions: state.displayingMapModeOptions, displayingPlacesButton: displayingPlacesButton, proximityNotification: nil, animated: true)
+                strongSelf.classicOptionsNode?.updateMapMode(state.mapMode)
                 
                 let annotations: [LocationPinAnnotation]
                 if let venues = displayedVenues, let queryId {
@@ -1092,6 +1104,7 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
         self.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
         self.listNode.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
         self.headerNode.updatePresentationData(self.presentationData)
+        self.classicOptionsNode?.updatePresentationData(self.presentationData)
         self.shadeNode.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
         self.innerShadeNode.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
         self.searchContainerNode?.updatePresentationData(self.presentationData)
@@ -1293,13 +1306,21 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
             }
         }
         
+        if let classicOptionsNode = self.classicOptionsNode {
+            let optionsOffset: CGFloat = self.state.displayingMapModeOptions ? navigationHeight : navigationHeight - optionsHeight
+            let optionsFrame = CGRect(x: 0.0, y: optionsOffset, width: layout.size.width, height: optionsHeight)
+            transition.updateFrame(node: classicOptionsNode, frame: optionsFrame)
+            classicOptionsNode.updateLayout(size: optionsFrame.size, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, transition: transition)
+            classicOptionsNode.isUserInteractionEnabled = self.state.displayingMapModeOptions
+        }
+        
         if let searchContainerNode = self.searchContainerNode {
             searchContainerNode.frame = CGRect(origin: CGPoint(), size: layout.size)
-            searchContainerNode.containerLayoutUpdated(ContainerViewLayout(size: layout.size, metrics: LayoutMetrics(), deviceMetrics: layout.deviceMetrics, intrinsicInsets: layout.intrinsicInsets, safeInsets: layout.safeInsets, additionalInsets: layout.additionalInsets, statusBarHeight: nil, inputHeight: layout.inputHeight, inputHeightIsInteractivellyChanging: layout.inputHeightIsInteractivellyChanging, inVoiceOver: layout.inVoiceOver), navigationBarHeight: navigationHeight, transition: transition)
+            searchContainerNode.containerLayoutUpdated(ContainerViewLayout(size: layout.size, metrics: LayoutMetrics(), deviceMetrics: layout.deviceMetrics, intrinsicInsets: layout.intrinsicInsets, safeInsets: layout.safeInsets, reservedCorners: layout.reservedCorners, division: layout.division, additionalInsets: layout.additionalInsets, statusBarHeight: nil, inputHeight: layout.inputHeight, inputHeightIsInteractivellyChanging: layout.inputHeightIsInteractivellyChanging, inVoiceOver: layout.inVoiceOver, presentedInFormSheet: layout.presentedInFormSheet), navigationBarHeight: navigationHeight, transition: transition)
         }
         
         if self.locationAccessDenied {
-            self.controller?.navigationBar?.updateBackgroundAlpha(0.0, transition: .immediate)
+            self.controller?.navigationBar?.setBackdropAlpha(0.0, transition: .immediate)
             Queue.mainQueue().after(0.25) {
                 self.controller?.updateTabBarAlpha(0.0, .immediate)
             }
@@ -1321,7 +1342,7 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
                 }
                 self.placeholderBackgroundNode = backgroundNode
                 
-                placeholderNode = LocationPlaceholderNode(content: .intro)
+                placeholderNode = LocationPlaceholderNode(content: .intro, lottieSettings: self.context.lottieRenderingSettings)
                 placeholderNode.settingsPressed = { [weak self] in
                     self?.context.sharedContext.applicationBindings.openSettings()
                 }
@@ -1346,7 +1367,7 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
                 placeholderBackgroundNode.removeFromSupernode()
             }
             
-            self.controller?.navigationBar?.updateBackgroundAlpha(1.0, transition: .immediate)
+            self.controller?.navigationBar?.setBackdropAlpha(1.0, transition: .immediate)
             self.controller?.updateTabBarAlpha(1.0, .immediate)
         }
         
@@ -1462,12 +1483,22 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
                 environment: {},
                 containerSize: barButtonSize
             )
-            let cancelButtonFrame = CGRect(origin: CGPoint(x: layout.safeInsets.left + 16.0, y: 16.0), size: cancelButtonSize)
+            // iPhone Duo, with a side strip: where the bar shows its own close there (the controller's "___close" item,
+            // which this button otherwise covers), this one would be a second close in the row, so it stays only as the
+            // back arrow used while picking a point; where the bar has none (sharing), this button goes in the strip.
+            let barShowsCloseInSideColumn = self.controller?.navigationBar?.isBackInSideColumn ?? false
+            let cancelButtonFrame: CGRect
+            if !barShowsCloseInSideColumn, let sideColumnFrame = layout.sideColumnNavigationButtonFrame {
+                cancelButtonFrame = CGRect(origin: CGPoint(x: floorToScreenPixels(sideColumnFrame.midX - cancelButtonSize.width * 0.5), y: floorToScreenPixels(sideColumnFrame.midY - cancelButtonSize.height * 0.5)), size: cancelButtonSize)
+            } else {
+                cancelButtonFrame = CGRect(origin: CGPoint(x: layout.safeInsets.left + 16.0, y: 16.0), size: cancelButtonSize)
+            }
             if let cancelButtonView = self.cancelButton.view {
                 if cancelButtonView.superview == nil {
                     self.view.addSubview(cancelButtonView)
                 }
                 transition.updateFrame(view: cancelButtonView, frame: cancelButtonFrame)
+                cancelButtonView.isHidden = barShowsCloseInSideColumn && !isPickingLocation
             }
             
             let searchButtonSize = self.searchButton.update(
@@ -1490,7 +1521,7 @@ final class LocationPickerControllerNode: ViewControllerTracingNode, CLLocationM
                 environment: {},
                 containerSize: barButtonSize
             )
-            let searchButtonFrame = CGRect(origin: CGPoint(x: layout.size.width - layout.safeInsets.left - 16.0 - searchButtonSize.width, y: 16.0), size: searchButtonSize)
+            let searchButtonFrame = CGRect(origin: CGPoint(x: layout.size.width - layout.safeInsets.right - 16.0 - searchButtonSize.width, y: 16.0), size: searchButtonSize)
             if let searchButtonView = self.searchButton.view {
                 if searchButtonView.superview == nil {
                     self.view.addSubview(searchButtonView)

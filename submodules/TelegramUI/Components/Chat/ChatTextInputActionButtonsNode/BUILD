@@ -17,6 +17,7 @@ swift_library(
         "//submodules/TelegramPresentationData",
         "//submodules/ContextUI",
         "//submodules/ChatPresentationInterfaceState",
+        "//submodules/TelegramUI/Components/Chat/ChatInputPanelNode",
         "//submodules/ChatMessageBackground",
         "//submodules/TelegramUI/Components/ChatControllerInteraction",
         "//submodules/AccountContext",

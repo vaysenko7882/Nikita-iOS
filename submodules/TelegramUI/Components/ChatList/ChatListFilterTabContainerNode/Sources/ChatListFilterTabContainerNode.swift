@@ -213,7 +213,7 @@ private final class ItemNode: ASDisplayNode {
         if self.theme !== presentationData.theme {
             self.theme = presentationData.theme
             
-            self.badgeBackgroundActiveNode.image = generateStretchableFilledCircleImage(diameter: 18.0, color: presentationData.theme.list.itemCheckColors.fillColor)
+            self.badgeBackgroundActiveNode.image = generateStretchableFilledCircleImage(diameter: 18.0, color: ClassicDesign.isEnabled ? presentationData.theme.chatList.unreadBadgeActiveBackgroundColor : presentationData.theme.list.itemCheckColors.fillColor)
             self.badgeBackgroundInactiveNode.image = generateStretchableFilledCircleImage(diameter: 18.0, color: presentationData.theme.chatList.unreadBadgeInactiveBackgroundColor)
             
             themeUpdated = true
@@ -300,7 +300,13 @@ private final class ItemNode: ASDisplayNode {
         self.shortTitleNode.visibility = title.enableAnimations
         self.shortTitleActiveNode.visibility = title.enableAnimations
         
-        if themeUpdated || titleUpdated {
+        if (themeUpdated || titleUpdated) && ClassicDesign.isEnabled {
+            self.titleNode.attributedText = title.attributedString(font: Font.medium(14.0), textColor: presentationData.theme.list.itemSecondaryTextColor)
+            self.titleActiveNode.attributedText = title.attributedString(font: Font.medium(14.0), textColor: presentationData.theme.list.itemAccentColor)
+            
+            self.shortTitleNode.attributedText = shortTitle.attributedString(font: Font.medium(14.0), textColor: presentationData.theme.list.itemSecondaryTextColor)
+            self.shortTitleActiveNode.attributedText = shortTitle.attributedString(font: Font.medium(14.0), textColor: presentationData.theme.list.itemAccentColor)
+        } else if themeUpdated || titleUpdated {
             self.titleNode.attributedText = title.attributedString(font: Font.medium(14.0), textColor: presentationData.theme.chat.inputPanel.panelControlColor)
             self.titleActiveNode.attributedText = title.attributedString(font: Font.medium(14.0), textColor: presentationData.theme.chat.inputPanel.panelControlColor)
             
@@ -549,7 +555,9 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         
         super.init()
         
-        self.view.addSubview(self.backgroundContainerView)
+        if !ClassicDesign.isEnabled {
+            self.view.addSubview(self.backgroundContainerView)
+        }
         
         self.scrollNode.view.showsHorizontalScrollIndicator = false
         self.scrollNode.view.showsVerticalScrollIndicator = false
@@ -561,7 +569,11 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         }
         self.scrollNode.view.scrollsToTop = false
         
-        self.backgroundView.contentView.addSubview(self.scrollNode.view)
+        if ClassicDesign.isEnabled {
+            self.addSubnode(self.scrollNode)
+        } else {
+            self.backgroundView.contentView.addSubview(self.scrollNode.view)
+        }
         self.scrollNode.addSubnode(self.selectedBackgroundNode)
         
         let reorderingGesture = ReorderingGestureRecognizer(shouldBegin: { [weak self] point in
@@ -602,7 +614,11 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
                         }
                     })
                     strongSelf.reorderingAutoScrollAnimator?.isPaused = false
-                    strongSelf.backgroundView.contentView.addSubview(itemNode.view)
+                    if ClassicDesign.isEnabled {
+                        strongSelf.addSubnode(itemNode)
+                    } else {
+                        strongSelf.backgroundView.contentView.addSubview(itemNode.view)
+                    }
                     
                     strongSelf.reorderingItemPosition = (itemNode.frame.minX, 0.0)
                     if let (size, sideInset, filters, selectedFilter, isReordering, isEditing, canReorderAllChats, filtersLimit, transitionFraction, presentationData) = strongSelf.currentParams {
@@ -698,13 +714,19 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         let isFirstTime = self.currentParams == nil
         let transition: ContainedViewLayoutTransition = isFirstTime ? .immediate : proposedTransition
         
-        let backgroundSize = CGSize(width: containerSize.width - (16.0 - containerSideInset) * 2.0, height: 44.0)
-        
-        transition.updateFrame(view: self.backgroundContainerView, frame: CGRect(origin: CGPoint(x: containerSideInset + 16.0, y: 0.0), size: backgroundSize))
-        self.backgroundContainerView.update(size: backgroundSize, isDark: presentationData.theme.overallDarkAppearance, transition: ComponentTransition(transition))
-        
-        transition.updateFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: backgroundSize))
-        self.backgroundView.update(size: backgroundSize, cornerRadius: backgroundSize.height * 0.5, isDark: presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: ComponentTransition(transition))
+        let isClassic = ClassicDesign.isEnabled
+        let backgroundSize: CGSize
+        if isClassic {
+            backgroundSize = containerSize
+        } else {
+            backgroundSize = CGSize(width: containerSize.width - (16.0 - containerSideInset) * 2.0, height: 44.0)
+            
+            transition.updateFrame(view: self.backgroundContainerView, frame: CGRect(origin: CGPoint(x: containerSideInset + 16.0, y: 0.0), size: backgroundSize))
+            self.backgroundContainerView.update(size: backgroundSize, isDark: presentationData.theme.overallDarkAppearance, transition: ComponentTransition(transition))
+            
+            transition.updateFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: backgroundSize))
+            self.backgroundView.update(size: backgroundSize, cornerRadius: backgroundSize.height * 0.5, isDark: presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: ComponentTransition(transition))
+        }
         
         var isEditing = isEditing
         if isReordering {
@@ -716,7 +738,18 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         let previousContentWidth = self.scrollNode.view.contentSize.width
         
         if self.currentParams?.presentationData.theme !== presentationData.theme {
-            self.selectedBackgroundNode.image = generateStretchableFilledCircleImage(diameter: 36.0, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)
+            if isClassic {
+                self.selectedBackgroundNode.image = generateImage(CGSize(width: 5.0, height: 3.0), rotatedContext: { size, context in
+                    context.clear(CGRect(origin: CGPoint(), size: size))
+                    context.setFillColor(presentationData.theme.list.itemAccentColor.cgColor)
+                    context.fillEllipse(in: CGRect(origin: CGPoint(), size: CGSize(width: 4.0, height: 4.0)))
+                    context.fillEllipse(in: CGRect(origin: CGPoint(x: size.width - 4.0, y: 0.0), size: CGSize(width: 4.0, height: 4.0)))
+                    context.fill(CGRect(x: 2.0, y: 0.0, width: size.width - 4.0, height: 4.0))
+                    context.fill(CGRect(x: 0.0, y: 2.0, width: size.width, height: 2.0))
+                })?.resizableImage(withCapInsets: UIEdgeInsets(top: 3.0, left: 3.0, bottom: 0.0, right: 3.0), resizingMode: .stretch)
+            } else {
+                self.selectedBackgroundNode.image = generateStretchableFilledCircleImage(diameter: 36.0, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)
+            }
         }
         
         if isReordering {
@@ -878,7 +911,7 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         
         let minSpacing: CGFloat = 26.0
         
-        let resolvedSideInset: CGFloat = 14.0
+        let resolvedSideInset: CGFloat = isClassic ? (16.0 + containerSideInset) : 14.0
         var leftOffset: CGFloat = resolvedSideInset
         
         var longTitlesWidth: CGFloat = resolvedSideInset
@@ -953,7 +986,12 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         if let selectedFrame = selectedFrame {
             let wasAdded = self.selectedBackgroundNode.isHidden
             self.selectedBackgroundNode.isHidden = false
-            let selectedBackgroundFrame = CGRect(origin: CGPoint(x: selectedFrame.minX - 10.0, y: selectedFrame.minY - floor((36.0 - selectedFrame.height) * 0.5)), size: CGSize(width: selectedFrame.width + 10.0 * 2.0, height: 36.0))
+            let selectedBackgroundFrame: CGRect
+            if isClassic {
+                selectedBackgroundFrame = CGRect(origin: CGPoint(x: selectedFrame.minX, y: backgroundSize.height - 3.0), size: CGSize(width: selectedFrame.width, height: 3.0))
+            } else {
+                selectedBackgroundFrame = CGRect(origin: CGPoint(x: selectedFrame.minX - 10.0, y: selectedFrame.minY - floor((36.0 - selectedFrame.height) * 0.5)), size: CGSize(width: selectedFrame.width + 10.0 * 2.0, height: 36.0))
+            }
             if wasAdded {
                 self.selectedBackgroundNode.frame = selectedBackgroundFrame
             } else {

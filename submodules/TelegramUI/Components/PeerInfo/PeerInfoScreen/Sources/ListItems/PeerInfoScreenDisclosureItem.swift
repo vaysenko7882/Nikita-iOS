@@ -154,8 +154,9 @@ private final class PeerInfoScreenDisclosureItemNode: PeerInfoScreenItemNode {
         self.selectionNode.pressed = item.action
         
         let sideInset: CGFloat = 16.0 + safeInsets.left
+        let sideInsetRight: CGFloat = 16.0 + safeInsets.right
         let leftInset = (item.icon == nil && item.iconSignal == nil ? sideInset : sideInset + 29.0 + 16.0)
-        let rightInset = sideInset + (item.hasArrow ? 18.0 : 0.0)
+        let rightInset = sideInsetRight + (item.hasArrow ? 18.0 : 0.0)
         let separatorInset = item.icon == nil && item.iconSignal == nil ? sideInset : leftInset - 1.0
         let titleFont = Font.regular(presentationData.listsFontSize.itemListBaseFontSize)
         
@@ -209,10 +210,12 @@ private final class PeerInfoScreenDisclosureItemNode: PeerInfoScreenItemNode {
         var labelConstrainWidth = width - textSize.width - (leftInset + rightInset)
         if case .semitransparentBadge = item.label {
             labelConstrainWidth -= 16.0
+        } else if !PeerInfoClassicMetrics.isEnabled {
+            labelConstrainWidth -= 8.0
         }
         let labelSize = self.labelNode.updateLayout(CGSize(width: labelConstrainWidth, height: .greatestFiniteMagnitude))
         
-        let height = textSize.height + 32.0
+        let height = textSize.height + PeerInfoClassicMetrics.rowVerticalInset * 2.0
         let textFrame = CGRect(origin: CGPoint(x: leftInset, y: floorToScreenPixels((height - textSize.height) / 2.0)), size: textSize)        
         
         if item.icon != nil || item.iconSignal != nil {
@@ -222,7 +225,11 @@ private final class PeerInfoScreenDisclosureItemNode: PeerInfoScreenItemNode {
             let iconSize: CGSize
             if let icon = item.icon {
                 self.iconNode.image = icon
-                iconSize = icon.size
+                if PeerInfoClassicMetrics.isEnabled && icon.size == CGSize(width: 30.0, height: 30.0) {
+                    iconSize = CGSize(width: PeerInfoClassicMetrics.rowIconSize, height: PeerInfoClassicMetrics.rowIconSize)
+                } else {
+                    iconSize = icon.size
+                }
             } else if let iconSignal = item.iconSignal {
                 if previousItem?.text != item.text {
                     self.iconNode.image = nil
@@ -233,9 +240,9 @@ private final class PeerInfoScreenDisclosureItemNode: PeerInfoScreenItemNode {
                         }
                     }))
                 }
-                iconSize = CGSize(width: 30.0, height: 30.0)
+                iconSize = CGSize(width: PeerInfoClassicMetrics.rowIconSize, height: PeerInfoClassicMetrics.rowIconSize)
             } else {
-                iconSize = CGSize(width: 30.0, height: 30.0)
+                iconSize = CGSize(width: PeerInfoClassicMetrics.rowIconSize, height: PeerInfoClassicMetrics.rowIconSize)
             }
             let iconFrame = CGRect(origin: CGPoint(x: sideInset, y: floorToScreenPixels((height - iconSize.height) / 2.0)), size: iconSize)
             transition.updateFrame(node: self.iconNode, frame: iconFrame)
@@ -405,7 +412,7 @@ private final class PeerInfoScreenDisclosureItemNode: PeerInfoScreenItemNode {
         self.selectionNode.update(size: CGSize(width: width, height: height + highlightNodeOffset), theme: presentationData.theme, transition: transition)
         transition.updateFrame(node: self.selectionNode, frame: CGRect(origin: CGPoint(x: 0.0, y: -highlightNodeOffset), size: CGSize(width: width, height: height + highlightNodeOffset)))
         
-        let separatorRightInset: CGFloat = 16.0
+        let separatorRightInset: CGFloat = PeerInfoClassicMetrics.separatorRightInset
         
         transition.updateFrame(node: self.bottomSeparatorNode, frame: CGRect(origin: CGPoint(x: separatorInset, y: height - UIScreenPixel), size: CGSize(width: width - separatorInset - separatorRightInset, height: UIScreenPixel)))
         transition.updateAlpha(node: self.bottomSeparatorNode, alpha: bottomItem == nil ? 0.0 : 1.0)

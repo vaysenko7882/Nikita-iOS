@@ -10,11 +10,9 @@ import UIKit
 private enum InterfaceTuningSection: Int32 {
     case tabs
     case profiles
-    case messages
     case stories
-    case media
-    case privacy
-    case business
+    case chats
+    case camera
 }
 
 private enum InterfaceTuningKey: Int32 {
@@ -35,7 +33,6 @@ private enum InterfaceTuningKey: Int32 {
     case allowStoryRepost
     case startRoundVideoWithRearCamera
     case hideGalleryCamera
-    case hidePhoneInSettings
     case hideBusinessBotPanel
 }
 
@@ -80,15 +77,14 @@ private enum InterfaceTuningEntry: ItemListNodeEntry {
             case .showDataCenter: return 12
             case .showRegistrationDate: return 13
             case .showChatCreationDate: return 14
-            case .showCallbackData: return 16
             case .hideStoryStrip: return 21
             case .disableStoryCameraSwipe: return 22
             case .confirmStoryOpen: return 23
             case .allowStoryRepost: return 24
-            case .startRoundVideoWithRearCamera: return 31
-            case .hideGalleryCamera: return 32
-            case .hidePhoneInSettings: return 41
-            case .hideBusinessBotPanel: return 51
+            case .showCallbackData: return 31
+            case .hideBusinessBotPanel: return 32
+            case .startRoundVideoWithRearCamera: return 41
+            case .hideGalleryCamera: return 42
             }
         }
     }
@@ -185,8 +181,6 @@ private func updatedInterfaceTuningSettings(
         current.startRoundVideoWithRearCamera = value
     case .hideGalleryCamera:
         current.hideGalleryCamera = value
-    case .hidePhoneInSettings:
-        current.hidePhoneInSettings = value
     case .hideBusinessBotPanel:
         current.hideBusinessBotPanel = value
     }
@@ -231,26 +225,21 @@ public func interfaceTuningSettingsController(context: AccountContext) -> ViewCo
             .toggle(.showRegistrationDate, .profiles, strings.showRegistrationDate, strings.showRegistrationDateInfo, settings.showRegistrationDate, true),
             .toggle(.showChatCreationDate, .profiles, strings.showChatCreationDate, strings.showChatCreationDateInfo, settings.showChatCreationDate, true),
 
-            .header(15, .messages, strings.messagesSection),
-            .toggle(.showCallbackData, .messages, strings.showCallbackData, strings.showCallbackDataInfo, settings.showCallbackData, true),
-
             .header(20, .stories, strings.storiesSection),
             .toggle(.hideStoryStrip, .stories, strings.hideStoryStrip, strings.hideStoryStripInfo, settings.hideStoryStrip, true),
             .toggle(.disableStoryCameraSwipe, .stories, strings.disableStoryCameraSwipe, strings.disableStoryCameraSwipeInfo, settings.disableStoryCameraSwipe, true),
             .toggle(.confirmStoryOpen, .stories, strings.confirmStoryOpen, strings.confirmStoryOpenInfo, settings.confirmStoryOpen, true),
             .toggle(.allowStoryRepost, .stories, strings.allowStoryRepost, strings.allowStoryRepostInfo, settings.allowStoryRepost, true),
 
-            .header(30, .media, strings.mediaSection),
-            .toggle(.startRoundVideoWithRearCamera, .media, strings.startRoundVideoWithRearCamera, strings.startRoundVideoWithRearCameraInfo, settings.startRoundVideoWithRearCamera, true),
-            .toggle(.hideGalleryCamera, .media, strings.hideGalleryCamera, strings.hideGalleryCameraInfo, settings.hideGalleryCamera ?? false, true),
+            .header(30, .chats, strings.chatsSection),
+            .toggle(.showCallbackData, .chats, strings.showCallbackData, strings.showCallbackDataInfo, settings.showCallbackData, true),
+            .toggle(.hideBusinessBotPanel, .chats, strings.hideBusinessBotPanel, strings.hideBusinessBotPanelInfo, settings.hideBusinessBotPanel, true),
+            .disclosure(33, .chats, strings.businessBotPanelExceptions, settings.businessBotPanelVisibilityOverrides.isEmpty ? "" : "\(settings.businessBotPanelVisibilityOverrides.count)"),
+            .footer(34, .chats, strings.businessBotPanelExceptionsInfo),
 
-            .header(40, .privacy, strings.privacySection),
-            .toggle(.hidePhoneInSettings, .privacy, strings.hidePhoneInSettings, strings.hidePhoneInSettingsInfo, settings.hidePhoneInSettings, true),
-
-            .header(50, .business, strings.businessSection),
-            .toggle(.hideBusinessBotPanel, .business, strings.hideBusinessBotPanel, strings.hideBusinessBotPanelInfo, settings.hideBusinessBotPanel, true),
-            .disclosure(52, .business, strings.businessBotPanelExceptions, settings.businessBotPanelVisibilityOverrides.isEmpty ? "" : "\(settings.businessBotPanelVisibilityOverrides.count)"),
-            .footer(53, .business, strings.businessBotPanelExceptionsInfo)
+            .header(40, .camera, strings.cameraSection),
+            .toggle(.startRoundVideoWithRearCamera, .camera, strings.startRoundVideoWithRearCamera, strings.startRoundVideoWithRearCameraInfo, settings.startRoundVideoWithRearCamera, true),
+            .toggle(.hideGalleryCamera, .camera, strings.hideGalleryCamera, strings.hideGalleryCameraInfo, settings.hideGalleryCamera ?? false, true)
         ]
         return (
             ItemListControllerState(

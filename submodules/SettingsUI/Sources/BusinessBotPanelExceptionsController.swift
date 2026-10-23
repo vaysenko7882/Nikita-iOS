@@ -5,7 +5,6 @@ import Foundation
 import ItemListPeerActionItem
 import ItemListPeerItem
 import ItemListUI
-import Postbox
 import PresentationDataUtils
 import SwiftSignalKit
 import TelegramCore

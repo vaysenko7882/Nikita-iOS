@@ -27,11 +27,15 @@ MadGram не связан с Telegram и не одобрен Telegram.
   и отображением номера телефона.
 - **Пользовательские бейджи** загружаются из подписанного реестра и отображаются рядом с профилями.
 - **Энергосбережение** одной настройкой ограничивает анимации, автовоспроизведение и фоновую работу.
+- **Классический дизайн** возвращает оформление Telegram до Liquid Glass: плоские панели, шапки,
+  меню и поле ввода.
 
 ### Другие улучшения
 
 - Добавлен индикатор взаимных контактов в профиле пользователя.
-- Добавлена возможность прочитать все чаты локально или на сервере.
+- Добавлены отдельные кнопки прочтения: чаты без архива, архив и всё сразу — локально или на сервере.
+- Скрытые пользователи больше не показывают баннеры уведомлений внутри приложения.
+- Плашку MADGRAM вверху экрана можно отключить.
 - Добавлена отдельная вкладка для просмотра и дарения удалённых подарков с подписью и анонимной
   отправкой.
 
@@ -129,11 +133,16 @@ MadGram is not affiliated with or endorsed by Telegram.
   phone-number visibility.
 - **Custom peer badges** are downloaded from a signed registry and displayed alongside profiles.
 - **Power Saving** applies a single low-power preset for animations, autoplay and background work.
+- **Classic design** brings back the pre-Liquid Glass Telegram look: flat panels, headers, menus and
+  the input bar.
 
 ### Other improvements
 
 - Added a mutual contact indicator to user profiles.
-- Added the ability to mark all chats as read locally or on the server.
+- Added separate read buttons for chats without the archive, the archive and everything at once —
+  locally or on the server.
+- Hidden users no longer show in-app notification banners.
+- The MADGRAM badge at the top of the screen can be turned off.
 - Added a separate tab for viewing and sending removed gifts with captions and anonymous delivery.
 
 MadGram-specific settings are available in Russian, Ukrainian and English.

@@ -3,7 +3,6 @@ import Display
 import Foundation
 import ItemListPeerItem
 import ItemListUI
-import Postbox
 import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData

@@ -14,8 +14,51 @@ import TelegramStringFormatting
 import EmojiStatusComponent
 import PeerBadgeUI
 import GlassBackgroundComponent
+import NewsFeedSupport
 
-public final class ChatNavigationBarTitleView: UIView, NavigationBarTitleView {
+/// The pill's labels as an expansion borrows them: frames in the content container's coordinates, and the colours they
+/// are drawn in.
+public final class ChatTitleExpansionLabels {
+    public let title: UIView
+    public let titleFrame: CGRect
+    public let titleColor: UIColor
+    /// The layers the title's text is coloured through (its emoji drawn apart, untinted): an expansion runs the ink on
+    /// them rather than recolouring the whole title.
+    public let titleTintLayers: [CALayer]
+    /// The status line in a wrapper the size of its text (the status node itself has no width).
+    public let status: UIView?
+    public let statusFrame: CGRect
+    public let statusColor: UIColor
+    /// The content container itself, holding the icons once the title and status are out of it.
+    public let rest: UIView
+    public let restFrame: CGRect
+
+    init(title: UIView, titleFrame: CGRect, titleColor: UIColor, titleTintLayers: [CALayer], status: UIView?, statusFrame: CGRect, statusColor: UIColor, rest: UIView, restFrame: CGRect) {
+        self.title = title
+        self.titleFrame = titleFrame
+        self.titleColor = titleColor
+        self.titleTintLayers = titleTintLayers
+        self.status = status
+        self.statusFrame = statusFrame
+        self.statusColor = statusColor
+        self.rest = rest
+        self.restFrame = restFrame
+    }
+}
+
+/// The colour a status line is drawn in: its text's, or its activity's.
+private func chatTitleActivityColor(_ state: ChatTitleActivityNodeState) -> UIColor? {
+    switch state {
+    case .none:
+        return nil
+    case let .info(text, _), let .interactingWithEmoji(text, _):
+        return text.length == 0 ? nil : text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
+    case let .typingText(_, color), let .uploading(_, color), let .recordingVoice(_, color), let .recordingVideo(_, color), let .playingGame(_, color), let .choosingSticker(_, color):
+        return color
+    }
+}
+
+public final class ChatNavigationBarTitleView: UIView, NavigationBarGlassPillTitleView {
     private final class ContentData: Equatable {
         let context: AccountContext
         let theme: PresentationTheme
@@ -104,7 +147,39 @@ public final class ChatNavigationBarTitleView: UIView, NavigationBarTitleView {
     
     public func animateLayoutTransition() {
     }
-    
+
+    /// The header's glass pill: in a navigation transition it is the bar's second right platter, which the transition
+    /// draws (showing what it shows, lent live) while this view hides it.
+    public var glassPillFrame: CGRect? {
+        guard let titleView = self.title.view as? ChatTitleComponent.View, let frame = titleView.glassPillFrame else {
+            return nil
+        }
+        return titleView.convert(frame, to: self)
+    }
+
+    public var isGlassPillDetached: Bool = false {
+        didSet {
+            (self.title.view as? ChatTitleComponent.View)?.isGlassPillDetached = self.isGlassPillDetached
+        }
+    }
+
+    public func lendGlassPillContent() -> UIView? {
+        return (self.title.view as? ChatTitleComponent.View)?.lendGlassPillContent()
+    }
+
+    /// The title and the status line, lent separately to an expansion (the pill growing into the profile); only while
+    /// the pill is detached.
+    public func lendExpansionLabels() -> ChatTitleExpansionLabels? {
+        return (self.title.view as? ChatTitleComponent.View)?.lendExpansionLabels()
+    }
+
+    public func reclaimExpansionLabels() {
+        (self.title.view as? ChatTitleComponent.View)?.reclaimExpansionLabels()
+    }
+
+    /// When the pill was last tapped (media time): an expansion carries the press on from there.
+    public private(set) var lastTapTime: Double?
+
     public func prepareSnapshotState() -> ChatTitleView.SnapshotState? {
         //return titleView.contentView?.snapshotView(afterScreenUpdates: false)
         return nil
@@ -173,7 +248,7 @@ public final class ChatNavigationBarTitleView: UIView, NavigationBarTitleView {
         let transition = ComponentTransition(transition)
         
         if let contentData = self.contentData {
-            let displayBackground: Bool = true
+            let displayBackground: Bool = !ClassicDesign.isEnabled
             
             let titleSize = self.title.update(
                 transition: transition,
@@ -192,6 +267,7 @@ public final class ChatNavigationBarTitleView: UIView, NavigationBarTitleView {
                         guard let self else {
                             return
                         }
+                        self.lastTapTime = CACurrentMediaTime()
                         self.tapAction?()
                     },
                     longTapped: { [weak self] in
@@ -215,6 +291,7 @@ public final class ChatNavigationBarTitleView: UIView, NavigationBarTitleView {
                     }
                     self.addSubview(titleView)
                 }
+                (titleView as? ChatTitleComponent.View)?.isGlassPillDetached = self.isGlassPillDetached
                 transition.setFrame(view: titleView, frame: CGRect(origin: CGPoint(), size: titleSize))
             }
             return titleSize
@@ -286,6 +363,18 @@ public final class ChatTitleComponent: Component {
         self.longTapped = longTapped
     }
     
+    var titleTextColor: UIColor {
+        return ClassicDesign.isEnabled ? self.theme.rootController.navigationBar.primaryTextColor : self.theme.chat.inputPanel.panelControlColor
+    }
+
+    var statusTextColor: UIColor {
+        return ClassicDesign.isEnabled ? self.theme.rootController.navigationBar.secondaryTextColor : self.theme.chat.inputPanel.inputControlColor
+    }
+
+    var titleIconColor: UIColor {
+        return ClassicDesign.isEnabled ? self.theme.rootController.navigationBar.controlColor : self.theme.chat.inputPanel.inputControlColor
+    }
+
     public static func ==(lhs: ChatTitleComponent, rhs: ChatTitleComponent) -> Bool {
         if lhs.context !== rhs.context {
             return false
@@ -323,6 +412,127 @@ public final class ChatTitleComponent: Component {
     public final class View: UIView {
         private var backgroundView: GlassBackgroundView?
         private let contentContainer: UIView
+        /// While a navigation transition draws the pill, the pill is hidden and what it shows is lent to the transition
+        /// (`lendGlassPillContent`); it is taken back when the pill is attached again.
+        var isGlassPillDetached: Bool = false {
+            didSet {
+                if self.isGlassPillDetached != oldValue {
+                    self.backgroundView?.isHidden = self.isGlassPillDetached || self.lentExpansionLabels != nil
+                    if !self.isGlassPillDetached {
+                        self.reclaimGlassPillContent()
+                    }
+                }
+            }
+        }
+        /// The wrapper the content container is lent in while the pill is detached.
+        private var lentContentWrapper: UIView?
+
+        /// The pill's frame in this view, nil without one.
+        var glassPillFrame: CGRect? {
+            guard let backgroundView = self.backgroundView, !backgroundView.frame.isEmpty else {
+                return nil
+            }
+            return backgroundView.frame
+        }
+
+        /// What the pill shows (the title, its icons, the status line), live, in a wrapper the transition places and
+        /// animates: the content container itself, so an animated emoji status or a typing indicator goes on moving. Only
+        /// while the pill is detached; the same wrapper for the whole detachment.
+        func lendGlassPillContent() -> UIView? {
+            guard self.isGlassPillDetached, let frame = self.glassPillFrame else {
+                return nil
+            }
+            if let current = self.lentContentWrapper {
+                return current
+            }
+            let wrapper = UIView(frame: CGRect(origin: CGPoint(), size: frame.size))
+            wrapper.isUserInteractionEnabled = false
+            wrapper.addSubview(self.contentContainer)
+            self.contentContainer.frame = CGRect(origin: CGPoint(), size: frame.size)
+            self.lentContentWrapper = wrapper
+            return wrapper
+        }
+
+        /// The title's and the status's frames in the content container, the status's text size and the container's own
+        /// frame, as the last layout set them: lent labels are not moved by a layout, and go back to these.
+        private struct ExpansionLayout {
+            var titleFrame: CGRect
+            var statusFrame: CGRect
+            var statusTextSize: CGSize
+            var containerFrame: CGRect
+        }
+        private var expansionLayout: ExpansionLayout?
+        private var lentExpansionLabels: ChatTitleExpansionLabels?
+
+        /// For an expansion (the pill growing into the profile): the title and the status line lent live, each on its own,
+        /// with the content container (the emoji status, verified and other icons) riding with the title. The pill's glass
+        /// hides while they are lent, since the expansion draws the pill: the bars detach it only once their transition
+        /// assigns roles, after the expansion has borrowed. The expansion's end returns them (`reclaimExpansionLabels`);
+        /// the pill's re-attachment does not, because the bars' transition ends before the expansion's and the
+        /// expansion's end takes its views out.
+        func lendExpansionLabels() -> ChatTitleExpansionLabels? {
+            guard self.lentExpansionLabels == nil, self.lentContentWrapper == nil, let component = self.component, let layout = self.expansionLayout, let titleView = self.title.view, titleView.superview === self.contentContainer else {
+                return nil
+            }
+            var status: UIView?
+            var statusFrame = CGRect()
+            if let subtitleNode = self.subtitleNode, subtitleNode.view.superview === self.contentContainer, layout.statusTextSize.width > 0.0 {
+                // The status node has no width of its own (its text is centred on its origin), so it is lent in a wrapper
+                // the size of its text.
+                let size = layout.statusTextSize
+                statusFrame = CGRect(x: layout.statusFrame.minX - size.width * 0.5, y: layout.statusFrame.minY, width: size.width, height: layout.statusFrame.height)
+                let wrapper = UIView(frame: statusFrame)
+                wrapper.isUserInteractionEnabled = false
+                subtitleNode.view.frame = CGRect(x: size.width * 0.5, y: 0.0, width: 0.0, height: layout.statusFrame.height)
+                wrapper.addSubview(subtitleNode.view)
+                self.contentContainer.addSubview(wrapper)
+                status = wrapper
+            }
+            let statusColor = self.subtitleNode.flatMap { chatTitleActivityColor($0.state) } ?? component.statusTextColor
+            let titleTintLayers = (titleView as? AnimatedTextComponent.View)?.textTintLayers ?? []
+            let labels = ChatTitleExpansionLabels(title: titleView, titleFrame: layout.titleFrame, titleColor: component.titleTextColor, titleTintLayers: titleTintLayers, status: status, statusFrame: statusFrame, statusColor: statusColor, rest: self.contentContainer, restFrame: self.contentContainer.frame)
+            self.lentExpansionLabels = labels
+            self.backgroundView?.isHidden = true
+            return labels
+        }
+
+        func reclaimExpansionLabels() {
+            guard let labels = self.lentExpansionLabels else {
+                return
+            }
+            self.lentExpansionLabels = nil
+            labels.title.frame = self.expansionLayout?.titleFrame ?? labels.titleFrame
+            self.contentContainer.addSubview(labels.title)
+            if let wrapper = labels.status {
+                if let subtitleNode = self.subtitleNode {
+                    if let layout = self.expansionLayout {
+                        subtitleNode.view.frame = layout.statusFrame
+                    }
+                    self.contentContainer.addSubview(subtitleNode.view)
+                }
+                wrapper.removeFromSuperview()
+            }
+            if let backgroundView = self.backgroundView {
+                backgroundView.contentView.addSubview(self.contentContainer)
+            } else {
+                self.addSubview(self.contentContainer)
+            }
+            self.contentContainer.frame = self.expansionLayout?.containerFrame ?? labels.restFrame
+            self.backgroundView?.isHidden = self.isGlassPillDetached
+        }
+
+        private func reclaimGlassPillContent() {
+            guard self.lentContentWrapper != nil else {
+                return
+            }
+            self.lentContentWrapper = nil
+            if let backgroundView = self.backgroundView {
+                backgroundView.contentView.addSubview(self.contentContainer)
+                self.contentContainer.frame = CGRect(origin: CGPoint(), size: backgroundView.bounds.size)
+            } else {
+                self.addSubview(self.contentContainer)
+            }
+        }
         private let title = ComponentView<Empty>()
         private var subtitleNode: ChatTitleActivityNode?
         private var activityMeasureSubtitleNode: ChatTitleActivityNode?
@@ -381,12 +591,14 @@ public final class ChatTitleComponent: Component {
             let rightTitleIconSpacing: CGFloat = 3.0
             let containerSideInset: CGFloat = 14.0
             
+            let isUpdate = self.component != nil
             self.component = component
             self.state = state
             
             var titleSegments: [AnimatedTextComponent.Item] = []
             var titleLeftIcon: TitleIconComponent.Kind?
             var titleRightIcon: TitleIconComponent.Kind?
+            var animatesBadgeWithNewsSpring = false
             var titleCredibilityIcon: ChatTitleCredibilityIcon = .none
             var titleVerifiedIcon: ChatTitleCredibilityIcon = .none
             var titleStatusIcon: ChatTitleCredibilityIcon = .none
@@ -489,11 +701,30 @@ public final class ChatTitleComponent: Component {
                         }
                     } else {
                         if let notificationSettings = peerView.notificationSettings {
+                            var isMutedNow = false
                             if case let .muted(until) = notificationSettings.muteState, until >= Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970) {
-                                if titleCredibilityIcon != .verified {
-                                    titleRightIcon = .mute
+                                isMutedNow = true
+                            }
+                            var isBroadcast = false
+                            var participation: NewsChannelParticipation = .left
+                            if let channel = peerView.peer as? TelegramChannel {
+                                if case .broadcast = channel.info {
+                                    isBroadcast = true
+                                }
+                                switch channel.participationStatus {
+                                case .member:
+                                    participation = .member
+                                case .left:
+                                    participation = .left
+                                case .kicked:
+                                    participation = .kicked
                                 }
                             }
+                            let featureEnabled = isNewsFeedEnabled(appConfiguration: component.context.currentAppConfiguration.with { $0 })
+                            if newsChatTitleShowsMuteIcon(isBroadcast: isBroadcast, participation: participation, isMuted: isMutedNow, isVerified: titleCredibilityIcon == .verified, featureEnabled: featureEnabled) {
+                                titleRightIcon = .mute
+                            }
+                            animatesBadgeWithNewsSpring = isBroadcast && featureEnabled
                         }
                     }
                     if peerView.peerId.isVerificationCodes {
@@ -642,7 +873,7 @@ public final class ChatTitleComponent: Component {
                 inputActivitiesAllowed = false
             }
             
-            let subtitleFont = Font.regular(12.0)
+            let subtitleFont = Font.regular(ClassicDesign.isEnabled ? 13.0 : 12.0)
             var state: ChatTitleActivityNodeState = .none
             switch component.networkState {
             case .waitingForNetwork, .connecting, .updating:
@@ -657,7 +888,7 @@ public final class ChatTitleComponent: Component {
                 case .online, .none:
                     infoText = ""
                 }
-                state = .info(NSAttributedString(string: infoText, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor), .generic)
+                state = .info(NSAttributedString(string: infoText, font: subtitleFont, textColor: component.statusTextColor), .generic)
             case .online, .none:
                 if let inputActivities = component.activities, !inputActivities.items.isEmpty, inputActivitiesAllowed {
                     var stringValue = ""
@@ -730,25 +961,25 @@ public final class ChatTitleComponent: Component {
                     switch component.content {
                     case let .peer(peerView, customTitle, customSubtitle, onlineMemberCount, isScheduledMessages, _, customMessageCount, _, _):
                         if let customSubtitle {
-                            let string = NSAttributedString(string: customSubtitle, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                            let string = NSAttributedString(string: customSubtitle, font: subtitleFont, textColor: component.statusTextColor)
                             state = .info(string, .generic)
                         } else if let customMessageCount = customMessageCount, customMessageCount != 0 {
-                            let string = NSAttributedString(string: component.strings.Conversation_Messages(Int32(customMessageCount)), font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                            let string = NSAttributedString(string: component.strings.Conversation_Messages(Int32(customMessageCount)), font: subtitleFont, textColor: component.statusTextColor)
                             state = .info(string, .generic)
                         } else if let peer = peerView.peer {
                             let servicePeer = isServicePeer(peer)
                             if peer.id == component.context.account.peerId || isScheduledMessages || peer.id.isRepliesOrVerificationCodes {
-                                let string = NSAttributedString(string: "", font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                let string = NSAttributedString(string: "", font: subtitleFont, textColor: component.statusTextColor)
                                 state = .info(string, .generic)
                             } else if let user = peer as? TelegramUser {
                                 if user.isDeleted {
                                     state = .none
                                 } else if servicePeer {
-                                    let string = NSAttributedString(string: "", font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                    let string = NSAttributedString(string: "", font: subtitleFont, textColor: component.statusTextColor)
                                     state = .info(string, .generic)
                                 } else if user.flags.contains(.isSupport) {
                                     let statusText = component.strings.Bot_GenericSupportStatus
-                                    let string = NSAttributedString(string: statusText, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                    let string = NSAttributedString(string: statusText, font: subtitleFont, textColor: component.statusTextColor)
                                     state = .info(string, .generic)
                                 } else if let _ = user.botInfo {
                                     let statusText: String
@@ -758,7 +989,7 @@ public final class ChatTitleComponent: Component {
                                         statusText = component.strings.Bot_GenericBotStatus
                                     }
                                     
-                                    let string = NSAttributedString(string: statusText, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                    let string = NSAttributedString(string: statusText, font: subtitleFont, textColor: component.statusTextColor)
                                     state = .info(string, .generic)
                                 } else if let peer = peerView.peer {
                                     let timestamp = CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970
@@ -770,10 +1001,10 @@ public final class ChatTitleComponent: Component {
                                         userPresence = TelegramUserPresence(status: .none, lastActivity: 0)
                                     }
                                     let (string, activity) = stringAndActivityForUserPresence(strings: component.strings, dateTimeFormat: component.dateTimeFormat, presence: EnginePeer.Presence(userPresence), relativeTo: Int32(timestamp))
-                                    let attributedString = NSAttributedString(string: string, font: subtitleFont, textColor: activity ? component.theme.rootController.navigationBar.accentTextColor : component.theme.chat.inputPanel.inputControlColor)
+                                    let attributedString = NSAttributedString(string: string, font: subtitleFont, textColor: activity ? component.theme.rootController.navigationBar.accentTextColor : component.statusTextColor)
                                     state = .info(attributedString, activity ? .online : .lastSeenTime)
                                 } else {
-                                    let string = NSAttributedString(string: "", font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                    let string = NSAttributedString(string: "", font: subtitleFont, textColor: component.statusTextColor)
                                     state = .info(string, .generic)
                                 }
                             } else if let group = peer as? TelegramGroup {
@@ -795,32 +1026,32 @@ public final class ChatTitleComponent: Component {
                                 if onlineCount > 1 {
                                     let string = NSMutableAttributedString()
                                     
-                                    string.append(NSAttributedString(string: "\(component.strings.Conversation_StatusMembers(Int32(group.participantCount))), ", font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor))
-                                    string.append(NSAttributedString(string: component.strings.Conversation_StatusOnline(Int32(onlineCount)), font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor))
+                                    string.append(NSAttributedString(string: "\(component.strings.Conversation_StatusMembers(Int32(group.participantCount))), ", font: subtitleFont, textColor: component.statusTextColor))
+                                    string.append(NSAttributedString(string: component.strings.Conversation_StatusOnline(Int32(onlineCount)), font: subtitleFont, textColor: component.statusTextColor))
                                     state = .info(string, .generic)
                                 } else {
-                                    let string = NSAttributedString(string: component.strings.Conversation_StatusMembers(Int32(group.participantCount)), font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                    let string = NSAttributedString(string: component.strings.Conversation_StatusMembers(Int32(group.participantCount)), font: subtitleFont, textColor: component.statusTextColor)
                                     state = .info(string, .generic)
                                 }
                             } else if let channel = peer as? TelegramChannel {
                                 if channel.isForumOrMonoForum, customTitle != nil {
-                                    let string = NSAttributedString(string: EnginePeer(peer).displayTitle(strings: component.strings, displayOrder: component.nameDisplayOrder), font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                    let string = NSAttributedString(string: EnginePeer(peer).displayTitle(strings: component.strings, displayOrder: component.nameDisplayOrder), font: subtitleFont, textColor: component.statusTextColor)
                                     state = .info(string, .generic)
                                 } else if let cachedChannelData = peerView.cachedData as? CachedChannelData, let memberCount = onlineMemberCount.total ?? cachedChannelData.participantsSummary.memberCount {
                                     if memberCount == 0 {
                                         let string: NSAttributedString
                                         if case .group = channel.info {
-                                            string = NSAttributedString(string: component.strings.Group_Status, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                            string = NSAttributedString(string: component.strings.Group_Status, font: subtitleFont, textColor: component.statusTextColor)
                                         } else {
-                                            string = NSAttributedString(string: component.strings.Channel_Status, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                            string = NSAttributedString(string: component.strings.Channel_Status, font: subtitleFont, textColor: component.statusTextColor)
                                         }
                                         state = .info(string, .generic)
                                     } else {
                                         if case .group = channel.info, let onlineMemberCount = onlineMemberCount.recent, onlineMemberCount > 1 {
                                             let string = NSMutableAttributedString()
                                             
-                                            string.append(NSAttributedString(string: "\(component.strings.Conversation_StatusMembers(Int32(memberCount))), ", font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor))
-                                            string.append(NSAttributedString(string: component.strings.Conversation_StatusOnline(Int32(onlineMemberCount)), font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor))
+                                            string.append(NSAttributedString(string: "\(component.strings.Conversation_StatusMembers(Int32(memberCount))), ", font: subtitleFont, textColor: component.statusTextColor))
+                                            string.append(NSAttributedString(string: component.strings.Conversation_StatusOnline(Int32(onlineMemberCount)), font: subtitleFont, textColor: component.statusTextColor))
                                             state = .info(string, .generic)
                                         } else {
                                             let membersString: String
@@ -829,24 +1060,24 @@ public final class ChatTitleComponent: Component {
                                             } else {
                                                 membersString = component.strings.Conversation_StatusSubscribers(memberCount)
                                             }
-                                            let string = NSAttributedString(string: membersString, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                            let string = NSAttributedString(string: membersString, font: subtitleFont, textColor: component.statusTextColor)
                                             state = .info(string, .generic)
                                         }
                                     }
                                 } else {
                                     switch channel.info {
                                     case .group:
-                                        let string = NSAttributedString(string: component.strings.Group_Status, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                        let string = NSAttributedString(string: component.strings.Group_Status, font: subtitleFont, textColor: component.statusTextColor)
                                         state = .info(string, .generic)
                                     case .broadcast:
-                                        let string = NSAttributedString(string: component.strings.Channel_Status, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                                        let string = NSAttributedString(string: component.strings.Channel_Status, font: subtitleFont, textColor: component.statusTextColor)
                                         state = .info(string, .generic)
                                     }
                                 }
                             }
                         }
                     case let .custom(_, subtitle?, _):
-                        let string = NSAttributedString(string: subtitle, font: subtitleFont, textColor: component.theme.chat.inputPanel.inputControlColor)
+                        let string = NSAttributedString(string: subtitle, font: subtitleFont, textColor: component.statusTextColor)
                         state = .info(string, .generic)
                     default:
                         break
@@ -871,7 +1102,7 @@ public final class ChatTitleComponent: Component {
                     transition: rightIconTransition,
                     component: AnyComponent(TitleIconComponent(
                         kind: titleRightIcon,
-                        color: component.theme.chat.inputPanel.inputControlColor
+                        color: component.titleIconColor
                     )),
                     environment: {},
                     containerSize: CGSize(width: 100.0, height: 100.0)
@@ -879,10 +1110,22 @@ public final class ChatTitleComponent: Component {
             } else if let rightIcon = self.rightIcon {
                 self.rightIcon = nil
                 if let rightIconView = rightIcon.view {
-                    transition.setScale(view: rightIconView, scale: 0.001)
-                    transition.setAlpha(view: rightIconView, alpha: 0.0, completion: { [weak rightIconView] _ in
-                        rightIconView?.removeFromSuperview()
-                    })
+                    if animatesBadgeWithNewsSpring && isUpdate {
+                        // `Motion.content`: the badge shrinks to half and fades.
+                        let spring = NewsSpring.titleBadge
+                        rightIconView.layer.add(spring.makeAnimation(keyPath: "transform.scale", from: 1.0 as NSNumber, to: 0.5 as NSNumber), forKey: "newsBadgeScale")
+                        rightIconView.layer.add(spring.makeAnimation(keyPath: "opacity", from: 1.0 as NSNumber, to: 0.0 as NSNumber), forKey: "newsBadgeOpacity")
+                        rightIconView.layer.transform = CATransform3DMakeScale(0.5, 0.5, 1.0)
+                        rightIconView.alpha = 0.0
+                        DispatchQueue.main.asyncAfter(deadline: .now() + spring.settlingDuration, execute: { [weak rightIconView] in
+                            rightIconView?.removeFromSuperview()
+                        })
+                    } else {
+                        transition.setScale(view: rightIconView, scale: 0.001)
+                        transition.setAlpha(view: rightIconView, alpha: 0.0, completion: { [weak rightIconView] _ in
+                            rightIconView?.removeFromSuperview()
+                        })
+                    }
                 }
             }
             
@@ -901,7 +1144,7 @@ public final class ChatTitleComponent: Component {
                     transition: leftIconTransition,
                     component: AnyComponent(TitleIconComponent(
                         kind: titleLeftIcon,
-                        color: component.theme.chat.inputPanel.panelControlColor
+                        color: component.titleTextColor
                     )),
                     environment: {},
                     containerSize: CGSize(width: 100.0, height: 100.0)
@@ -1096,12 +1339,13 @@ public final class ChatTitleComponent: Component {
                 transition: transition,
                 component: AnyComponent(AnimatedTextComponent(
                     font: Font.semibold(17.0),
-                    color: component.theme.chat.inputPanel.panelControlColor,
+                    color: component.titleTextColor,
                     items: titleSegments,
                     noDelay: false,
                     animateScale: true,
                     animateSlide: true,
-                    blur: true
+                    blur: true,
+                    splitsEmoji: true
                 )),
                 environment: {},
                 containerSize: CGSize(width: maxTitleWidth, height: 100.0)
@@ -1141,12 +1385,19 @@ public final class ChatTitleComponent: Component {
                     titleView.isUserInteractionEnabled = false
                     self.contentContainer.addSubview(titleView)
                 }
-                transition.setFrame(view: titleView, frame: titleFrame)
+                // Not while an expansion has it: the expansion places it.
+                if self.lentExpansionLabels == nil {
+                    transition.setFrame(view: titleView, frame: titleFrame)
+                }
             }
             
             let subtitleFrame = CGRect(origin: CGPoint(x: floor((containerFrame.width - subtitleSize.width) * 0.5), y: titleFrame.maxY), size: subtitleSize)
             // Internally, the status view has zero width
-            transition.setFrame(view: subtitleNode.view, frame: CGRect(origin: CGPoint(x: subtitleFrame.midX, y: subtitleFrame.minY), size: CGSize(width: 0.0, height: subtitleFrame.height)))
+            let subtitleViewFrame = CGRect(origin: CGPoint(x: subtitleFrame.midX, y: subtitleFrame.minY), size: CGSize(width: 0.0, height: subtitleFrame.height))
+            if self.lentExpansionLabels?.status == nil {
+                transition.setFrame(view: subtitleNode.view, frame: subtitleViewFrame)
+            }
+            self.expansionLayout = ExpansionLayout(titleFrame: titleFrame, statusFrame: subtitleViewFrame, statusTextSize: subtitleSize, containerFrame: component.displayBackground ? CGRect(origin: CGPoint(), size: containerFrame.size) : containerFrame)
             
             var nextLeftIconX: CGFloat = titleFrame.minX
             
@@ -1242,8 +1493,15 @@ public final class ChatTitleComponent: Component {
                     rightIconView.isUserInteractionEnabled = false
                     self.contentContainer.addSubview(rightIconView)
                     rightIconView.frame = rightIconFrame
-                    ComponentTransition.immediate.setScale(view: rightIconView, scale: 0.001)
-                    rightIconView.alpha = 0.0
+                    if animatesBadgeWithNewsSpring && isUpdate {
+                        // `Motion.content`: the badge grows from half and fades in.
+                        let spring = NewsSpring.titleBadge
+                        rightIconView.layer.add(spring.makeAnimation(keyPath: "transform.scale", from: 0.5 as NSNumber, to: 1.0 as NSNumber), forKey: "newsBadgeScale")
+                        rightIconView.layer.add(spring.makeAnimation(keyPath: "opacity", from: 0.0 as NSNumber, to: 1.0 as NSNumber), forKey: "newsBadgeOpacity")
+                    } else {
+                        ComponentTransition.immediate.setScale(view: rightIconView, scale: 0.001)
+                        rightIconView.alpha = 0.0
+                    }
                 }
                 transition.setPosition(view: rightIconView, position: rightIconFrame.center)
                 transition.setBounds(view: rightIconView, bounds: CGRect(origin: CGPoint(), size: rightIconFrame.size))
@@ -1260,21 +1518,29 @@ public final class ChatTitleComponent: Component {
                     backgroundView = GlassBackgroundView()
                     self.backgroundView = backgroundView
                     self.addSubview(backgroundView)
-                    backgroundView.contentView.addSubview(self.contentContainer)
+                    if self.lentContentWrapper == nil && self.lentExpansionLabels == nil {
+                        backgroundView.contentView.addSubview(self.contentContainer)
+                    }
+                    backgroundView.isHidden = self.isGlassPillDetached || self.lentExpansionLabels != nil
                 }
                 transition.setFrame(view: backgroundView, frame: containerFrame)
                 backgroundView.update(size: containerFrame.size, cornerRadius: containerFrame.height * 0.5, isDark: component.theme.overallDarkAppearance, tintColor: .init(kind: component.preferClearGlass ? .clear : .panel), isInteractive: isEnabled, transition: transition)
-                transition.setFrame(view: self.contentContainer, frame: CGRect(origin: CGPoint(), size: containerFrame.size))
+                // Not while a transition has it (`lendGlassPillContent`, `lendExpansionLabels`): the transition places it.
+                if self.lentContentWrapper == nil && self.lentExpansionLabels == nil {
+                    transition.setFrame(view: self.contentContainer, frame: CGRect(origin: CGPoint(), size: containerFrame.size))
+                }
                 self.contentContainer.layer.cornerRadius = containerFrame.height * 0.5
             } else {
                 if let backgroundView = self.backgroundView {
                     self.backgroundView = nil
                     backgroundView.removeFromSuperview()
                 }
-                if self.contentContainer.superview !== self {
-                    self.addSubview(self.contentContainer)
+                if self.lentContentWrapper == nil && self.lentExpansionLabels == nil {
+                    if self.contentContainer.superview !== self {
+                        self.addSubview(self.contentContainer)
+                    }
+                    transition.setFrame(view: self.contentContainer, frame: containerFrame)
                 }
-                transition.setFrame(view: self.contentContainer, frame: containerFrame)
                 self.contentContainer.layer.cornerRadius = 0.0
             }
             

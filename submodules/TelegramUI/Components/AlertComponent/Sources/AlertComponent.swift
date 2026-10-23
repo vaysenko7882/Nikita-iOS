@@ -72,6 +72,20 @@ private final class AlertScreenComponent: Component {
         private let containerView = GlassBackgroundContainerView()
         private let backgroundView = GlassBackgroundView()
         
+        private let classicBackgroundView: UIView?
+        private let classicEffectView: UIVisualEffectView?
+        private let classicColorView: UIView?
+        private var classicBlurStyle: UIBlurEffect.Style?
+        private var classicSeparatorViews: [UIView] = []
+        private let classicDimMaskLayer: CAShapeLayer?
+
+        private var actionHostView: UIView {
+            return self.classicBackgroundView ?? self.backgroundView
+        }
+        private var contentHostView: UIView {
+            return self.classicBackgroundView ?? self.backgroundView.contentView
+        }
+        
         private var disposable: Disposable?
         private var content: [AnyComponentWithIdentity<AlertComponentEnvironment>]?
         private var actions: [AlertScreen.Action]?
@@ -106,20 +120,52 @@ private final class AlertScreenComponent: Component {
         private weak var state: EmptyComponentState?
                 
         override init(frame: CGRect) {
+            if ClassicDesign.isEnabled {
+                let classicBackgroundView = UIView()
+                classicBackgroundView.clipsToBounds = true
+                classicBackgroundView.layer.cornerRadius = 14.0
+                self.classicBackgroundView = classicBackgroundView
+                
+                let classicEffectView = UIVisualEffectView(effect: nil)
+                classicEffectView.isUserInteractionEnabled = false
+                self.classicEffectView = classicEffectView
+                
+                let classicColorView = UIView()
+                classicColorView.isUserInteractionEnabled = false
+                self.classicColorView = classicColorView
+
+                let classicDimMaskLayer = CAShapeLayer()
+                classicDimMaskLayer.fillRule = .evenOdd
+                classicDimMaskLayer.fillColor = UIColor.black.cgColor
+                self.classicDimMaskLayer = classicDimMaskLayer
+            } else {
+                self.classicBackgroundView = nil
+                self.classicEffectView = nil
+                self.classicColorView = nil
+                self.classicDimMaskLayer = nil
+            }
+            
             super.init(frame: frame)
             
             self.dimView.alpha = 0.0
-            self.dimView.backgroundColor = UIColor(rgb: 0x000000, alpha: 0.2)
+            self.dimView.backgroundColor = UIColor(rgb: 0x000000, alpha: self.classicBackgroundView != nil ? 0.5 : 0.2)
             
             self.addSubview(self.dimView)
-            self.addSubview(self.containerView)
-            self.containerView.contentView.addSubview(self.backgroundView)
+            if let classicBackgroundView = self.classicBackgroundView, let classicEffectView = self.classicEffectView, let classicColorView = self.classicColorView {
+                self.addSubview(classicBackgroundView)
+                classicBackgroundView.addSubview(classicEffectView)
+                classicBackgroundView.addSubview(classicColorView)
+                self.dimView.layer.mask = self.classicDimMaskLayer
+            } else {
+                self.addSubview(self.containerView)
+                self.containerView.contentView.addSubview(self.backgroundView)
+            }
             
             self.dimView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.dimTapped)))
             
             let tapRecognizer = ActionSelectionGestureRecognizer(target: self, action: #selector(self.actionTapped(_:)))
             tapRecognizer.delegate = self
-            self.backgroundView.addGestureRecognizer(tapRecognizer)
+            self.actionHostView.addGestureRecognizer(tapRecognizer)
         }
         
         required init?(coder: NSCoder) {
@@ -132,7 +178,7 @@ private final class AlertScreenComponent: Component {
         
         override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             if gestureRecognizer is ActionSelectionGestureRecognizer {
-                let location = gestureRecognizer.location(in: self.backgroundView)
+                let location = gestureRecognizer.location(in: self.actionHostView)
                 for (_, action) in self.actionItems {
                     if let actionView = action.view, actionView.frame.contains(location) {
                         return true
@@ -145,7 +191,7 @@ private final class AlertScreenComponent: Component {
         }
         
         @objc private func actionTapped(_ gestureRecognizer: ActionSelectionGestureRecognizer) {
-            let location = gestureRecognizer.location(in: self.backgroundView)
+            let location = gestureRecognizer.location(in: self.actionHostView)
             switch gestureRecognizer.state {
             case .began, .changed:
                 var highlightedActionId: AnyHashable?
@@ -186,6 +232,14 @@ private final class AlertScreenComponent: Component {
         }
         
         func animateIn() {
+            if let classicBackgroundView = self.classicBackgroundView {
+                let alphaTransition = ComponentTransition(animation: .curve(duration: 0.3, curve: .linear))
+                alphaTransition.setAlpha(view: self.dimView, alpha: 1.0)
+                classicBackgroundView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.25)
+                classicBackgroundView.layer.animateSpring(from: 0.8 as NSNumber, to: 1.0 as NSNumber, keyPath: "transform.scale", duration: 0.5, initialVelocity: 0.0, removeOnCompletion: true, additive: false, completion: nil)
+                self.classicDimMaskLayer?.animateSpring(from: 0.8 as NSNumber, to: 1.0 as NSNumber, keyPath: "transform.scale", duration: 0.5, initialVelocity: 0.0, removeOnCompletion: true, additive: false, completion: nil)
+                return
+            }
             let alphaTransition = ComponentTransition(animation: .curve(duration: 0.2, curve: .linear))
             let scaleTransition = ComponentTransition(animation: .curve(duration: 0.4, curve: .spring))
             alphaTransition.setAlpha(view: self.dimView, alpha: 1.0)
@@ -195,6 +249,24 @@ private final class AlertScreenComponent: Component {
         }
         
         func animateOut(completion: @escaping () -> Void) {
+            if let classicBackgroundView = self.classicBackgroundView {
+                let transition = ComponentTransition(animation: .curve(duration: 0.3, curve: .linear))
+                transition.setAlpha(view: self.dimView, alpha: 0.0, completion: { _ in
+                    completion()
+                })
+                var initialAlpha: CGFloat = 1.0
+                if let presentationLayer = classicBackgroundView.layer.presentation() {
+                    initialAlpha = CGFloat(presentationLayer.opacity)
+                }
+                classicBackgroundView.layer.removeAllAnimations()
+                classicBackgroundView.layer.animateAlpha(from: initialAlpha, to: 0.0, duration: 0.3, removeOnCompletion: false)
+                classicBackgroundView.layer.animateScale(from: 1.0, to: 0.8, duration: 0.4, removeOnCompletion: false)
+                if let classicDimMaskLayer = self.classicDimMaskLayer {
+                    classicDimMaskLayer.removeAllAnimations()
+                    classicDimMaskLayer.animateScale(from: 1.0, to: 0.8, duration: 0.4, removeOnCompletion: false)
+                }
+                return
+            }
             let transition = ComponentTransition(animation: .curve(duration: 0.2, curve: .linear))
             transition.setAlpha(view: self.dimView, alpha: 0.0, completion: { _ in
                 completion()
@@ -334,12 +406,16 @@ private final class AlertScreenComponent: Component {
             
             self.component = component
             
+            let isClassic = self.classicBackgroundView != nil
+            
             var alertHeight: CGFloat = 0.0
-            let alertWidth: CGFloat = 300.0
-            let contentTopInset: CGFloat = 22.0
-            let contentBottomInset: CGFloat = 21.0
-            let contentSideInset: CGFloat = 30.0
+            let alertWidth: CGFloat = isClassic ? 270.0 : 300.0
+            let contentTopInset: CGFloat = isClassic ? 18.0 : 22.0
+            let contentBottomInset: CGFloat = isClassic ? 18.0 : 21.0
+            let contentSideInset: CGFloat = isClassic ? 24.0 : 30.0
             let contentSpacing: CGFloat = 8.0
+            let classicTitleSpacing: CGFloat = 6.0
+            var previousContentIsTitle = false
             let actionSideInset: CGFloat = 16.0
             let actionSpacing: CGFloat = 8.0
             let fullWidthActionSize = CGSize(width: alertWidth - actionSideInset * 2.0, height: AlertActionComponent.actionHeight)
@@ -353,9 +429,12 @@ private final class AlertScreenComponent: Component {
                 for content in content {
                     if contentOriginY.isZero {
                         contentOriginY += contentTopInset
+                    } else if isClassic && previousContentIsTitle {
+                        contentOriginY += classicTitleSpacing
                     } else {
                         contentOriginY += contentSpacing
                     }
+                    previousContentIsTitle = content.component.wrapped is AlertTitleComponent
                     validContentIds.insert(content.id)
                     
                     let item: ComponentView<AlertComponentEnvironment>
@@ -379,7 +458,7 @@ private final class AlertScreenComponent: Component {
                     let itemFrame = CGRect(origin: CGPoint(x: contentSideInset, y: contentOriginY), size: itemSize)
                     if let itemView = item.view {
                         if itemView.superview == nil {
-                            self.backgroundView.contentView.addSubview(itemView)
+                            self.contentHostView.addSubview(itemView)
                             item.parentState = state
                             
                             transition.animateAlpha(view: itemView, from: 0.0, to: 1.0)
@@ -410,7 +489,9 @@ private final class AlertScreenComponent: Component {
                 alertHeight += contentBottomInset
             }
             
-            if let actions = self.actions {
+            if isClassic, let actions = self.actions {
+                alertHeight = self.updateClassicActions(actions: actions, component: component, theme: environment.theme, alertEnvironment: alertEnvironment, alertWidth: alertWidth, alertHeight: alertHeight, transition: transition)
+            } else if let actions = self.actions {
                 let genericActionTheme = AlertActionComponent.Theme(
                     background: environment.theme.actionSheet.primaryTextColor.withMultipliedAlpha(0.1),
                     foreground: environment.theme.actionSheet.primaryTextColor,
@@ -560,8 +641,10 @@ private final class AlertScreenComponent: Component {
             let bounds = CGRect(origin: .zero, size: availableSize)
             
             transition.setFrame(view: self.dimView, frame: bounds)
-            transition.setFrame(view: self.containerView, frame: bounds)
-            self.containerView.update(size: availableSize, isDark: environment.theme.overallDarkAppearance, transition: transition)
+            if !isClassic {
+                transition.setFrame(view: self.containerView, frame: bounds)
+                self.containerView.update(size: availableSize, isDark: environment.theme.overallDarkAppearance, transition: transition)
+            }
             
             var availableHeight = availableSize.height
             availableHeight -= environment.statusBarHeight
@@ -569,10 +652,196 @@ private final class AlertScreenComponent: Component {
                 availableHeight -= environment.inputHeight
             }
                         
-            transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(x: floorToScreenPixels((availableSize.width - alertSize.width) / 2.0), y: environment.statusBarHeight +  floorToScreenPixels((availableHeight - alertSize.height) / 2.0)), size: alertSize))
-            self.backgroundView.update(size: alertSize, cornerRadius: 35.0, isDark: environment.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: transition)
+            // Centered in the band between the side safe insets (iPhone Duo's side strip); with equal insets this
+            // is the full width's center.
+            let alertX = environment.safeInsets.left + floorToScreenPixels((availableSize.width - environment.safeInsets.left - environment.safeInsets.right - alertSize.width) / 2.0)
+            if let classicBackgroundView = self.classicBackgroundView, let classicEffectView = self.classicEffectView, let classicColorView = self.classicColorView {
+                let actionSheetTheme = environment.theme.actionSheet
+                let blurStyle: UIBlurEffect.Style = actionSheetTheme.backgroundType == .light ? .light : .dark
+                if self.classicBlurStyle != blurStyle {
+                    self.classicBlurStyle = blurStyle
+                    classicEffectView.effect = UIBlurEffect(style: blurStyle)
+                }
+                if classicColorView.backgroundColor == nil {
+                    classicColorView.backgroundColor = actionSheetTheme.itemBackgroundColor
+                } else {
+                    transition.setBackgroundColor(view: classicColorView, color: actionSheetTheme.itemBackgroundColor)
+                }
+                
+                let alertFrame = CGRect(origin: CGPoint(x: alertX, y: environment.statusBarHeight + floorToScreenPixels((availableHeight - alertSize.height) / 2.0)), size: alertSize)
+                transition.setFrame(view: classicBackgroundView, frame: alertFrame)
+                transition.setFrame(view: classicEffectView, frame: CGRect(origin: .zero, size: alertSize))
+                transition.setFrame(view: classicColorView, frame: CGRect(origin: .zero, size: alertSize))
+
+                if let classicDimMaskLayer = self.classicDimMaskLayer {
+                    let maskSide = (max(availableSize.width, availableSize.height) + 100.0) * 3.0
+                    let maskBounds = CGRect(origin: .zero, size: CGSize(width: maskSide, height: maskSide))
+                    let holeRect = CGRect(origin: CGPoint(x: floorToScreenPixels((maskSide - alertSize.width) / 2.0), y: floorToScreenPixels((maskSide - alertSize.height) / 2.0)), size: alertSize)
+                    let maskPath = CGMutablePath()
+                    maskPath.addRect(maskBounds)
+                    let holeCornerRadius = min(14.0, floor(min(holeRect.width, holeRect.height) / 2.0))
+                    if holeCornerRadius > 0.0 {
+                        maskPath.addRoundedRect(in: holeRect, cornerWidth: holeCornerRadius, cornerHeight: holeCornerRadius)
+                    }
+
+                    let maskTransition: ComponentTransition = classicDimMaskLayer.path == nil ? .immediate : transition
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    maskTransition.setBounds(layer: classicDimMaskLayer, bounds: maskBounds)
+                    maskTransition.setPosition(layer: classicDimMaskLayer, position: CGPoint(x: alertFrame.minX - holeRect.minX + maskSide / 2.0, y: alertFrame.minY - holeRect.minY + maskSide / 2.0))
+                    maskTransition.setShapeLayerPath(layer: classicDimMaskLayer, path: maskPath)
+                    CATransaction.commit()
+                }
+            } else {
+                transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(x: alertX, y: environment.statusBarHeight +  floorToScreenPixels((availableHeight - alertSize.height) / 2.0)), size: alertSize))
+                self.backgroundView.update(size: alertSize, cornerRadius: 35.0, isDark: environment.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: transition)
+            }
             
             return availableSize
+        }
+        
+        private func updateClassicActions(actions: [AlertScreen.Action], component: AlertScreenComponent, theme: PresentationTheme, alertEnvironment: AlertComponentEnvironment, alertWidth: CGFloat, alertHeight: CGFloat, transition: ComponentTransition) -> CGFloat {
+            let actionHeight = AlertActionComponent.classicActionHeight
+            let actionSheetTheme = theme.actionSheet
+            let highlightColor = actionSheetTheme.itemHighlightedBackgroundColor
+            let separatorColor = actionSheetTheme.itemHighlightedBackgroundColor
+            
+            func actionTheme(type: AlertScreen.Action.ActionType) -> AlertActionComponent.Theme {
+                switch type {
+                case .generic:
+                    return AlertActionComponent.Theme(background: highlightColor, foreground: actionSheetTheme.controlAccentColor, secondary: actionSheetTheme.secondaryTextColor, font: .regular)
+                case .default:
+                    return AlertActionComponent.Theme(background: highlightColor, foreground: actionSheetTheme.controlAccentColor, secondary: actionSheetTheme.secondaryTextColor, font: .bold)
+                case .destructive:
+                    return AlertActionComponent.Theme(background: highlightColor, foreground: actionSheetTheme.destructiveActionTextColor, secondary: actionSheetTheme.destructiveActionTextColor.withMultipliedAlpha(0.6), font: .regular)
+                case .defaultDestructive:
+                    return AlertActionComponent.Theme(background: highlightColor, foreground: actionSheetTheme.destructiveActionTextColor, secondary: actionSheetTheme.destructiveActionTextColor.withMultipliedAlpha(0.6), font: .bold)
+                }
+            }
+            
+            let actionTitlePadding: CGFloat = 16.0
+            let actionTitleInsets: CGFloat = 8.0
+            let maxActionWidth = floor(alertWidth / CGFloat(max(1, actions.count)))
+            
+            var isVertical = component.configuration.actionAlignment == .vertical
+            var actionTransitions: [AnyHashable: ComponentTransition] = [:]
+            var validActionIds: Set<AnyHashable> = Set()
+            for action in actions {
+                validActionIds.insert(action.id)
+                
+                let item: ComponentView<AlertComponentEnvironment>
+                var itemTransition = transition
+                if let current = self.actionItems[action.id] {
+                    item = current
+                } else {
+                    item = ComponentView()
+                    if !transition.animation.isImmediate {
+                        itemTransition = .immediate
+                    }
+                    self.actionItems[action.id] = item
+                }
+                actionTransitions[action.id] = itemTransition
+                
+                let itemSize = item.update(
+                    transition: itemTransition,
+                    component: AnyComponent(AlertActionComponent(
+                        theme: actionTheme(type: action.type),
+                        title: action.title,
+                        isHighlighted: AnyHashable(action.id) == self.highlightedAction,
+                        isEnabled: action.isEnabled,
+                        progress: action.progress
+                    )),
+                    environment: { alertEnvironment },
+                    containerSize: CGSize(width: alertWidth, height: actionHeight)
+                )
+                if let itemView = item.view {
+                    if itemView.superview == nil {
+                        self.contentHostView.addSubview(itemView)
+                    }
+                }
+                
+                if !isVertical && actions.count > 1 && itemSize.width - actionTitlePadding * 2.0 + actionTitleInsets > maxActionWidth {
+                    isVertical = true
+                }
+            }
+            self.effectiveActionLayout = isVertical ? .vertical : .horizontal
+            
+            var alertHeight = alertHeight
+            let actionsOriginY = alertHeight
+            if !actions.isEmpty {
+                alertHeight += isVertical ? actionHeight * CGFloat(actions.count) : actionHeight
+            }
+            
+            var actionOffset: CGFloat = 0.0
+            var index = 0
+            for action in actions {
+                guard let item = self.actionItems[action.id], let itemView = item.view as? AlertActionComponent.View else {
+                    index += 1
+                    continue
+                }
+                let itemTransition = actionTransitions[action.id] ?? transition
+                let itemFrame: CGRect
+                if isVertical {
+                    itemFrame = CGRect(origin: CGPoint(x: 0.0, y: actionsOriginY + actionHeight * CGFloat(index)), size: CGSize(width: alertWidth, height: actionHeight))
+                } else {
+                    let width = index == actions.count - 1 ? alertWidth - actionOffset : maxActionWidth
+                    itemFrame = CGRect(origin: CGPoint(x: actionOffset, y: actionsOriginY), size: CGSize(width: width, height: actionHeight))
+                    actionOffset += width
+                }
+                itemView.applySize(size: itemFrame.size, transition: itemTransition)
+                itemTransition.setFrame(view: itemView, frame: itemFrame)
+                index += 1
+            }
+            
+            let separatorCount = actions.count
+            while self.classicSeparatorViews.count > separatorCount {
+                self.classicSeparatorViews.removeLast().removeFromSuperview()
+            }
+            while self.classicSeparatorViews.count < separatorCount {
+                let separatorView = UIView()
+                separatorView.isUserInteractionEnabled = false
+                self.classicSeparatorViews.append(separatorView)
+            }
+            for i in 0 ..< self.classicSeparatorViews.count {
+                let separatorView = self.classicSeparatorViews[i]
+                var separatorTransition = transition
+                if separatorView.superview == nil {
+                    separatorTransition = .immediate
+                }
+                self.contentHostView.addSubview(separatorView)
+                separatorView.backgroundColor = separatorColor
+                
+                let separatorFrame: CGRect
+                if i == 0 {
+                    separatorFrame = CGRect(origin: CGPoint(x: 0.0, y: actionsOriginY - UIScreenPixel), size: CGSize(width: alertWidth, height: UIScreenPixel))
+                } else if isVertical {
+                    separatorFrame = CGRect(origin: CGPoint(x: 0.0, y: actionsOriginY + actionHeight * CGFloat(i) - UIScreenPixel), size: CGSize(width: alertWidth, height: UIScreenPixel))
+                } else {
+                    separatorFrame = CGRect(origin: CGPoint(x: maxActionWidth * CGFloat(i) - UIScreenPixel, y: actionsOriginY), size: CGSize(width: UIScreenPixel, height: actionHeight - UIScreenPixel))
+                }
+                separatorTransition.setFrame(view: separatorView, frame: separatorFrame)
+            }
+            
+            var removeActionIds: [AnyHashable] = []
+            for (id, item) in self.actionItems {
+                if !validActionIds.contains(id) {
+                    removeActionIds.append(id)
+                    if let itemView = item.view {
+                        if !transition.animation.isImmediate {
+                            itemView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.25, removeOnCompletion: false, completion: { _ in
+                                itemView.removeFromSuperview()
+                            })
+                        } else {
+                            itemView.removeFromSuperview()
+                        }
+                    }
+                }
+            }
+            for id in removeActionIds {
+                self.actionItems.removeValue(forKey: id)
+            }
+            
+            return alertHeight
         }
     }
     
@@ -757,10 +1026,14 @@ open class AlertScreen: ViewControllerComponentContainer, KeyShortcutResponder {
             ))
         }
         if !text.isEmpty {
+            let textComponent = AlertTextComponent(content: .plain(text), action: textAction)
+            if ClassicDesign.isEnabled && title == nil {
+                textComponent.isClassicStandaloneText = true
+            }
             content.append(AnyComponentWithIdentity(
                 id: "text",
                 component: AnyComponent(
-                    AlertTextComponent(content: .plain(text), action: textAction)
+                    textComponent
                 )
             ))
         }

@@ -386,6 +386,8 @@ public struct AutomaticThemeSwitchSetting: Codable, Equatable {
     }
 }
 
+private let classicDesignBaseColorBlue: Bool = InterfaceTuningSettingsStore.shared.current.classicDesign
+
 public enum PresentationThemeBaseColor: Int32, CaseIterable {
     case blue
     case cyan
@@ -406,7 +408,7 @@ public enum PresentationThemeBaseColor: Int32, CaseIterable {
         let value: UInt32
         switch self {
             case .blue:
-                value = 0x0088ff
+                value = classicDesignBaseColorBlue ? 0x007aff : 0x0088ff
             case .cyan:
                 value = 0x00c2ed
             case .green:

@@ -1,4 +1,5 @@
 import Foundation
+import LottieSettings
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -21,6 +22,7 @@ import TextNodeWithEntities
 import ContextUI
 import LensTransition
 import BalancedTextComponent
+import AppBundle
 
 public protocol ContextControllerActionsListItemNode: ASDisplayNode {
     func update(presentationData: PresentationData, constrainedSize: CGSize) -> (minSize: CGSize, apply: (_ size: CGSize, _ transition: ContainedViewLayoutTransition) -> Void)
@@ -39,6 +41,7 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
     private let requestUpdateAction: (AnyHashable, ContextMenuActionItem) -> Void
     private var item: ContextMenuActionItem
     
+    private let classicHighlightBackgroundNode: ASDisplayNode?
     private let titleLabelNode: ImmediateTextNodeWithEntities
     private let balancedTitleLabel = ComponentView<Empty>()
     private let subtitleNode: ImmediateTextNode
@@ -68,7 +71,17 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
         self.requestDismiss = requestDismiss
         self.requestUpdateAction = requestUpdateAction
         self.item = item
-        
+
+        if ClassicDesign.isEnabled {
+            let classicHighlightBackgroundNode = ASDisplayNode()
+            classicHighlightBackgroundNode.isAccessibilityElement = false
+            classicHighlightBackgroundNode.isUserInteractionEnabled = false
+            classicHighlightBackgroundNode.alpha = 0.0
+            self.classicHighlightBackgroundNode = classicHighlightBackgroundNode
+        } else {
+            self.classicHighlightBackgroundNode = nil
+        }
+
         self.titleLabelNode = ImmediateTextNodeWithEntities()
         self.titleLabelNode.isAccessibilityElement = false
         self.titleLabelNode.displaysAsynchronously = false
@@ -91,21 +104,26 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
         self.isAccessibilityElement = true
         self.accessibilityLabel = item.text
         self.accessibilityTraits = [.button]
-        
+
+        if let classicHighlightBackgroundNode = self.classicHighlightBackgroundNode {
+            self.addSubnode(classicHighlightBackgroundNode)
+        }
         self.addSubnode(self.titleLabelNode)
         self.addSubnode(self.subtitleNode)
         self.addSubnode(self.iconNode)
         self.addSubnode(self.additionalIconNode)
-        
+
         self.isEnabled = self.canBeHighlighted()
-        
+
         self.highligthedChanged = { [weak self] highlighted in
             guard let strongSelf = self else {
                 return
             }
             if highlighted {
+                strongSelf.classicHighlightBackgroundNode?.alpha = 1.0
                 strongSelf.startTimer()
             } else {
+                strongSelf.classicHighlightBackgroundNode?.alpha = 0.0
                 strongSelf.invalidateTimer()
             }
         }
@@ -187,8 +205,9 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
     }
     
     public func updateIsHighlighted(isHighlighted: Bool) {
+        self.classicHighlightBackgroundNode?.alpha = isHighlighted ? 1.0 : 0.0
     }
-    
+
     public func performAction() {
         self.pressed()
     }
@@ -209,13 +228,18 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
     }
     
     public func update(presentationData: PresentationData, constrainedSize: CGSize) -> (minSize: CGSize, apply: (_ size: CGSize, _ transition: ContainedViewLayoutTransition) -> Void) {
-        let sideInset: CGFloat = 18.0
+        let isClassic = ClassicDesign.isEnabled
+        let sideInset: CGFloat = isClassic ? 16.0 : 18.0
         let verticalInset: CGFloat = 11.0
         let titleSubtitleSpacing: CGFloat = 1.0
-        let iconSideInset: CGFloat = 20.0
+        let iconSideInset: CGFloat = isClassic ? 12.0 : 20.0
         let standardIconWidth: CGFloat = 32.0
         let iconSpacing: CGFloat = 8.0
-        
+
+        if let classicHighlightBackgroundNode = self.classicHighlightBackgroundNode {
+            classicHighlightBackgroundNode.backgroundColor = presentationData.theme.contextMenu.itemHighlightedBackgroundColor
+        }
+
         var forcedHeight: CGFloat?
         var titleVerticalOffset: CGFloat?
         let titleFont: UIFont
@@ -236,7 +260,13 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
         }
         
         let subtitleFont = Font.regular(presentationData.listsFontSize.baseDisplaySize * 14.0 / 17.0)
-        let subtitleColor = presentationData.theme.contextMenu.secondaryColor
+        var subtitleColor: UIColor
+        switch self.item.textColor {
+        case .destructive:
+            subtitleColor = presentationData.theme.contextMenu.destructiveColor
+        default:
+            subtitleColor = presentationData.theme.contextMenu.secondaryColor
+        }
         
         if let context = self.context {
             self.titleLabelNode.arguments = TextNodeWithEntities.Arguments(
@@ -264,6 +294,7 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
             )
         case let .secondLineWithAttributedValue(subtitleValue):
             self.titleLabelNode.maximumNumberOfLines = 1
+            self.subtitleNode.maximumNumberOfLines = 3
             let mutableString = subtitleValue.mutableCopy() as! NSMutableAttributedString
             mutableString.addAttribute(.foregroundColor, value: subtitleColor, range: NSRange(location: 0, length: mutableString.length))
             mutableString.addAttribute(.font, value: subtitleFont, range: NSRange(location: 0, length: mutableString.length))
@@ -410,7 +441,8 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
                     content: LottieComponent.AppBundleContent(name: iconAnimation.name),
                     color: titleColor,
                     startingPosition: iconAnimation.loop ? .begin : .end,
-                    loop: iconAnimation.loop
+                    loop: iconAnimation.loop,
+                    lottieSettings: self.context?.lottieRenderingSettings ?? .noAccountFallback
                 )),
                 environment: {},
                 containerSize: animatedIconSize
@@ -574,11 +606,23 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
                 titleFrame = titleFrame.offsetBy(dx: 0.0, dy: titleVerticalOffset)
             }
             var subtitleFrame = CGRect(origin: CGPoint(x: titleFrame.minX, y: titleFrame.maxY + titleSubtitleSpacing), size: subtitleSize)
-            if iconSize != nil {
+            if isClassic {
+                if self.item.additionalLeftIcon != nil {
+                    titleFrame = titleFrame.offsetBy(dx: 26.0, dy: 0.0)
+                    subtitleFrame = subtitleFrame.offsetBy(dx: 26.0, dy: 0.0)
+                } else if self.item.iconPosition == .left {
+                    titleFrame = titleFrame.offsetBy(dx: 36.0, dy: 0.0)
+                    subtitleFrame = subtitleFrame.offsetBy(dx: 36.0, dy: 0.0)
+                }
+            } else if iconSize != nil {
                 titleFrame.origin.x = iconSideInset + 40.0
                 subtitleFrame.origin.x = titleFrame.minX
             }
-            
+
+            if let classicHighlightBackgroundNode = self.classicHighlightBackgroundNode {
+                transition.updateFrame(node: classicHighlightBackgroundNode, frame: CGRect(origin: CGPoint(), size: size), beginWithCurrentState: true)
+            }
+
             if let _ = balanceTitleAttributedText {
                 if let balancedTitleLabelView = self.balancedTitleLabel.view {
                     if balancedTitleLabelView.superview == nil {
@@ -596,10 +640,30 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
             }
             
             if let iconSize {
+                let iconY: CGFloat
+                if isClassic {
+                    iconY = floor((size.height - iconSize.height) / 2.0)
+                } else if case .secondLineWithAttributedValue = self.item.textLayout {
+                    if self.item.iconSource != nil {
+                        let textBlockFrame = titleFrame.union(subtitleFrame)
+                        iconY = floor(textBlockFrame.midY - iconSize.height * 0.5)
+                    } else {
+                        iconY = titleFrame.minY + floor((titleFrame.height - iconSize.height) / 2.0)
+                    }
+                } else {
+                    iconY = floor((size.height - iconSize.height) / 2.0)
+                }
+                let iconX: CGFloat
+                if isClassic {
+                    let iconWidth = max(standardIconWidth, iconSize.width)
+                    iconX = self.item.iconPosition == .left ? iconSideInset : size.width - iconSideInset - iconWidth + floor((iconWidth - iconSize.width) / 2.0)
+                } else {
+                    iconX = iconSideInset + floor((standardIconWidth - iconSize.width) * 0.5)
+                }
                 let iconFrame = CGRect(
                     origin: CGPoint(
-                        x: iconSideInset + floor((standardIconWidth - iconSize.width) * 0.5),
-                        y: floor((size.height - iconSize.height) / 2.0)
+                        x: iconX,
+                        y: iconY
                     ),
                     size: iconSize
                 )
@@ -625,13 +689,16 @@ public final class ContextControllerActionsListActionItemNode: HighlightTracking
             }
             
             if let additionalIconSize {
-                let iconFrame = CGRect(
+                var iconFrame = CGRect(
                     origin: CGPoint(
                         x: size.width - iconSideInset - additionalIconSize.width,
                         y: floor((size.height - additionalIconSize.height) / 2.0)
                     ),
                     size: additionalIconSize
                 )
+                if isClassic {
+                    iconFrame.origin.x = self.item.iconPosition == .left ? size.width - additionalIconSize.width - 10.0 : 10.0
+                }
                 transition.updateFrame(node: self.additionalIconNode, frame: iconFrame, beginWithCurrentState: true)
             }
         })
@@ -667,6 +734,12 @@ private final class ContextControllerActionsListSeparatorItemNode: ASDisplayNode
     }
     
     func update(presentationData: PresentationData, constrainedSize: CGSize) -> (minSize: CGSize, apply: (_ size: CGSize, _ transition: ContainedViewLayoutTransition) -> Void) {
+        if ClassicDesign.isEnabled {
+            return (minSize: CGSize(width: 0.0, height: 7.0), apply: { _, _ in
+                self.separatorView.isHidden = true
+                self.backgroundColor = presentationData.theme.contextMenu.sectionSeparatorColor
+            })
+        }
         return (minSize: CGSize(width: 0.0, height: 20.0), apply: { size, transition in
             let sideInset: CGFloat = 18.0
             self.separatorView.tintColor = presentationData.theme.contextMenu.itemSeparatorColor
@@ -780,9 +853,17 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
         
         private final class Item {
             let node: ContextControllerActionsListItemNode
+            let classicSeparatorNode: ASDisplayNode?
             
             init(node: ContextControllerActionsListItemNode) {
                 self.node = node
+                if ClassicDesign.isEnabled, !(node is ContextControllerActionsListSeparatorItemNode) {
+                    let classicSeparatorNode = ASDisplayNode()
+                    classicSeparatorNode.isUserInteractionEnabled = false
+                    self.classicSeparatorNode = classicSeparatorNode
+                } else {
+                    self.classicSeparatorNode = nil
+                }
             }
         }
         
@@ -864,6 +945,11 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
             self.view.addSubview(self.highlightedItemBackgroundView)
             
             for item in self.itemNodes {
+                if let classicSeparatorNode = item.classicSeparatorNode {
+                    self.addSubnode(classicSeparatorNode)
+                }
+            }
+            for item in self.itemNodes {
                 self.addSubnode(item.node)
             }
             
@@ -911,6 +997,7 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
                     if currentAction.id == id {
                         let previousNode = self.itemNodes[i]
                         previousNode.node.removeFromSupernode()
+                        previousNode.classicSeparatorNode?.removeFromSupernode()
                         
                         let addedNode = Item(
                             node: ContextControllerActionsListActionItemNode(
@@ -927,6 +1014,9 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
                             )
                         )
                         self.itemNodes[i] = addedNode
+                        if let classicSeparatorNode = addedNode.classicSeparatorNode {
+                            self.insertSubnode(classicSeparatorNode, at: 0)
+                        }
                         self.addSubnode(addedNode.node)
                         
                         self.requestUpdate(.immediate)
@@ -970,7 +1060,7 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
             
             var highlightedItemFrame: CGRect?
             
-            let verticalInset: CGFloat = 10.0
+            let verticalInset: CGFloat = ClassicDesign.isEnabled ? 0.0 : 10.0
             
             var itemNodeLayouts: [(minSize: CGSize, apply: (_ size: CGSize, _ transition: ContainedViewLayoutTransition) -> Void)] = []
             var combinedSize = CGSize(width: 0.0, height: 0.0)
@@ -1024,12 +1114,30 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
                 itemNodeLayout.apply(itemSize, itemTransition)
                 nextItemOrigin.y += itemSize.height
                 
+                if let classicSeparatorNode = item.classicSeparatorNode {
+                    classicSeparatorNode.backgroundColor = presentationData.theme.contextMenu.itemSeparatorColor
+                    itemTransition.updateFrame(node: classicSeparatorNode, frame: CGRect(origin: CGPoint(x: itemFrame.minX, y: itemFrame.maxY), size: CGSize(width: itemFrame.width, height: UIScreenPixel)), beginWithCurrentState: true)
+                    
+                    var separatorHidden = false
+                    if i != self.itemNodes.count - 1 {
+                        if case .separator = self.items[i + 1] {
+                            separatorHidden = true
+                        }
+                    } else {
+                        separatorHidden = true
+                    }
+                    if let itemContainerNode = item.node as? ContextControllerActionsListCustomItemNode, let itemNode = itemContainerNode.itemNode, !itemNode.needsSeparator {
+                        separatorHidden = true
+                    }
+                    classicSeparatorNode.isHidden = separatorHidden
+                }
+                
                 if self.highlightedItemNode === item {
                     highlightedItemFrame = itemFrame
                 }
             }
             
-            if let tip = self.tip {
+            if let tip = self.tip, !ClassicDesign.isEnabled {
                 let tipNode: InnerTextSelectionTipContainerNode
                 var tipTransition = transition
                 if let current = self.tipNode, current.tip == tip {
@@ -1091,7 +1199,8 @@ public final class ContextControllerActionsListStackItem: ContextControllerActio
                 }
             }
             
-            if let highlightedItemFrame {
+            if ClassicDesign.isEnabled {
+            } else if let highlightedItemFrame {
                 self.highlightedItemBackgroundView.backgroundColor = presentationData.theme.overallDarkAppearance ? UIColor.white : UIColor.black
                 self.highlightedItemBackgroundView.setMonochromaticEffect(tintColor: self.highlightedItemBackgroundView.backgroundColor)
                 
@@ -1449,197 +1558,24 @@ private final class ItemSelectionRecognizer: UIGestureRecognizer {
     }
 }
 
-private final class LensTransitionContainerEffectViewImpl: UIView, LensTransitionContainerEffectView {
-    let glassView: UIVisualEffectView
-    let contentView: UIView?
-    
-    private var theme: PresentationTheme?
-    
-    init(contentView: UIView?) {
-        self.glassView = UIVisualEffectView()
-        self.contentView = contentView
-        
-        super.init(frame: CGRect())
-        
-        self.addSubview(self.glassView)
-        if let contentView {
-            self.glassView.contentView.addSubview(contentView)
-        }
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    func update(theme: PresentationTheme) {
-        self.theme = theme
-        if #available(iOS 26.0, *) {
-            let glassEffectValue: UIGlassEffect
-            if theme.overallDarkAppearance {
-                glassEffectValue = UIGlassEffect(style: .regular)
-                //glassEffectValue.tintColor = UIColor(white: 1.0, alpha: 0.025)
-            } else {
-                glassEffectValue = UIGlassEffect(style: .regular)
-                //glassEffectValue.tintColor = UIColor(white: 1.0, alpha: 0.1)
-            }
-            self.glassView.effect = glassEffectValue
-        }
-    }
-    
-    func updateSize(size: CGSize, cornerRadius: CGFloat, transition: ComponentTransition) {
-        transition.animateView {
-            self.glassView.bounds.size = size
-            self.glassView.center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
-            if #available(iOS 26.0, *) {
-                self.glassView.cornerConfiguration = .corners(radius: UICornerRadius(floatLiteral: cornerRadius))
-            }
-        }
-    }
-    
-    func updateSize(size: CGSize, transition: ComponentTransition) {
-        transition.setBounds(view: self, bounds: CGRect(origin: .zero, size: size))
-        transition.setBounds(view: self.glassView, bounds: CGRect(origin: .zero, size: size))
-        transition.setPosition(view: self.glassView, position: CGPoint(x: size.width * 0.5, y: size.height * 0.5))
-    }
-    
-    func updateSize(duration: Double, keyframes: [CGSize]) {
-        guard keyframes.count >= 2 else {
-            if let last = keyframes.last {
-                self.bounds.size = last
-                self.glassView.bounds.size = last
-                self.glassView.center = CGPoint(x: last.width * 0.5, y: last.height * 0.5)
-            }
-            return
-        }
-
-        // Start value
-        self.bounds.size = keyframes[0]
-        self.glassView.bounds.size = keyframes[0]
-        self.glassView.center = CGPoint(x: keyframes[0].width * 0.5, y: keyframes[0].height * 0.5)
-
-        let segmentCount = keyframes.count - 1
-        let relativeStep = 1.0 / Double(segmentCount)
-
-        var options: UIView.KeyframeAnimationOptions = [.calculationModeLinear]
-        options.insert(UIView.KeyframeAnimationOptions(rawValue: UIView.AnimationOptions.curveLinear.rawValue))
-        UIView.animateKeyframes(
-            withDuration: duration,
-            delay: 0.0,
-            options: options,
-            animations: {
-                for i in 0..<segmentCount {
-                    let nextSize = keyframes[i + 1]
-                    let relativeStartTime = Double(i) * relativeStep
-                    let relativeDuration = (i == segmentCount - 1) ? (1.0 - relativeStartTime) : relativeStep
-                    UIView.addKeyframe(
-                        withRelativeStartTime: relativeStartTime,
-                        relativeDuration: relativeDuration
-                    ) {
-                        self.bounds.size = nextSize
-                        self.glassView.bounds.size = nextSize
-                        self.glassView.center = CGPoint(x: nextSize.width * 0.5, y: nextSize.height * 0.5)
-                    }
-                }
-            },
-            completion: nil
-        )
-    }
-
-    func updatePosition(duration: Double, keyframes: [CGPoint]) {
-        guard keyframes.count >= 2 else {
-            if let last = keyframes.last {
-                self.center = last
-            }
-            return
-        }
-
-        self.center = keyframes[0]
-
-        let segmentCount = keyframes.count - 1
-        let relativeStep = 1.0 / Double(segmentCount)
-
-        var options: UIView.KeyframeAnimationOptions = [.calculationModeLinear]
-        options.insert(UIView.KeyframeAnimationOptions(rawValue: UIView.AnimationOptions.curveLinear.rawValue))
-        UIView.animateKeyframes(
-            withDuration: duration,
-            delay: 0.0,
-            options: options,
-            animations: {
-                for i in 0 ..< segmentCount {
-                    let nextPosition = keyframes[i + 1]
-                    let relativeStartTime = Double(i) * relativeStep
-                    let relativeDuration = (i == segmentCount - 1) ? (1.0 - relativeStartTime) : relativeStep
-                    UIView.addKeyframe(
-                        withRelativeStartTime: relativeStartTime,
-                        relativeDuration: relativeDuration
-                    ) {
-                        self.center = nextPosition
-                    }
-                }
-            },
-            completion: nil
-        )
-    }
-    
-    func updatePosition(position: CGPoint, transition: ComponentTransition) {
-        transition.setPosition(view: self, position: position)
-    }
-    
-    func updateCornerRadius(duration: Double, keyframes: [CGFloat]) {
-        guard #available(iOS 26.0, *) else {
-            return
-        }
-        
-        guard keyframes.count >= 2 else {
-            if let last = keyframes.last {
-                self.glassView.cornerConfiguration = .corners(radius: UICornerRadius(floatLiteral: last))
-            }
-            return
-        }
-        
-        // Start value
-        self.glassView.cornerConfiguration = .corners(radius: UICornerRadius(floatLiteral: keyframes[0]))
-        
-        let segmentCount = keyframes.count - 1
-        let relativeStep = 1.0 / Double(segmentCount)
-        
-        var options: UIView.KeyframeAnimationOptions = [.calculationModeLinear]
-        options.insert(UIView.KeyframeAnimationOptions(rawValue: UIView.AnimationOptions.curveLinear.rawValue))
-        UIView.animateKeyframes(
-            withDuration: duration,
-            delay: 0.0,
-            options: options,
-            animations: {
-                for i in 0 ..< segmentCount {
-                    let nextValue = keyframes[i + 1]
-                    let relativeStartTime = Double(i) * relativeStep
-                    let relativeDuration = (i == segmentCount - 1) ? (1.0 - relativeStartTime) : relativeStep
-                    UIView.addKeyframe(
-                        withRelativeStartTime: relativeStartTime,
-                        relativeDuration: relativeDuration
-                    ) {
-                        self.glassView.cornerConfiguration = .corners(radius: UICornerRadius(floatLiteral: nextValue))
-                    }
-                }
-            },
-            completion: nil
-        )
-    }
-    
-    func setTransitionFraction(value: CGFloat, duration: Double) {
-        let fraction = max(0.0, min(1.0, value))
-        let transition: ComponentTransition = duration == 0.0 ? .immediate : .easeInOut(duration: duration)
-        transition.setBlur(layer: self.glassView.contentView.layer, radius: (1.0 - fraction) * 4.0)
-        transition.setAlpha(view: self.glassView.contentView, alpha: fraction)
-    }
-}
-
 public final class ContextControllerActionsStackNodeImpl: ASDisplayNode, ContextControllerActionsStackNode {
+    public var usesClearGlass: Bool = false
+    public var glassBlurRadius: CGFloat?
+
     final class NavigationContainer: ASDisplayNode, ASGestureRecognizerDelegate {
         let backgroundContainer: GlassBackgroundContainerView
-        let backgroundContainerInset: CGFloat
-        var sourceExtractableContainer: ContextExtractableContainer?
         let contentContainer: LensTransitionContainer
+        
+        private let classicBackgroundNode: NavigationBackgroundNode?
+        let classicShadowNode: ASImageNode?
+        
+        func addItemContainer(_ itemContainer: ASDisplayNode) {
+            if self.classicBackgroundNode != nil {
+                self.addSubnode(itemContainer)
+            } else {
+                self.contentContainer.contentsView.addSubview(itemContainer.view)
+            }
+        }
         
         var requestUpdate: ((ContainedViewLayoutTransition) -> Void)?
         var requestPop: (() -> Void)?
@@ -1656,14 +1592,30 @@ public final class ContextControllerActionsStackNodeImpl: ASDisplayNode, Context
         
         override init() {
             self.backgroundContainer = GlassBackgroundContainerView(spacing: 28.0)
-            self.contentContainer = LensTransitionContainer(effectView: LensTransitionContainerEffectViewImpl(contentView: nil))
+            self.contentContainer = LensTransitionContainer(frame: .zero)
             
-            self.backgroundContainerInset = 32.0
+            if ClassicDesign.isEnabled {
+                self.classicBackgroundNode = NavigationBackgroundNode(color: .clear, enableBlur: false)
+                let classicShadowNode = ASImageNode()
+                classicShadowNode.displaysAsynchronously = false
+                classicShadowNode.isUserInteractionEnabled = false
+                classicShadowNode.image = UIImage(bundleImageName: "Components/Context Menu/Shadow")?.stretchableImage(withLeftCapWidth: 60, topCapHeight: 48)
+                self.classicShadowNode = classicShadowNode
+            } else {
+                self.classicBackgroundNode = nil
+                self.classicShadowNode = nil
+            }
             
             super.init()
             
-            self.view.addSubview(self.backgroundContainer)
-            self.backgroundContainer.contentView.addSubview(self.contentContainer)
+            if let classicBackgroundNode = self.classicBackgroundNode {
+                self.addSubnode(classicBackgroundNode)
+                self.clipsToBounds = true
+                self.cornerRadius = 14.0
+            } else {
+                self.view.addSubview(self.backgroundContainer)
+                self.backgroundContainer.contentView.addSubview(self.contentContainer)
+            }
             
             let panRecognizer = InteractiveTransitionGestureRecognizer(target: self, action: #selector(self.panGesture(_:)), allowedDirections: { [weak self] point in
                 guard let strongSelf = self else {
@@ -1721,71 +1673,42 @@ public final class ContextControllerActionsStackNodeImpl: ASDisplayNode, Context
             }
         }
         
-        func animateIn(fromExtractableContainer extractableContainer: ContextExtractableContainer, fromRect: CGRect, presentationData: PresentationData, transition: ComponentTransition) {
-            let normalState = extractableContainer.normalState
-            //let sourceSize = normalState.size
-            let normalCornerRadius: CGFloat = normalState.cornerRadius
-            
-            let currentSize = self.contentContainer.bounds.size
-            
-            self.sourceExtractableContainer = extractableContainer
-            self.contentContainer.frame = CGRect(origin: CGPoint(), size: currentSize)
-            
-            let sourceEffectView = LensTransitionContainerEffectViewImpl(contentView: extractableContainer.extractableContentView)
-            sourceEffectView.update(theme: presentationData.theme)
-            
-            self.contentContainer.animateIn(fromRect: fromRect, toRect: CGRect(origin: CGPoint(), size: currentSize), fromCornerRadius: normalCornerRadius, toCornerRadius: 30.0, isDark: presentationData.theme.overallDarkAppearance, sourceEffectView: sourceEffectView)
+        func animateIn(from sourceView: UIView, sourceRect: CGRect, sourcePath: UIBezierPath?, alongsideAnimations: @escaping () -> Void) {
+            self.contentContainer.animateIn(from: sourceView, sourceRect: sourceRect, sourcePath: sourcePath, alongsideAnimations: alongsideAnimations)
         }
-        
-        func animateOut(toExtractableContainer extractableContainer: ContextExtractableContainer, toRect: CGRect, presentationData: PresentationData, transition: ComponentTransition) {
-            let normalState = extractableContainer.normalState
-            let normalCornerRadius: CGFloat = normalState.cornerRadius
 
-            let currentSize = self.contentContainer.bounds.size
-            self.contentContainer.frame = CGRect(origin: CGPoint(), size: currentSize)
-            
-            let sourceEffectView = LensTransitionContainerEffectViewImpl(contentView: extractableContainer.extractableContentView)
-            sourceEffectView.update(theme: presentationData.theme)
+        func animateOut(currentSource: (view: UIView, sourceRect: CGRect, sourcePath: UIBezierPath?)?, alongsideAnimations: @escaping () -> Void, completion: @escaping () -> Void) {
+            self.contentContainer.animateOut(currentSource: currentSource, alongsideAnimations: alongsideAnimations, completion: completion)
+        }
 
-            self.contentContainer.animateOut(fromRect: CGRect(origin: CGPoint(), size: currentSize), toRect: toRect, fromCornerRadius: 30.0, toCornerRadius: normalCornerRadius, isDark: presentationData.theme.overallDarkAppearance, sourceEffectView: sourceEffectView)
-        }
-        
-        func didAnimateOut(toExtractableContainer extractableContainer: ContextExtractableContainer) {
-            let normalState = extractableContainer.normalState
-            extractableContainer.extractableContentView.frame = CGRect(origin: CGPoint(), size: normalState.size)
-            extractableContainer.isHidden = false
-            extractableContainer.extractableContentView.alpha = 1.0
-            extractableContainer.addSubview(extractableContainer.extractableContentView)
-            extractableContainer.updateState(state: .normal, transition: .transition(.immediate), completion: nil)
-        }
-        
-        func update(presentationData: PresentationData, presentation: Presentation, size: CGSize, transition: ContainedViewLayoutTransition) {
+        func update(presentationData: PresentationData, presentation: Presentation, size: CGSize, usesClearGlass: Bool, glassBlurRadius: CGFloat?, transition: ContainedViewLayoutTransition) {
+            if let classicBackgroundNode = self.classicBackgroundNode {
+                switch presentation {
+                case .modal:
+                    classicBackgroundNode.updateColor(color: presentationData.theme.contextMenu.backgroundColor, enableBlur: false, forceKeepBlur: false, transition: transition)
+                    self.classicShadowNode?.isHidden = true
+                case .inline:
+                    classicBackgroundNode.updateColor(color: presentationData.theme.contextMenu.backgroundColor, enableBlur: true, forceKeepBlur: true, transition: transition)
+                    self.classicShadowNode?.isHidden = false
+                case .additional:
+                    classicBackgroundNode.updateColor(color: presentationData.theme.contextMenu.backgroundColor.withMultipliedAlpha(0.5), enableBlur: true, forceKeepBlur: true, transition: transition)
+                    self.classicShadowNode?.isHidden = false
+                }
+                transition.updateFrame(node: classicBackgroundNode, frame: CGRect(origin: CGPoint(), size: size), beginWithCurrentState: true)
+                classicBackgroundNode.update(size: size, transition: transition)
+                return
+            }
+            
             let transition = ComponentTransition(transition)
             
             transition.setFrame(view: self.backgroundContainer, frame: CGRect(origin: CGPoint(), size: size))
             self.backgroundContainer.update(size: size, isDark: presentationData.theme.overallDarkAppearance, transition: transition)
             
-            if let effectView = self.contentContainer.effectView as? LensTransitionContainerEffectViewImpl {
-                effectView.update(theme: presentationData.theme)
-            }
             transition.setPosition(view: self.contentContainer, position: CGRect(origin: CGPoint(), size: size).center)
             transition.setBounds(view: self.contentContainer, bounds: CGRect(origin: CGPoint(), size: size))
-            self.contentContainer.update(size: size, cornerRadius: min(30.0, size.height * 0.5), isDark: presentationData.theme.overallDarkAppearance, transition: transition)
-            
-            //let backgroundContainerFrame = CGRect(origin: CGPoint(), size: size).insetBy(dx: -self.backgroundContainerInset, dy: -self.backgroundContainerInset)
-            
-            /*if self.backgroundContainer.bounds.size != backgroundContainerFrame.size {
-                self.backgroundContainer.update(size: backgroundContainerFrame.size, isDark: presentationData.theme.overallDarkAppearance, transition: transition)
-                transition.setFrame(view: self.backgroundContainer, frame: backgroundContainerFrame)
-            }
-            
-            transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(x: self.backgroundContainerInset, y: self.backgroundContainerInset), size: size))
-            self.backgroundView.update(size: size, cornerRadius: min(30.0, size.height * 0.5), isDark: presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: transition)*/
-            
-            /*if let sourceExtractableContainer = self.sourceExtractableContainer {
-                transition.setFrame(view: sourceExtractableContainer.extractableContentView, frame: CGRect(origin: CGPoint(x: self.backgroundContainerInset, y: self.backgroundContainerInset), size: size))
-                sourceExtractableContainer.updateState(state: .extracted(size: size, cornerRadius: min(30.0, size.height * 0.5), state: .animatedIn), transition: .transition(transition.containedViewLayoutTransition), completion: nil)
-            }*/
+            self.backgroundContainer.nativeBlurRadius = glassBlurRadius
+            self.contentContainer.nativeBlurRadius = glassBlurRadius
+            self.contentContainer.update(size: size, cornerRadius: min(30.0, size.height * 0.5), isDark: presentationData.theme.overallDarkAppearance, tintColor: GlassBackgroundView.TintColor(kind: usesClearGlass ? .custom(style: .clear, color: .clear) : .panel), transition: transition)
         }
     }
     
@@ -1897,7 +1820,7 @@ public final class ContextControllerActionsStackNodeImpl: ASDisplayNode, Context
         }
         
         func updateTip(presentationData: PresentationData, presentation: ContextControllerActionsStackNode.Presentation, width: CGFloat, transition: ContainedViewLayoutTransition) -> (node: InnerTextSelectionTipContainerNode, height: CGFloat)? {
-            if self.item is ContextControllerActionsListStackItem {
+            if self.item is ContextControllerActionsListStackItem, !ClassicDesign.isEnabled {
                 return nil
             }
             
@@ -2009,6 +1932,9 @@ public final class ContextControllerActionsStackNodeImpl: ASDisplayNode, Context
         
         super.init()
         
+        if let classicShadowNode = self.navigationContainer.classicShadowNode {
+            self.addSubnode(classicShadowNode)
+        }
         self.addSubnode(self.navigationContainer)
         
         self.navigationContainer.requestUpdate = { [weak self] transition in
@@ -2151,7 +2077,7 @@ public final class ContextControllerActionsStackNodeImpl: ASDisplayNode, Context
             positionLock: positionLock
         )
         self.itemContainers.append(itemContainer)
-        self.navigationContainer.contentContainer.contentsView.addSubview(itemContainer.view)
+        self.navigationContainer.addItemContainer(itemContainer)
         self.navigationContainer.isNavigationEnabled = self.itemContainers.count > 1
         
         let transition: ContainedViewLayoutTransition
@@ -2317,7 +2243,10 @@ public final class ContextControllerActionsStackNodeImpl: ASDisplayNode, Context
         let previousNavigationContainerFrame = self.navigationContainer.frame
         transition.updateFrame(node: self.navigationContainer, frame: navigationContainerFrame, beginWithCurrentState: true)
         if !navigationContainerFrame.isEmpty {
-            self.navigationContainer.update(presentationData: presentationData, presentation: presentation, size: navigationContainerFrame.size, transition: transition)
+            self.navigationContainer.update(presentationData: presentationData, presentation: presentation, size: navigationContainerFrame.size, usesClearGlass: self.usesClearGlass, glassBlurRadius: self.glassBlurRadius, transition: transition)
+        }
+        if let classicShadowNode = self.navigationContainer.classicShadowNode {
+            transition.updateFrame(node: classicShadowNode, frame: navigationContainerFrame.insetBy(dx: -30.0, dy: -30.0), beginWithCurrentState: true)
         }
         
         for i in 0 ..< self.itemContainers.count {
@@ -2436,15 +2365,34 @@ public final class ContextControllerActionsStackNodeImpl: ASDisplayNode, Context
         }
     }
     
-    func animateIn(fromExtractableContainer extractableContainer: ContextExtractableContainer, fromRect: CGRect, presentationData: PresentationData, transition: ComponentTransition) {
-        self.navigationContainer.animateIn(fromExtractableContainer: extractableContainer, fromRect: fromRect, presentationData: presentationData, transition: transition)
+    static var supportsLiquidMorph: Bool {
+        if ClassicDesign.isEnabled {
+            return false
+        }
+        return LensTransitionContainer.isMorphSupported
     }
-    
-    func animateOut(toExtractableContainer extractableContainer: ContextExtractableContainer, toRect: CGRect, presentationData: PresentationData, transition: ComponentTransition) {
-        self.navigationContainer.animateOut(toExtractableContainer: extractableContainer, toRect: toRect, presentationData: presentationData, transition: transition)
+
+    func animateIn(from sourceView: UIView, sourceRect: CGRect, sourcePath: UIBezierPath?, alongsideAnimations: @escaping () -> Void) {
+        let accessories = self.subnodes?.filter { $0 !== self.navigationContainer } ?? []
+        for node in accessories {
+            node.alpha = 0.0
+        }
+        self.navigationContainer.animateIn(from: sourceView, sourceRect: sourceRect, sourcePath: sourcePath, alongsideAnimations: {
+            for node in accessories {
+                node.alpha = 1.0
+            }
+            alongsideAnimations()
+        })
     }
-    
-    func didAnimateOut(toExtractableContainer extractableContainer: ContextExtractableContainer) {
-        self.navigationContainer.didAnimateOut(toExtractableContainer: extractableContainer)
+
+    /// `currentSource` is the morph source's outline resolved for this close, as `animateIn` was given it at opening.
+    func animateOut(currentSource: (view: UIView, sourceRect: CGRect, sourcePath: UIBezierPath?)?, alongsideAnimations: @escaping () -> Void, completion: @escaping () -> Void) {
+        let accessories = self.subnodes?.filter { $0 !== self.navigationContainer } ?? []
+        self.navigationContainer.animateOut(currentSource: currentSource, alongsideAnimations: {
+            for node in accessories {
+                node.alpha = 0.0
+            }
+            alongsideAnimations()
+        }, completion: completion)
     }
 }

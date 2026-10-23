@@ -57,7 +57,7 @@ final class ChatTranslationPanelNode: ASDisplayNode {
         
         let theme: PresentationTheme = context.sharedContext.currentPresentationData.with { $0 }.theme
         self.moreButton = MoreButtonNode(theme: theme)
-        self.moreButton.updateColor(theme.chat.inputPanel.panelControlColor, transition: .immediate)
+        self.moreButton.updateColor(ClassicDesign.isEnabled ? nil : theme.chat.inputPanel.panelControlColor, transition: .immediate)
         self.moreButton.iconNode.enqueueState(.more, animated: false)
         self.moreButton.hitTestSlop = UIEdgeInsets(top: -8.0, left: -8.0, bottom: -8.0, right: -8.0)
         
@@ -109,7 +109,12 @@ final class ChatTranslationPanelNode: ASDisplayNode {
             self.theme = theme
         }
         
-        if themeUpdated {
+        if themeUpdated, ClassicDesign.isEnabled {
+            self.buttonIconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Title Panels/Translate"), color: theme.chat.inputPanel.panelControlAccentColor)
+            self.moreButton.theme = theme
+            self.moreButton.updateColor(nil, transition: .immediate)
+            self.closeButton.setImage(PresentationResourcesChat.chatInputPanelEncircledCloseIconImage(theme), for: [])
+        } else if themeUpdated {
             self.buttonIconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Title Panels/Translate"), color: theme.chat.inputPanel.panelControlColor)
             self.moreButton.theme = theme
             self.moreButton.updateColor(theme.chat.inputPanel.panelControlColor, transition: .immediate)
@@ -150,12 +155,12 @@ final class ChatTranslationPanelNode: ASDisplayNode {
             if self.buttonTextNode.attributedText?.string != buttonText {
                 textUpdated = true
             }
-            self.buttonTextNode.attributedText = NSAttributedString(string: buttonText, font: Font.regular(17.0), textColor: theme.chat.inputPanel.panelControlColor)
+            self.buttonTextNode.attributedText = NSAttributedString(string: buttonText, font: Font.regular(17.0), textColor: ClassicDesign.isEnabled ? theme.rootController.navigationBar.accentTextColor : theme.chat.inputPanel.panelControlColor)
         }
 
         let panelHeight: CGFloat = 40.0
         
-        let contentRightInset: CGFloat = 11.0 + rightInset
+        let contentRightInset: CGFloat = (ClassicDesign.isEnabled ? 14.0 : 11.0) + rightInset
         
         var copyTextView: UIView?
         if textUpdated, transition.isAnimated {
@@ -174,7 +179,7 @@ final class ChatTranslationPanelNode: ASDisplayNode {
         }
                   
         let moreButtonSize = self.moreButton.measure(CGSize(width: 100.0, height: panelHeight))
-        transition.updateFrame(node: self.moreButton, frame: CGRect(origin: CGPoint(x: width - contentRightInset - moreButtonSize.width, y: floorToScreenPixels((panelHeight - moreButtonSize.height) / 2.0) - 1.0), size: moreButtonSize))
+        transition.updateFrame(node: self.moreButton, frame: CGRect(origin: CGPoint(x: width - contentRightInset - moreButtonSize.width, y: floorToScreenPixels((panelHeight - moreButtonSize.height) / 2.0) - (ClassicDesign.isEnabled ? 0.0 : 1.0)), size: moreButtonSize))
      
         let closeButtonSize = self.closeButton.measure(CGSize(width: 100.0, height: 100.0))
         self.closeButton.frame = CGRect(origin: CGPoint(x: width - contentRightInset - closeButtonSize.width, y: floorToScreenPixels((panelHeight - closeButtonSize.height) / 2.0)), size: closeButtonSize)
@@ -282,7 +287,7 @@ final class ChatTranslationPanelNode: ASDisplayNode {
         
         let items: Signal<ContextController.Items, NoError> = context.sharedContext.accountManager.sharedData(keys: [ApplicationSpecificSharedDataKeys.translationSettings])
         |> take(1)
-        |> map { sharedData -> ContextController.Items in
+        |> map { [weak self] sharedData -> ContextController.Items in
             let settings: TranslationSettings
             if let current = sharedData.entries[ApplicationSpecificSharedDataKeys.translationSettings]?.get(TranslationSettings.self) {
                 settings = current
@@ -442,7 +447,7 @@ private final class TranslationContextReferenceContentSource: ContextReferenceCo
     }
     
     func transitionInfo() -> ContextControllerReferenceViewInfo? {
-        return ContextControllerReferenceViewInfo(referenceView: self.sourceNode.view, contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerReferenceViewInfo(referenceView: self.sourceNode.view, contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 }
 

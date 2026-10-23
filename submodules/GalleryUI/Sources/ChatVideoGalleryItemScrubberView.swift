@@ -13,7 +13,11 @@ import ComponentFlow
 import ComponentDisplayAdapters
 import GlassBackgroundComponent
 
-private let textFont = Font.with(size: 13.0, design: .regular, weight: .medium, traits: [.monospacedNumbers])
+private let glassTextFont = Font.with(size: 13.0, design: .regular, weight: .medium, traits: [.monospacedNumbers])
+private let classicTextFont = Font.with(size: 13.0, design: .regular, weight: .regular, traits: [.monospacedNumbers])
+private var textFont: UIFont {
+    return ClassicDesign.isEnabled ? classicTextFont : glassTextFont
+}
 
 private let scrubberBackgroundColor = UIColor(white: 1.0, alpha: 0.42)
 private let scrubberForegroundColor = UIColor.white
@@ -24,6 +28,13 @@ final class ChatVideoGalleryItemScrubberView: UIView {
     
     private let backgroundContainer: GlassBackgroundContainerView
     private let backgroundView: GlassBackgroundView
+    private let classicContentView: UIView?
+    private var chromeView: UIView {
+        return self.classicContentView ?? self.backgroundContainer
+    }
+    private var contentHostView: UIView {
+        return self.classicContentView ?? self.backgroundView.contentView
+    }
     
     private let leftTimestampNode: MediaPlayerTimeTextNode
     private let rightTimestampNode: MediaPlayerTimeTextNode
@@ -62,12 +73,12 @@ final class ChatVideoGalleryItemScrubberView: UIView {
         didSet {
             if self.hideWhenDurationIsUnknown {
                 if let playbackStatus = self.playbackStatus, !playbackStatus.duration.isZero {
-                    self.backgroundContainer.isHidden = false
+                    self.chromeView.isHidden = false
                 } else {
-                    self.backgroundContainer.isHidden = true
+                    self.chromeView.isHidden = true
                 }
             } else {
-                self.backgroundContainer.isHidden = false
+                self.chromeView.isHidden = false
             }
         }
     }
@@ -85,8 +96,20 @@ final class ChatVideoGalleryItemScrubberView: UIView {
         self.backgroundContainer.contentView.addSubview(self.backgroundView)
         self.backgroundView.contentView.layer.allowsGroupOpacity = true
         
+        if ClassicDesign.isEnabled {
+            let classicContentView = UIView()
+            classicContentView.layer.allowsGroupOpacity = true
+            self.classicContentView = classicContentView
+        } else {
+            self.classicContentView = nil
+        }
+        
         self.chapters = chapters
-        self.scrubberNode = MediaPlayerScrubbingNode(content: .standard(lineHeight: 8.0, lineCap: .round, scrubberHandle: .none, backgroundColor: scrubberBackgroundColor, foregroundColor: scrubberForegroundColor, bufferingColor: scrubberBufferingColor, chapters: chapters))
+        if ClassicDesign.isEnabled {
+            self.scrubberNode = MediaPlayerScrubbingNode(content: .standard(lineHeight: 5.0, lineCap: .round, scrubberHandle: .circle, backgroundColor: scrubberBackgroundColor, foregroundColor: scrubberForegroundColor, bufferingColor: scrubberBufferingColor, chapters: chapters))
+        } else {
+            self.scrubberNode = MediaPlayerScrubbingNode(content: .standard(lineHeight: 8.0, lineCap: .round, scrubberHandle: .none, backgroundColor: scrubberBackgroundColor, foregroundColor: scrubberForegroundColor, bufferingColor: scrubberBufferingColor, chapters: chapters))
+        }
         self.scrubberNode.layer.allowsGroupOpacity = true
         self.shimmerEffectNode = ShimmerEffectForegroundNode()
         
@@ -102,7 +125,7 @@ final class ChatVideoGalleryItemScrubberView: UIView {
         
         super.init(frame: CGRect())
         
-        self.addSubview(self.backgroundContainer)
+        self.addSubview(self.chromeView)
         
         self.scrubberNode.seek = { [weak self] timestamp in
             self?.seek(timestamp)
@@ -135,10 +158,10 @@ final class ChatVideoGalleryItemScrubberView: UIView {
             }
         }
                 
-        self.backgroundView.contentView.addSubview(self.leftTimestampNode.view)
-        self.backgroundView.contentView.addSubview(self.rightTimestampNode.view)
+        self.contentHostView.addSubview(self.leftTimestampNode.view)
+        self.contentHostView.addSubview(self.rightTimestampNode.view)
         self.addSubview(self.scrubberNode.view)
-        self.backgroundView.contentView.addSubview(self.infoNode.view)
+        self.contentHostView.addSubview(self.infoNode.view)
     }
     
     required init?(coder aDecoder: NSCoder) {
@@ -189,7 +212,7 @@ final class ChatVideoGalleryItemScrubberView: UIView {
         self.scrubberNode.setCollapsed(collapsed == true, animated: animated)
         let transition: ContainedViewLayoutTransition = animated ? .animated(duration: 0.3, curve: .linear) : .immediate
         
-        ComponentTransition(transition).setAlpha(view: self.backgroundContainer, alpha: alpha)
+        ComponentTransition(transition).setAlpha(view: self.chromeView, alpha: alpha)
         ComponentTransition(transition).setAlpha(view: self.scrubberNode.view, alpha: controlAlpha)
     }
     
@@ -376,20 +399,40 @@ final class ChatVideoGalleryItemScrubberView: UIView {
             scrubberRightInset = 0.0
         }
         
-        transition.setFrame(view: self.leftTimestampNode.view, frame: CGRect(origin: CGPoint(x: 16.0, y: yOffset + leftTimestampOffset), size: CGSize(width: 60.0, height: 20.0)))
-        transition.setFrame(view: self.rightTimestampNode.view, frame: CGRect(origin: CGPoint(x: size.width - leftInset - rightInset - 60.0 - 16.0, y: yOffset + rightTimestampOffset), size: CGSize(width: 60.0, height: 20.0)))
-        
-        var infoConstrainedSize = size
-        infoConstrainedSize.width = size.width - 20.0 * 2.0
-        
-        let infoSize = self.infoNode.measure(infoConstrainedSize)
-        self.infoNode.bounds = CGRect(origin: CGPoint(), size: infoSize)
-        transition.setPosition(view: self.infoNode.view, position: CGPoint(x: size.width / 2.0, y: yOffset + infoOffset + infoSize.height / 2.0))
-        self.infoNode.alpha = self.isCollapsed == false ? 1.0 : 0.0
-        
-        var scrubberFrame = CGRect(origin: CGPoint(x: scrubberLeftInset, y: yOffset + 15.0), size: CGSize(width: size.width - leftInset - rightInset - scrubberLeftInset - scrubberRightInset, height: scrubberHeight))
-        if isCollapsed {
-            scrubberFrame.origin.y = size.height - scrubberHeight
+        var scrubberFrame: CGRect
+        if ClassicDesign.isEnabled && !isCollapsed {
+            let classicTopOffset: CGFloat = 8.0
+            let classicScrubberInset: CGFloat = 13.0
+            let classicTimestampOffset: CGFloat = classicTopOffset + 22.0
+            
+            transition.setFrame(view: self.leftTimestampNode.view, frame: CGRect(origin: CGPoint(x: 12.0, y: classicTimestampOffset), size: CGSize(width: 60.0, height: 20.0)))
+            transition.setFrame(view: self.rightTimestampNode.view, frame: CGRect(origin: CGPoint(x: size.width - leftInset - rightInset - 60.0 - 12.0, y: classicTimestampOffset), size: CGSize(width: 60.0, height: 20.0)))
+            
+            var infoConstrainedSize = size
+            infoConstrainedSize.width = max(1.0, size.width - classicScrubberInset * 2.0 - 100.0)
+            
+            let infoSize = self.infoNode.measure(infoConstrainedSize)
+            self.infoNode.bounds = CGRect(origin: CGPoint(), size: infoSize)
+            transition.setPosition(view: self.infoNode.view, position: CGPoint(x: size.width / 2.0, y: classicTimestampOffset + infoSize.height / 2.0))
+            self.infoNode.alpha = 1.0
+            
+            scrubberFrame = CGRect(origin: CGPoint(x: classicScrubberInset, y: classicTopOffset + 6.0), size: CGSize(width: max(1.0, size.width - leftInset - rightInset - classicScrubberInset * 2.0), height: scrubberHeight))
+        } else {
+            transition.setFrame(view: self.leftTimestampNode.view, frame: CGRect(origin: CGPoint(x: 16.0, y: yOffset + leftTimestampOffset), size: CGSize(width: 60.0, height: 20.0)))
+            transition.setFrame(view: self.rightTimestampNode.view, frame: CGRect(origin: CGPoint(x: size.width - leftInset - rightInset - 60.0 - 16.0, y: yOffset + rightTimestampOffset), size: CGSize(width: 60.0, height: 20.0)))
+            
+            var infoConstrainedSize = size
+            infoConstrainedSize.width = size.width - 20.0 * 2.0
+            
+            let infoSize = self.infoNode.measure(infoConstrainedSize)
+            self.infoNode.bounds = CGRect(origin: CGPoint(), size: infoSize)
+            transition.setPosition(view: self.infoNode.view, position: CGPoint(x: size.width / 2.0, y: yOffset + infoOffset + infoSize.height / 2.0))
+            self.infoNode.alpha = self.isCollapsed == false ? 1.0 : 0.0
+            
+            scrubberFrame = CGRect(origin: CGPoint(x: scrubberLeftInset, y: yOffset + 15.0), size: CGSize(width: size.width - leftInset - rightInset - scrubberLeftInset - scrubberRightInset, height: scrubberHeight))
+            if isCollapsed {
+                scrubberFrame.origin.y = size.height - scrubberHeight
+            }
         }
         transition.setFrame(view: self.scrubberNode.view, frame: scrubberFrame)
         
@@ -407,11 +450,15 @@ final class ChatVideoGalleryItemScrubberView: UIView {
         self.shimmerEffectNode.frame = CGRect(origin: CGPoint(x: 0.0, y: 4.0), size: CGSize(width: scrubberFrame.size.width, height: 5.0))
         self.shimmerEffectNode.cornerRadius = 2.5
         
-        transition.setFrame(view: self.backgroundContainer, frame: CGRect(origin: CGPoint(), size: size))
-        self.backgroundContainer.update(size: size, isDark: true, transition: transition)
-        
-        transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: size))
-        self.backgroundView.update(size: size, cornerRadius: min(44.0 * 0.5, size.height * 0.5), isDark: true, tintColor: .init(kind: .panel), transition: transition)
+        if let classicContentView = self.classicContentView {
+            transition.setFrame(view: classicContentView, frame: CGRect(origin: CGPoint(), size: size))
+        } else {
+            transition.setFrame(view: self.backgroundContainer, frame: CGRect(origin: CGPoint(), size: size))
+            self.backgroundContainer.update(size: size, isDark: true, transition: transition)
+            
+            transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: size))
+            self.backgroundView.update(size: size, cornerRadius: min(44.0 * 0.5, size.height * 0.5), isDark: true, tintColor: .init(kind: .panel), transition: transition)
+        }
         
         self.updateTimestampsVisibility(animated: !transition.animation.isImmediate)
         self.updateScrubberVisibility(animated: !transition.animation.isImmediate)
@@ -431,7 +478,7 @@ final class ChatVideoGalleryItemScrubberView: UIView {
             let fromRect = scrubberTransition.view.convert(scrubberTransition.view.bounds, to: self)
             
             let targetCloneView = scrubberTransition.makeView()
-            self.backgroundView.contentView.addSubview(targetCloneView)
+            self.contentHostView.addSubview(targetCloneView)
             targetCloneView.frame = fromRect
             scrubberTransition.updateView(targetCloneView, GalleryItemScrubberTransition.Scrubber.TransitionState(sourceSize: fromRect.size, destinationSize: CGSize(width: self.scrubberNode.bounds.width, height: fromRect.height), progress: 0.0, direction: .in), .immediate)
             targetCloneView.alpha = 1.0
@@ -456,8 +503,8 @@ final class ChatVideoGalleryItemScrubberView: UIView {
             transition.animatePosition(node: self.rightTimestampNode, from: CGPoint(x: rightTimestampOffset.x + scrubberSourceRect.maxX, y: rightTimestampOffset.y + scrubberSourceRect.maxY))
         }
         
-        self.backgroundContainer.alpha = 0.0
-        ComponentTransition.easeInOut(duration: 0.2).setAlpha(view: self.backgroundContainer, alpha: 1.0)
+        self.chromeView.alpha = 0.0
+        ComponentTransition.easeInOut(duration: 0.2).setAlpha(view: self.chromeView, alpha: 1.0)
         
         self.scrubberNode.alpha = 0.0
         ComponentTransition.easeInOut(duration: 0.2).setAlpha(view: self.scrubberNode.view, alpha: 1.0)
@@ -471,7 +518,7 @@ final class ChatVideoGalleryItemScrubberView: UIView {
             let scrubberDestinationRect = CGRect(origin: CGPoint(x: toRect.minX, y: toRect.maxY - 3.0), size: CGSize(width: toRect.width, height: 3.0))
 
             let targetCloneView = scrubberTransition.makeView()
-            self.backgroundView.contentView.addSubview(targetCloneView)
+            self.contentHostView.addSubview(targetCloneView)
             targetCloneView.frame = CGRect(origin: CGPoint(x: self.scrubberNode.frame.minX, y: self.scrubberNode.frame.maxY - toRect.height), size: CGSize(width: self.scrubberNode.bounds.width, height: toRect.height))
             scrubberTransition.updateView(targetCloneView, GalleryItemScrubberTransition.Scrubber.TransitionState(sourceSize: CGSize(width: self.scrubberNode.bounds.width, height: toRect.height), destinationSize: toRect.size, progress: 0.0, direction: .out), .immediate)
             targetCloneView.alpha = 0.0
@@ -496,7 +543,7 @@ final class ChatVideoGalleryItemScrubberView: UIView {
             transition.animatePositionAdditive(layer: self.rightTimestampNode.layer, offset: CGPoint(), to: CGPoint(x: -self.rightTimestampNode.position.x + (rightTimestampOffset.x + scrubberDestinationRect.maxX), y: -self.rightTimestampNode.position.y + (rightTimestampOffset.y + scrubberDestinationRect.maxY)), removeOnCompletion: false)
         }
         
-        ComponentTransition.easeInOut(duration: 0.2).setAlpha(view: self.backgroundContainer, alpha: 0.0)
+        ComponentTransition.easeInOut(duration: 0.2).setAlpha(view: self.chromeView, alpha: 0.0)
         ComponentTransition.easeInOut(duration: 0.2).setAlpha(view: self.scrubberNode.view, alpha: 0.0)
     }
 }

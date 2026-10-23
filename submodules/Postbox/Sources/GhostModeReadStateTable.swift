@@ -180,7 +180,7 @@ final class GhostModeReadStateTable: Table {
     }
 
     func remove(peerId: PeerId, threadId: Int64?, namespace: MessageId.Namespace) {
-        self.updatedMarkers[self.key(peerId: peerId, threadId: threadId, namespace: namespace)] = nil
+        self.updatedMarkers.updateValue(nil, forKey: self.key(peerId: peerId, threadId: threadId, namespace: namespace))
     }
 
     func getAll() -> [GhostModeReadStateMarker] {
@@ -201,7 +201,7 @@ final class GhostModeReadStateTable: Table {
     func removeAll() -> [GhostModeReadStateMarker] {
         let markers = self.getAll()
         for marker in markers {
-            self.updatedMarkers[self.key(peerId: marker.peerId, threadId: marker.threadId, namespace: marker.namespace)] = nil
+            self.updatedMarkers.updateValue(nil, forKey: self.key(peerId: marker.peerId, threadId: marker.threadId, namespace: marker.namespace))
         }
         return markers
     }

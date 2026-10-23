@@ -319,7 +319,7 @@ final class ChatTagSearchInputPanelNode: ChatInputPanelNode {
                 component: AnyComponent(PlainButtonComponent(
                     content: AnyComponent(AnimatedTextComponent(
                         font: Font.regular(15.0),
-                        color: params.interfaceState.theme.chat.inputPanel.panelControlColor,
+                        color: classicTagSearchControlColor(theme: params.interfaceState.theme),
                         items: modeButtonTitle
                     )),
                     effectAlignment: .right,
@@ -373,7 +373,7 @@ final class ChatTagSearchInputPanelNode: ChatInputPanelNode {
                 component: AnyComponent(PlainButtonComponent(
                     content: AnyComponent(BundleIconComponent(
                         name: "Chat/Input/Search/Calendar",
-                        tintColor: params.interfaceState.theme.chat.inputPanel.panelControlColor
+                        tintColor: classicTagSearchControlColor(theme: params.interfaceState.theme)
                     )),
                     effectAlignment: .center,
                     minSize: CGSize(width: 40.0, height: 40.0),
@@ -430,7 +430,7 @@ final class ChatTagSearchInputPanelNode: ChatInputPanelNode {
                 component: AnyComponent(PlainButtonComponent(
                     content: AnyComponent(BundleIconComponent(
                         name: "Chat/Input/Search/Members",
-                        tintColor: params.interfaceState.theme.chat.inputPanel.panelControlColor
+                        tintColor: classicTagSearchControlColor(theme: params.interfaceState.theme)
                     )),
                     effectAlignment: .center,
                     minSize: CGSize(width: 40.0, height: 40.0),
@@ -561,7 +561,7 @@ final class ChatTagSearchInputPanelNode: ChatInputPanelNode {
         var leftControlsBackgroundFrame = CGRect(origin: CGPoint(x: params.leftInset, y: floor((height - 40.0) * 0.5)), size: CGSize(width: 0.0, height: 40.0))
         leftControlsBackgroundFrame.size.width = max(40.0, leftControlsRect.maxX - leftControlsBackgroundFrame.minX)
         transition.setFrame(view: self.leftControlsBackgroundView, frame: leftControlsBackgroundFrame)
-        self.leftControlsBackgroundView.update(size: leftControlsBackgroundFrame.size, cornerRadius: leftControlsBackgroundFrame.height * 0.5, isDark: params.interfaceState.theme.overallDarkAppearance, tintColor: .init(kind: params.interfaceState.preferredGlassType == .clear ? .clear : .panel), transition: transition)
+        self.leftControlsBackgroundView.update(size: leftControlsBackgroundFrame.size, cornerRadius: leftControlsBackgroundFrame.height * 0.5, isDark: params.interfaceState.theme.overallDarkAppearance, tintColor: .init(kind: params.interfaceState.preferredGlassType == .clear ? .clear : .panel), isVisible: !ClassicDesign.isEnabled, transition: transition)
         transition.setAlpha(view: self.leftControlsBackgroundView, alpha: leftControlsRect.isEmpty ? 0.0 : 1.0)
         
         let rightControlsFrames: [CGRect?] = [
@@ -583,7 +583,7 @@ final class ChatTagSearchInputPanelNode: ChatInputPanelNode {
         rightControlsBackgroundFrame.size.width = max(40.0, rightControlsRect.maxX - rightControlsRect.minX + 8.0 * 2.0)
         rightControlsBackgroundFrame.origin.x -= rightControlsBackgroundFrame.width
         transition.setFrame(view: self.rightControlsBackgroundView, frame: rightControlsBackgroundFrame)
-        self.rightControlsBackgroundView.update(size: rightControlsBackgroundFrame.size, cornerRadius: rightControlsBackgroundFrame.height * 0.5, isDark: params.interfaceState.theme.overallDarkAppearance, tintColor: .init(kind: params.interfaceState.preferredGlassType == .clear ? .clear : .panel), transition: transition)
+        self.rightControlsBackgroundView.update(size: rightControlsBackgroundFrame.size, cornerRadius: rightControlsBackgroundFrame.height * 0.5, isDark: params.interfaceState.theme.overallDarkAppearance, tintColor: .init(kind: params.interfaceState.preferredGlassType == .clear ? .clear : .panel), isVisible: !ClassicDesign.isEnabled, transition: transition)
         self.rightControlsBackgroundView.isHidden = rightControlsRect.isEmpty
         
         transition.setFrame(view: self.backgroundContainerView, frame: CGRect(origin: CGPoint(), size: CGSize(width: params.width, height: height)))
@@ -595,4 +595,8 @@ final class ChatTagSearchInputPanelNode: ChatInputPanelNode {
     override func minimalHeight(interfaceState: ChatPresentationInterfaceState, metrics: LayoutMetrics) -> CGFloat {
         return defaultHeight(metrics: metrics)
     }
+}
+
+private func classicTagSearchControlColor(theme: PresentationTheme) -> UIColor {
+    return ClassicDesign.isEnabled ? theme.rootController.navigationBar.accentTextColor : theme.chat.inputPanel.panelControlColor
 }

@@ -870,7 +870,12 @@ public func makeAttachmentFileControllerImpl(
             animateChanges = true
         }
 
-        let leftNavigationButton =  closeButtonNode.flatMap { ItemListNavigationButton(content: .node($0), style: .regular, enabled: true, action: {}) }
+        var leftNavigationButton =  closeButtonNode.flatMap { ItemListNavigationButton(content: .node($0), style: .regular, enabled: true, action: {}) }
+        if ClassicDesign.isEnabled {
+            leftNavigationButton = ItemListNavigationButton(content: .text(presentationData.strings.Common_Cancel), style: .regular, enabled: true, action: {
+                dismissImpl?()
+            })
+        }
 
         var hasAudioSearch = false
         if let data = context.currentAppConfiguration.with({ $0 }).data, let _ = data["music_search_username"] as? String {
@@ -879,7 +884,21 @@ public func makeAttachmentFileControllerImpl(
 
         var rightNavigationButton: ItemListNavigationButton?
         if bannedSendMedia == nil && (recentDocuments == nil || (recentDocuments?.count ?? 0) > 10 || (mode.isAudio && hasAudioSearch)) {
-            rightNavigationButton = searchButtonNode.flatMap { ItemListNavigationButton(content: .node($0), style: .regular, enabled: true, action: {}) }
+            if ClassicDesign.isEnabled {
+                if !state.searching && !isSelectionActive {
+                    rightNavigationButton = ItemListNavigationButton(content: .icon(.search), style: .regular, enabled: true, action: {
+                        updateState { state in
+                            var updatedState = state
+                            updatedState.searching = true
+                            return updatedState
+                        }
+                        updateTabBarVisibilityImpl?(false)
+                        updateIsSearchingImpl?(true)
+                    })
+                }
+            } else {
+                rightNavigationButton = searchButtonNode.flatMap { ItemListNavigationButton(content: .node($0), style: .regular, enabled: true, action: {}) }
+            }
         }
 
         let title: String
@@ -1051,6 +1070,9 @@ public func makeAttachmentFileControllerImpl(
     if case let .audio(audioMode) = mode, audioMode != .chat {
         controller.hasBottomEdgeEffect = false
     }
+    if ClassicDesign.isEnabled {
+        controller.hasBottomEdgeEffect = false
+    }
     
     updateIsSearchingImpl = { [weak controller] isSearching in
         controller?.isSearching = isSearching
@@ -1130,10 +1152,10 @@ private final class MessageContextExtractedContentSource: ContextExtractedConten
     }
 
     func takeView() -> ContextControllerTakeViewInfo? {
-        return ContextControllerTakeViewInfo(containingItem: .node(self.sourceNode), contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerTakeViewInfo(containingItem: .node(self.sourceNode), contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 
     func putBack() -> ContextControllerPutBackViewInfo? {
-        return ContextControllerPutBackViewInfo(contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerPutBackViewInfo(contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 }

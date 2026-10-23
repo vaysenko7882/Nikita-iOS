@@ -239,4 +239,124 @@ final class GhostModeTests: XCTestCase {
         XCTAssertEqual(marker.previousThreadReadState, snapshot)
         XCTAssertEqual(marker.threadId, 77)
     }
+
+    func testResetPlanRollsBackPeerThreadAndStoryMarkers() {
+        let chatMarker = self.peerMarker(peerId: PeerId(1), snapshot: GhostModePreviousReadState(
+            maxIncomingReadId: 10,
+            maxOutgoingReadId: 8,
+            maxKnownId: 15,
+            count: 5,
+            markedUnread: true
+        ))
+        let topicMarker = self.threadMarker(peerId: PeerId(2), threadId: 77, snapshot: GhostModePreviousThreadReadState(
+            maxIncomingReadId: 20,
+            maxKnownMessageId: 25,
+            incomingUnreadCount: 3,
+            markedUnread: false
+        ))
+        let seenStoryMarker = self.storyMarker(peerId: PeerId(3), previousStoryReadId: 42)
+
+        let plan = ghostModeResetPlan(
+            markers: [chatMarker, topicMarker, seenStoryMarker],
+            includeMessages: true,
+            includeStories: true
+        )
+
+        XCTAssertEqual(plan.peerRollbacks.map { $0.peerId }, [PeerId(1)])
+        XCTAssertEqual(plan.peerRollbacks.first?.readState, chatMarker.previousReadState)
+        XCTAssertEqual(plan.threadRollbacks.map { $0.threadId }, [77])
+        XCTAssertEqual(plan.threadRollbacks.first?.readState, topicMarker.previousThreadReadState)
+        XCTAssertEqual(plan.storyRollbacks.map { $0.maxReadId }, [42])
+        XCTAssertTrue(plan.peersNeedingServerState.isEmpty)
+        XCTAssertEqual(plan.consumedMarkers.count, 3)
+        XCTAssertFalse(plan.isEmpty)
+    }
+
+    func testResetPlanRoutesSnapshotlessPeerMarkerToServer() {
+        let marker = peerMarker(peerId: PeerId(1), snapshot: nil)
+
+        let plan = ghostModeResetPlan(markers: [marker], includeMessages: true, includeStories: true)
+
+        XCTAssertTrue(plan.peerRollbacks.isEmpty)
+        XCTAssertEqual(plan.peersNeedingServerState, [PeerId(1)])
+        XCTAssertEqual(plan.consumedMarkers, [marker])
+    }
+
+    func testResetPlanKeepsStoryMarkersWhenOnlyMessagesRestore() {
+        let messages = peerMarker(peerId: PeerId(1), snapshot: GhostModePreviousReadState(
+            maxIncomingReadId: 10,
+            maxOutgoingReadId: 8,
+            maxKnownId: 15,
+            count: 5,
+            markedUnread: false
+        ))
+        let stories = storyMarker(peerId: PeerId(3), previousStoryReadId: 42)
+
+        let plan = ghostModeResetPlan(markers: [messages, stories], includeMessages: true, includeStories: false)
+
+        XCTAssertTrue(plan.storyRollbacks.isEmpty)
+        XCTAssertEqual(plan.consumedMarkers, [messages])
+    }
+
+    func testResetPlanKeepsMessageMarkersWhenOnlyStoriesRestore() {
+        let messages = peerMarker(peerId: PeerId(1), snapshot: GhostModePreviousReadState(
+            maxIncomingReadId: 10,
+            maxOutgoingReadId: 8,
+            maxKnownId: 15,
+            count: 5,
+            markedUnread: false
+        ))
+        let stories = storyMarker(peerId: PeerId(3), previousStoryReadId: 42)
+
+        let plan = ghostModeResetPlan(markers: [messages, stories], includeMessages: false, includeStories: true)
+
+        XCTAssertTrue(plan.peerRollbacks.isEmpty)
+        XCTAssertTrue(plan.peersNeedingServerState.isEmpty)
+        XCTAssertEqual(plan.consumedMarkers, [stories])
+    }
+
+    func testResetPlanIsEmptyWithoutMarkers() {
+        let plan = ghostModeResetPlan(markers: [], includeMessages: true, includeStories: true)
+
+        XCTAssertTrue(plan.isEmpty)
+    }
+
+    private func peerMarker(peerId: PeerId, snapshot: GhostModePreviousReadState?) -> GhostModeReadStateMarker {
+        return GhostModeReadStateMarker(
+            peerId: peerId,
+            threadId: nil,
+            namespace: Namespaces.Message.Cloud,
+            maxReadIndex: MessageIndex(
+                id: MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: 15),
+                timestamp: 100
+            ),
+            previousReadState: snapshot
+        )
+    }
+
+    private func threadMarker(peerId: PeerId, threadId: Int64, snapshot: GhostModePreviousThreadReadState?) -> GhostModeReadStateMarker {
+        return GhostModeReadStateMarker(
+            peerId: peerId,
+            threadId: threadId,
+            namespace: Namespaces.Message.Cloud,
+            maxReadIndex: MessageIndex(
+                id: MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: 25),
+                timestamp: 200
+            ),
+            previousThreadReadState: snapshot
+        )
+    }
+
+    private func storyMarker(peerId: PeerId, previousStoryReadId: Int32?) -> GhostModeReadStateMarker {
+        return GhostModeReadStateMarker(
+            peerId: peerId,
+            threadId: nil,
+            namespace: ghostModeStoryNamespace,
+            maxReadIndex: MessageIndex(
+                id: MessageId(peerId: peerId, namespace: ghostModeStoryNamespace, id: 55),
+                timestamp: 0
+            ),
+            previousStoryReadId: previousStoryReadId
+        )
+    }
 }

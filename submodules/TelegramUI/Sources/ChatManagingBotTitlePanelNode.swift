@@ -1,5 +1,4 @@
 import Foundation
-import Postbox
 import UIKit
 import Display
 import AsyncDisplayKit
@@ -99,9 +98,9 @@ private final class ChatManagingBotTitlePanelComponent: Component {
             let topInset: CGFloat = 6.0
             let bottomInset: CGFloat = 6.0
             let avatarDiameter: CGFloat = 36.0
-            let avatarTextSpacing: CGFloat = 8.0
+            let avatarTextSpacing: CGFloat = ClassicDesign.isEnabled ? 10.0 : 8.0
             let titleTextSpacing: CGFloat = 1.0
-            let leftInset: CGFloat = component.insets.left + 6.0
+            let leftInset: CGFloat = component.insets.left + (ClassicDesign.isEnabled ? 12.0 : 6.0)
             let rightInset: CGFloat = component.insets.right + 10.0
             let actionAndSettingsButtonsSpacing: CGFloat = 8.0
             
@@ -136,7 +135,7 @@ private final class ChatManagingBotTitlePanelComponent: Component {
                 component: AnyComponent(PlainButtonComponent(
                     content: AnyComponent(BundleIconComponent(
                         name: "Chat/Context Menu/Customize",
-                        tintColor: component.theme.chat.inputPanel.panelControlColor
+                        tintColor: ClassicDesign.isEnabled ? component.theme.rootController.navigationBar.controlColor : component.theme.chat.inputPanel.panelControlColor
                     )),
                     effectAlignment: .center,
                     minSize: CGSize(width: 1.0, height: 40.0),
@@ -166,7 +165,7 @@ private final class ChatManagingBotTitlePanelComponent: Component {
             let titleSize = self.title.update(
                 transition: .immediate,
                 component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(string: component.peer.displayTitle(strings: component.strings, displayOrder: .firstLast), font: Font.semibold(16.0), textColor: component.theme.chat.inputPanel.panelControlColor))
+                    text: .plain(NSAttributedString(string: component.peer.displayTitle(strings: component.strings, displayOrder: .firstLast), font: Font.semibold(16.0), textColor: ClassicDesign.isEnabled ? component.theme.rootController.navigationBar.primaryTextColor : component.theme.chat.inputPanel.panelControlColor))
                 )),
                 environment: {},
                 containerSize: CGSize(width: maxTextWidth, height: 100.0)
@@ -180,7 +179,7 @@ private final class ChatManagingBotTitlePanelComponent: Component {
             let textSize = self.text.update(
                 transition: .immediate,
                 component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(string: textValue, font: Font.regular(14.0), textColor: component.theme.rootController.navigationBar.secondaryTextColor))
+                    text: .plain(NSAttributedString(string: textValue, font: Font.regular(ClassicDesign.isEnabled ? 15.0 : 14.0), textColor: component.theme.rootController.navigationBar.secondaryTextColor))
                 )),
                 environment: {},
                 containerSize: CGSize(width: maxTextWidth, height: 100.0)
@@ -463,6 +462,6 @@ private final class HeaderContextReferenceContentSource: ContextReferenceContent
     }
 
     func transitionInfo() -> ContextControllerReferenceViewInfo? {
-        return ContextControllerReferenceViewInfo(referenceView: self.sourceView, contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerReferenceViewInfo(referenceView: self.sourceView, contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 }

@@ -36,11 +36,12 @@ public struct MessageFilterSettings: Codable, Equatable {
         return self.shadowBannedPeerIds.contains(authorId)
     }
 
-    public func paginationAnchor<T>(visible: T?, unfiltered: T?) -> T? {
-        if self.isActive {
-            return unfiltered ?? visible
-        } else {
-            return visible
+    public func visibleNotificationMessages<Item>(_ messages: [Item], authorIds: (Item) -> [Int64]) -> [Item] {
+        if !self.isActive {
+            return messages
+        }
+        return messages.filter { message in
+            return !authorIds(message).contains(where: { self.hidesMessages(fromAuthorId: $0) })
         }
     }
 }

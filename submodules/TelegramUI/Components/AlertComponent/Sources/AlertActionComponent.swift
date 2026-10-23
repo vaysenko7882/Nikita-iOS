@@ -12,11 +12,14 @@ import ActivityIndicatorComponent
 
 private let titleFont = Font.medium(17.0)
 private let boldTitleFont = Font.semibold(17.0)
+private let classicTitleFont = Font.regular(17.0)
+private let classicBoldTitleFont = Font.semibold(17.0)
 
 final class AlertActionComponent: Component {
     typealias EnvironmentType = AlertComponentEnvironment
     
     static let actionHeight: CGFloat = 48.0
+    static let classicActionHeight: CGFloat = 44.0
     
     struct Theme: Equatable {
         enum Font {
@@ -126,13 +129,25 @@ final class AlertActionComponent: Component {
             self.component = component
             self.state = state
             
-            let attributedString = NSMutableAttributedString(string: component.title, font: component.theme.font == .bold ? boldTitleFont : titleFont, textColor: .white, paragraphAlignment: .center)
+            let isClassic = ClassicDesign.isEnabled
+            let effectiveTitleFont: UIFont
+            if isClassic {
+                effectiveTitleFont = component.theme.font == .bold ? classicBoldTitleFont : classicTitleFont
+            } else {
+                effectiveTitleFont = component.theme.font == .bold ? boldTitleFont : titleFont
+            }
+            let attributedString = NSMutableAttributedString(string: component.title, font: effectiveTitleFont, textColor: .white, paragraphAlignment: .center)
             if let range = attributedString.string.range(of: "$") {
                 attributedString.addAttribute(.attachment, value: UIImage(bundleImageName: "Item List/PremiumIcon")!, range: NSRange(range, in: attributedString.string))
                 attributedString.addAttribute(.foregroundColor, value: UIColor.white, range: NSRange(range, in: attributedString.string))
                 attributedString.addAttribute(.baselineOffset, value: 2.0, range: NSRange(range, in: attributedString.string))
             }
                   
+            var titleColor = component.theme.foreground
+            if isClassic && !self.isEnabled {
+                titleColor = environment[AlertComponentEnvironment.self].theme.actionSheet.disabledActionTextColor
+            }
+
             let titlePadding: CGFloat = 16.0
             let titleSize = self.title.update(
                 transition: .immediate,
@@ -140,7 +155,7 @@ final class AlertActionComponent: Component {
                     text: .plain(attributedString),
                     horizontalAlignment: .center,
                     maximumNumberOfLines: 1,
-                    tintColor: component.theme.foreground
+                    tintColor: titleColor
                 )),
                 environment: {},
                 containerSize: CGSize(width: availableSize.width - titlePadding * 2.0, height: availableSize.height)
@@ -180,16 +195,22 @@ final class AlertActionComponent: Component {
                 }
             }
             
-            let buttonAlpha: CGFloat
-            if self.isEnabled {
-                buttonAlpha = component.isHighlighted ? 0.35 : 1.0
+            if isClassic {
+                transition.setBackgroundColor(view: self.backgroundView, color: component.theme.background)
+                transition.setAlpha(view: self.backgroundView, alpha: (self.isEnabled && component.isHighlighted) ? 1.0 : 0.0)
+                self.backgroundView.layer.cornerRadius = 0.0
             } else {
-                buttonAlpha = 0.2
+                let buttonAlpha: CGFloat
+                if self.isEnabled {
+                    buttonAlpha = component.isHighlighted ? 0.35 : 1.0
+                } else {
+                    buttonAlpha = 0.2
+                }
+                
+                transition.setBackgroundColor(view: self.backgroundView, color: component.theme.background)
+                transition.setAlpha(view: self.backgroundView, alpha: buttonAlpha)
+                self.backgroundView.layer.cornerRadius = availableSize.height * 0.5
             }
-            
-            transition.setBackgroundColor(view: self.backgroundView, color: component.theme.background)
-            transition.setAlpha(view: self.backgroundView, alpha: buttonAlpha)
-            self.backgroundView.layer.cornerRadius = availableSize.height * 0.5
             
             return CGSize(width: titleSize.width + titlePadding * 2.0, height: availableSize.height)
         }

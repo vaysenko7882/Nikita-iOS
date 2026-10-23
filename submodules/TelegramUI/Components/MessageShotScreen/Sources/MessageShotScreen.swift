@@ -4,7 +4,6 @@ import Photos
 import AsyncDisplayKit
 import Display
 import SwiftSignalKit
-import Postbox
 import TelegramCore
 import TelegramPresentationData
 import AccountContext
@@ -18,6 +17,20 @@ public struct MessageShotOptions: Equatable {
     public var showDateHeader: Bool = true
     public var showReactions: Bool = true
     public var revealSpoilers: Bool = false
+}
+
+private let messageShotTimezoneOffset: Int32 = {
+    let nowTimestamp = Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
+    var now: time_t = time_t(nowTimestamp)
+    var timeinfoNow: tm = tm()
+    localtime_r(&now, &timeinfoNow)
+    return Int32(timeinfoNow.tm_gmtoff)
+}()
+
+private let messageShotDayGranularity: Int32 = 60 * 60 * 24
+
+private func messageShotDayTimestamp(_ timestamp: Int32) -> Int32 {
+    return ((timestamp + messageShotTimezoneOffset) / messageShotDayGranularity) * messageShotDayGranularity
 }
 
 private enum MessageShotToggle: Int, CaseIterable {
@@ -111,7 +124,7 @@ private final class MessageShotScreenNode: ASDisplayNode {
     private let wallpaperBackgroundNode: WallpaperBackgroundNode
     private let messagesContainerNode: ASDisplayNode
     private var messageNodes: [ListViewItemNode]?
-    private var dateHeaderNode: ListViewItemHeaderNode?
+    private var dateHeaderNodes: [ListViewItemHeaderNode] = []
     private var avatarHeaderNodes: [ListViewItemHeaderNode] = []
 
     private let panelNode: ASDisplayNode
@@ -237,8 +250,10 @@ private final class MessageShotScreenNode: ASDisplayNode {
             }
             self.messageNodes = nil
         }
-        self.dateHeaderNode?.removeFromSupernode()
-        self.dateHeaderNode = nil
+        for node in self.dateHeaderNodes {
+            node.removeFromSupernode()
+        }
+        self.dateHeaderNodes.removeAll()
         for node in self.avatarHeaderNodes {
             node.removeFromSupernode()
         }
@@ -305,7 +320,7 @@ private final class MessageShotScreenNode: ASDisplayNode {
             let displayMessages = group.map(self.displayMessage)
             items.append(self.context.sharedContext.makeChatMessagePreviewItem(
                 context: self.context,
-                messages: displayMessages.map { $0._asMessage() },
+                messages: displayMessages,
                 theme: theme,
                 strings: presentationData.strings,
                 wallpaper: presentationData.chatWallpaper,
@@ -324,6 +339,8 @@ private final class MessageShotScreenNode: ASDisplayNode {
                 isStandalone: false,
                 rank: nil,
                 rankRole: nil,
+                isGiftMessageComposerPreview: false,
+                activateGiftMessageInput: nil,
                 alwaysDisplayAuthorInfo: self.options.showAvatar
             ))
         }
@@ -334,27 +351,31 @@ private final class MessageShotScreenNode: ASDisplayNode {
         if let messageNodes = self.messageNodes {
             for i in 0 ..< items.count {
                 let itemNode = messageNodes[i]
-                let previousItem = i == items.count - 1 ? nil : items[i + 1]
-                let nextItem = i == 0 ? nil : items[i - 1]
+                let neighbors = ListViewItemNeighbors(
+                    previous: i == items.count - 1 ? nil : items[i + 1].neighborDescriptor,
+                    next: i == 0 ? nil : items[i - 1].neighborDescriptor
+                )
                 items[i].updateNode(async: { $0() }, node: {
                     return itemNode
-                }, params: params, previousItem: previousItem, nextItem: nextItem, animation: .None, completion: { (itemLayout, apply) in
+                }, params: params, neighbors: neighbors, animation: .None, completion: { (itemLayout, apply) in
                     itemNode.contentSize = itemLayout.contentSize
                     itemNode.insets = itemLayout.insets
                     itemNode.frame = CGRect(origin: itemNode.frame.origin, size: CGSize(width: contentWidth, height: itemLayout.size.height))
                     itemNode.isUserInteractionEnabled = false
-                    apply(ListViewItemApply(isOnScreen: true))
+                    apply(ListViewItemApply())
                 })
             }
         } else {
             var messageNodes: [ListViewItemNode] = []
             for i in 0 ..< items.count {
                 var itemNode: ListViewItemNode?
-                let previousItem = i == items.count - 1 ? nil : items[i + 1]
-                let nextItem = i == 0 ? nil : items[i - 1]
-                items[i].nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: true, previousItem: previousItem, nextItem: nextItem, completion: { node, apply in
+                let neighbors = ListViewItemNeighbors(
+                    previous: i == items.count - 1 ? nil : items[i + 1].neighborDescriptor,
+                    next: i == 0 ? nil : items[i - 1].neighborDescriptor
+                )
+                items[i].nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: true, neighbors: neighbors, completion: { node, apply in
                     itemNode = node
-                    apply().1(ListViewItemApply(isOnScreen: true))
+                    apply().1(ListViewItemApply())
                 })
                 if let itemNode {
                     itemNode.subnodeTransform = CATransform3DMakeScale(-1.0, 1.0, 1.0)
@@ -366,16 +387,78 @@ private final class MessageShotScreenNode: ASDisplayNode {
             self.messageNodes = messageNodes
         }
 
+        var dateHeaderItems: [Int: ListViewItemHeader] = [:]
+        if self.options.showDateHeader {
+            var previousDay: Int32?
+            for index in groupedMessages.indices {
+                guard let message = groupedMessages[index].first else {
+                    continue
+                }
+                let day = messageShotDayTimestamp(message.timestamp)
+                if previousDay != day {
+                    dateHeaderItems[index] = self.context.sharedContext.makeChatMessageDateHeaderItem(
+                        context: self.context,
+                        timestamp: message.timestamp,
+                        theme: theme,
+                        strings: presentationData.strings,
+                        wallpaper: presentationData.chatWallpaper,
+                        fontSize: presentationData.chatFontSize,
+                        chatBubbleCorners: presentationData.chatBubbleCorners,
+                        dateTimeFormat: presentationData.dateTimeFormat,
+                        nameOrder: presentationData.nameDisplayOrder
+                    )
+                }
+                previousDay = day
+            }
+        }
+
+        let dateHeaderGroupIndices = dateHeaderItems.keys.sorted()
+        if self.dateHeaderNodes.count != dateHeaderGroupIndices.count {
+            for node in self.dateHeaderNodes {
+                node.removeFromSupernode()
+            }
+            self.dateHeaderNodes.removeAll()
+        }
+        var dateHeaderNodesByGroupIndex: [Int: ListViewItemHeaderNode] = [:]
+        for (position, groupIndex) in dateHeaderGroupIndices.enumerated() {
+            guard let headerItem = dateHeaderItems[groupIndex] else {
+                continue
+            }
+            let headerNode: ListViewItemHeaderNode
+            if position < self.dateHeaderNodes.count {
+                headerNode = self.dateHeaderNodes[position]
+                headerItem.updateNode(headerNode, previous: nil, next: headerItem)
+            } else {
+                headerNode = headerItem.node(synchronousLoad: true)
+                headerNode.subnodeTransform = CATransform3DMakeScale(-1.0, 1.0, 1.0)
+                self.messagesContainerNode.addSubnode(headerNode)
+                self.dateHeaderNodes.append(headerNode)
+            }
+            dateHeaderNodesByGroupIndex[groupIndex] = headerNode
+        }
+
         var bottomOffset: CGFloat = 10.0
         var minY: CGFloat = .greatestFiniteMagnitude
         var maxY: CGFloat = 0.0
         if let messageNodes = self.messageNodes {
-            for itemNode in messageNodes.reversed() {
+            for index in stride(from: messageNodes.count - 1, through: 0, by: -1) {
+                let itemNode = messageNodes[index]
                 let itemFrame = CGRect(origin: CGPoint(x: 0.0, y: bottomOffset), size: itemNode.frame.size)
                 transition.updateFrame(node: itemNode, frame: itemFrame)
                 minY = min(minY, itemFrame.minY)
                 maxY = max(maxY, itemFrame.maxY)
                 bottomOffset += itemNode.frame.height
+
+                if let headerItem = dateHeaderItems[index], let headerNode = dateHeaderNodesByGroupIndex[index] {
+                    let headerFrame = CGRect(
+                        origin: CGPoint(x: 0.0, y: bottomOffset),
+                        size: CGSize(width: containerSize.width, height: headerItem.height)
+                    )
+                    transition.updateFrame(node: headerNode, frame: headerFrame)
+                    headerNode.updateLayout(size: containerSize, leftInset: 0.0, rightInset: 0.0, transition: .immediate)
+                    maxY = max(maxY, headerFrame.maxY)
+                    bottomOffset += headerItem.height
+                }
             }
         }
 
@@ -409,8 +492,8 @@ private final class MessageShotScreenNode: ASDisplayNode {
                 let avatarHeaderItem = self.context.sharedContext.makeChatMessageAvatarHeaderItem(
                     context: self.context,
                     timestamp: avatarMessage.message.timestamp,
-                    peer: author._asPeer(),
-                    message: avatarMessage.message._asMessage(),
+                    peer: author,
+                    message: avatarMessage.message,
                     theme: theme,
                     strings: presentationData.strings,
                     wallpaper: presentationData.chatWallpaper,
@@ -445,35 +528,6 @@ private final class MessageShotScreenNode: ASDisplayNode {
                 node.removeFromSupernode()
             }
             self.avatarHeaderNodes.removeAll()
-        }
-
-        if self.options.showDateHeader, let firstMessage = self.messages.first {
-            let headerItem = self.context.sharedContext.makeChatMessageDateHeaderItem(
-                context: self.context,
-                timestamp: firstMessage.timestamp,
-                theme: theme,
-                strings: presentationData.strings,
-                wallpaper: presentationData.chatWallpaper,
-                fontSize: presentationData.chatFontSize,
-                chatBubbleCorners: presentationData.chatBubbleCorners,
-                dateTimeFormat: presentationData.dateTimeFormat,
-                nameOrder: presentationData.nameDisplayOrder
-            )
-            let dateHeaderNode: ListViewItemHeaderNode
-            if let current = self.dateHeaderNode {
-                dateHeaderNode = current
-                headerItem.updateNode(dateHeaderNode, previous: nil, next: headerItem)
-            } else {
-                dateHeaderNode = headerItem.node(synchronousLoad: true)
-                dateHeaderNode.subnodeTransform = CATransform3DMakeScale(-1.0, 1.0, 1.0)
-                self.messagesContainerNode.addSubnode(dateHeaderNode)
-                self.dateHeaderNode = dateHeaderNode
-            }
-            let headerFrame = CGRect(origin: CGPoint(x: 0.0, y: bottomOffset), size: CGSize(width: containerSize.width, height: headerItem.height))
-            transition.updateFrame(node: dateHeaderNode, frame: headerFrame)
-            dateHeaderNode.updateLayout(size: containerSize, leftInset: 0.0, rightInset: 0.0, transition: .immediate)
-            maxY = max(maxY, headerFrame.maxY)
-            bottomOffset += headerItem.height
         }
 
         let contentHeight = max(containerSize.height, maxY + 10.0)

@@ -16,8 +16,6 @@ import TelegramStringFormatting
 import ChatTimerScreen
 import NotificationPeerExceptionController
 
-/// Running "delete all my messages" operations, keyed by "accountPeerId:peerId". Main queue only.
-/// Held globally so deletion survives menu/controller dismissal and repeated launches are blocked.
 private var deleteAllOwnMessagesDisposables: [String: MetaDisposable] = [:]
 
 private func startDeleteAllOwnMessages(context: AccountContext, peerId: EnginePeer.Id, peerTitle: String, chatListController: ChatListControllerImpl?) {
@@ -79,21 +77,30 @@ func archiveContextMenuItems(context: AccountContext, group: EngineChatList.Grou
     let presentationData = context.sharedContext.currentPresentationData.with({ $0 })
     let strings = presentationData.strings
     return combineLatest(
-        context.engine.messages.unreadChatListPeerIds(groupId: group, filterPredicate: nil),
+        context.engine.messages.markAllChatsAsReadState(items: [(groupId: group, filterPredicate: nil)]),
         context.engine.data.get(
             TelegramEngine.EngineData.Item.Configuration.ApplicationSpecificPreference(key: ApplicationSpecificPreferencesKeys.chatArchiveSettings)
-        )
+        ),
+        context.engine.messages.ghostModeSettings() |> take(1)
     )
-    |> map { [weak chatListController] unreadChatListPeerIds, chatArchiveSettingsPreference -> [ContextMenuItem] in
+    |> map { [weak chatListController] readState, chatArchiveSettingsPreference, ghostModeSettings -> [ContextMenuItem] in
         var items: [ContextMenuItem] = []
         
-        if !unreadChatListPeerIds.isEmpty {
-            items.append(.action(ContextMenuActionItem(text: strings.ChatList_Context_MarkAllAsRead, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/MarkAsRead"), color: theme.contextMenu.primaryColor) }, action: { _, f in
-                let _ = (context.engine.messages.markAllChatsAsReadInteractively(items: [(groupId: group, filterPredicate: nil)])
-                |> deliverOnMainQueue).startStandalone(completed: {
-                    f(.default)
-                })
-            })))
+        if readState.hasLocalUnread || readState.hasServerUnread {
+            let markAllAsRead: (String, MarkAllChatsAsReadMode) -> ContextMenuItem = { title, mode in
+                return .action(ContextMenuActionItem(text: title, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/MarkAsRead"), color: theme.contextMenu.primaryColor) }, action: { _, f in
+                    let _ = (context.engine.messages.markAllChatsAsReadInteractively(items: [(groupId: group, filterPredicate: nil)], mode: mode)
+                    |> deliverOnMainQueue).startStandalone(completed: {
+                        f(.default)
+                    })
+                }))
+            }
+            if ghostModeSettings.hidesMessageReadReceipts {
+                items.append(markAllAsRead(strings.localFeatures.ghostMode.readAllLocally, .localOnly))
+                items.append(markAllAsRead(strings.localFeatures.ghostMode.readAllOnServer, .server))
+            } else {
+                items.append(markAllAsRead(strings.ChatList_Context_MarkAllAsRead, .server))
+            }
         }
         
         let settings = chatArchiveSettingsPreference?.get(ChatArchiveSettings.self) ?? ChatArchiveSettings.default
@@ -154,9 +161,7 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
     )
     |> mapToSignal { peerGroup, recentlySearchedPeers, limitsData -> Signal<[ContextMenuItem], NoError> in
         let location: TogglePeerChatPinnedLocation
-        var chatListFilter: ChatListFilter?
         if case let .chatList(filter) = source, let chatFilter = filter {
-            chatListFilter = chatFilter
             location = .filter(chatFilter.id)
         } else {
             if let peerGroup = peerGroup {
@@ -177,7 +182,7 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
             let renderedPeer = context.engine.data.get(TelegramEngine.EngineData.Item.Peer.RenderedPeer(id: peerId))
             
             return renderedPeer
-            |> mapToSignal { renderedPeer -> Signal<[ContextMenuItem], NoError> in
+            |> mapToSignal { [chatListController] renderedPeer -> Signal<[ContextMenuItem], NoError> in
                 guard let renderedPeer = renderedPeer else {
                     return .single([])
                 }
@@ -274,8 +279,15 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
                             isCommunity = false
                         }
                         
+                        // A folder's include/exclude lists are matched against a peer's identity-overriding
+                        // associated peer (ChatListFilterPredicate.includes), so a secret chat's own id can
+                        // never match one: adding or removing it would write an entry that changes nothing
+                        // and then report success. Pinning is unaffected, since pinnedPeerIds is matched
+                        // against the raw peer id.
+                        let canEditFolderMembership = peerId.namespace != Namespaces.Peer.SecretChat
+
                         var hasRemoveFromFolder = false
-                        if case let .chatList(currentFilter) = source {
+                        if canEditFolderMembership, case let .chatList(currentFilter) = source {
                             if let currentFilter = currentFilter, case let .filter(id, title, emoticon, data) = currentFilter {
                                 items.append(.action(ContextMenuActionItem(text: strings.ChatList_Context_RemoveFromFolder, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/RemoveFromFolder"), color: theme.contextMenu.primaryColor) }, action: { c, _ in
                                     let _ = (context.engine.peers.updateChatListFiltersInteractively { filters in
@@ -302,7 +314,7 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
                             }
                         }
                         
-                        if !hasRemoveFromFolder && peerGroup != nil {
+                        if canEditFolderMembership && !hasRemoveFromFolder && peerGroup != nil {
                             var hasFolders = false
                             
                             for case let .filter(_, _, _, data) in filters {
@@ -464,58 +476,56 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
                                 })))
                             }
                             
-                            if isPinned || chatListFilter == nil || peerId.namespace != Namespaces.Peer.SecretChat {
-                                items.append(.action(ContextMenuActionItem(text: isPinned ? strings.ChatList_Context_Unpin : strings.ChatList_Context_Pin, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: isPinned ? "Chat/Context Menu/Unpin" : "Chat/Context Menu/Pin"), color: theme.contextMenu.primaryColor) }, action: { c, f in
-                                    let _ = (context.engine.peers.toggleItemPinned(location: location, itemId: .peer(peerId))
-                                             |> deliverOnMainQueue).startStandalone(next: { result in
-                                        switch result {
-                                        case .done:
-                                            f(.default)
-                                        case let .limitExceeded(count, _):
-                                            f(.default)
-                                            
-                                            let isPremium = limitsData.0?.isPremium ?? false
-                                            if isPremium {
-                                                if case .filter = location {
-                                                    let controller = PremiumLimitScreen(context: context, subject: .chatsPerFolder, count: Int32(count), action: {
-                                                        return true
-                                                    })
-                                                    chatListController?.push(controller)
-                                                } else {
-                                                    let controller = PremiumLimitScreen(context: context, subject: .pins, count: Int32(count), action: {
-                                                        return true
-                                                    })
-                                                    chatListController?.push(controller)
+                            items.append(.action(ContextMenuActionItem(text: isPinned ? strings.ChatList_Context_Unpin : strings.ChatList_Context_Pin, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: isPinned ? "Chat/Context Menu/Unpin" : "Chat/Context Menu/Pin"), color: theme.contextMenu.primaryColor) }, action: { c, f in
+                                let _ = (context.engine.peers.toggleItemPinned(location: location, itemId: .peer(peerId))
+                                         |> deliverOnMainQueue).startStandalone(next: { result in
+                                    switch result {
+                                    case .done:
+                                        f(.default)
+                                    case let .limitExceeded(count, _):
+                                        f(.default)
+                                        
+                                        let isPremium = limitsData.0?.isPremium ?? false
+                                        if isPremium {
+                                            if case .filter = location {
+                                                let controller = PremiumLimitScreen(context: context, subject: .chatsPerFolder, count: Int32(count), action: {
+                                                    return true
+                                                })
+                                                chatListController?.push(controller)
+                                            } else {
+                                                let controller = PremiumLimitScreen(context: context, subject: .pins, count: Int32(count), action: {
+                                                    return true
+                                                })
+                                                chatListController?.push(controller)
+                                            }
+                                        } else {
+                                            if case .filter = location {
+                                                var replaceImpl: ((ViewController) -> Void)?
+                                                let controller = PremiumLimitScreen(context: context, subject: .chatsPerFolder, count: Int32(count), action: {
+                                                    let premiumScreen = PremiumIntroScreen(context: context, source: .pinnedChats)
+                                                    replaceImpl?(premiumScreen)
+                                                    return true
+                                                })
+                                                chatListController?.push(controller)
+                                                replaceImpl = { [weak controller] c in
+                                                    controller?.replace(with: c)
                                                 }
                                             } else {
-                                                if case .filter = location {
-                                                    var replaceImpl: ((ViewController) -> Void)?
-                                                    let controller = PremiumLimitScreen(context: context, subject: .chatsPerFolder, count: Int32(count), action: {
-                                                        let premiumScreen = PremiumIntroScreen(context: context, source: .pinnedChats)
-                                                        replaceImpl?(premiumScreen)
-                                                        return true
-                                                    })
-                                                    chatListController?.push(controller)
-                                                    replaceImpl = { [weak controller] c in
-                                                        controller?.replace(with: c)
-                                                    }
-                                                } else {
-                                                    var replaceImpl: ((ViewController) -> Void)?
-                                                    let controller = PremiumLimitScreen(context: context, subject: .pins, count: Int32(count), action: {
-                                                        let premiumScreen = PremiumIntroScreen(context: context, source: .pinnedChats)
-                                                        replaceImpl?(premiumScreen)
-                                                        return true
-                                                    })
-                                                    chatListController?.push(controller)
-                                                    replaceImpl = { [weak controller] c in
-                                                        controller?.replace(with: c)
-                                                    }
+                                                var replaceImpl: ((ViewController) -> Void)?
+                                                let controller = PremiumLimitScreen(context: context, subject: .pins, count: Int32(count), action: {
+                                                    let premiumScreen = PremiumIntroScreen(context: context, source: .pinnedChats)
+                                                    replaceImpl?(premiumScreen)
+                                                    return true
+                                                })
+                                                chatListController?.push(controller)
+                                                replaceImpl = { [weak controller] c in
+                                                    controller?.replace(with: c)
                                                 }
                                             }
                                         }
-                                    })
-                                })))
-                            }
+                                    }
+                                })
+                            })))
                             
                             if !isSavedMessages {
                                 let isMuted = chatContextMenuPeerIsMuted(peer: peer, notificationSettings: notificationSettings, globalNotificationSettings: globalNotificationSettings)
@@ -617,7 +627,6 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
                             }
                         }
 
-                        // peer.id == peerId excludes secret chats (their list entry resolves to the underlying user).
                         var canDeleteOwnMessages = false
                         if peer.id == peerId {
                             switch peer {
@@ -718,7 +727,7 @@ public func chatForumTopicMenuItems(context: AccountContext, peerId: EnginePeer.
         TelegramEngine.EngineData.Item.Peer.ThreadData(id: peerId, threadId: threadId),
         TelegramEngine.EngineData.Item.NotificationSettings.Global()
     )
-    |> mapToSignal { peer, peerNotificationSettings, threadData, globalNotificationSettings -> Signal<[ContextMenuItem], NoError> in
+    |> mapToSignal { [chatListController] peer, peerNotificationSettings, threadData, globalNotificationSettings -> Signal<[ContextMenuItem], NoError> in
         guard let peer else {
             return .single([])
         }

@@ -50,7 +50,7 @@ public final class ChatRecentActionsController: TelegramBaseController {
         
         self.titleView = ChatNavigationBarTitleView(frame: CGRect())
         
-        super.init(context: context, navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData, hideBackground: false, hideBadge: false, style: .glass, glassStyle: .default))
+        super.init(context: context, navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData, hideBackground: false, hideBadge: false, glassStyle: .default))
 
         self._hasGlassStyle = true
         
@@ -103,6 +103,7 @@ public final class ChatRecentActionsController: TelegramBaseController {
         }, beginMediaRecording: { _ in
         }, finishMediaRecording: { _ in
         }, stopMediaRecording: {
+        }, stopIncomingStreamingMessage: {
         }, lockMediaRecording: {
         }, resumeMediaRecording: {
         }, deleteRecordedMedia: {
@@ -197,7 +198,7 @@ public final class ChatRecentActionsController: TelegramBaseController {
         
         self.navigationItem.titleView = self.titleView
         
-        let rightBarButton = ChatNavigationButton(action: .search(hasTags: false), buttonItem: UIBarButtonItem(image: PresentationResourcesRootController.navigationSearchIcon(self.presentationData.theme), style: .plain, target: self, action: #selector(self.activateSearch)))
+        let rightBarButton = ChatNavigationButton(action: .search(hasTags: false), buttonItem: UIBarButtonItem(image: ClassicDesign.isEnabled ? PresentationResourcesRootController.navigationSearchIcon(self.presentationData.theme)?.withRenderingMode(.alwaysTemplate) : PresentationResourcesRootController.navigationSearchIcon(self.presentationData.theme), style: .plain, target: self, action: #selector(self.activateSearch)))
         self.rightBarButton = rightBarButton
         
         self.updateTitle()
@@ -267,7 +268,7 @@ public final class ChatRecentActionsController: TelegramBaseController {
         self.updatePreferredGlassType()
         self.updateTitle()
         
-        let rightButton = ChatNavigationButton(action: .search(hasTags: false), buttonItem: UIBarButtonItem(image: PresentationResourcesRootController.navigationSearchIcon(self.presentationData.theme), style: .plain, target: self, action: #selector(self.activateSearch)))
+        let rightButton = ChatNavigationButton(action: .search(hasTags: false), buttonItem: UIBarButtonItem(image: ClassicDesign.isEnabled ? PresentationResourcesRootController.navigationSearchIcon(self.presentationData.theme)?.withRenderingMode(.alwaysTemplate) : PresentationResourcesRootController.navigationSearchIcon(self.presentationData.theme), style: .plain, target: self, action: #selector(self.activateSearch)))
         self.rightBarButton = rightButton
         self.navigationItem.setRightBarButton(rightButton.buttonItem, animated: false)
         
@@ -394,7 +395,7 @@ public final class ChatRecentActionsController: TelegramBaseController {
     }
     
     private func updateNavigationBarPresentation() {
-        let navigationBarTheme = NavigationBarTheme(rootControllerTheme: self.presentationData.theme, hideBackground: false, hideBadge: false, edgeEffectColor: .clear, style: .glass, glassStyle: self.preferredGlassType == .clear ? .clear : .default)
+        let navigationBarTheme = NavigationBarTheme(rootControllerTheme: self.presentationData.theme, hideBadge: false, edgeEffectColor: ClassicDesign.isEnabled ? self.presentationData.theme.rootController.navigationBar.blurredBackgroundColor : .clear, glassStyle: self.preferredGlassType == .clear ? .clear : .default)
         self.navigationBar?.updatePresentationData(NavigationBarPresentationData(theme: navigationBarTheme, strings: NavigationBarStrings(presentationStrings: self.presentationData.strings)), transition: .immediate)
     }
 

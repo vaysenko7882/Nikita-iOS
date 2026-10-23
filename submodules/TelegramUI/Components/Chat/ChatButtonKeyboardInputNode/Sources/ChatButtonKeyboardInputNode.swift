@@ -29,6 +29,9 @@ private final class ChatButtonKeyboardInputButtonNode: HighlightTrackingButtonNo
     
     private var theme: PresentationTheme?
     
+    private var classicImage: UIImage?
+    private weak var classicImageTheme: PresentationTheme?
+    
     init() {
         self.backgroundContainerNode = ASDisplayNode()
         self.backgroundContainerNode.allowsGroupOpacity = true
@@ -75,14 +78,37 @@ private final class ChatButtonKeyboardInputButtonNode: HighlightTrackingButtonNo
         }
         
         if self.backgroundView.image == nil {
-            self.backgroundView.image = generateStretchableFilledCircleImage(diameter: 20.0, color: .white)?.withRenderingMode(.alwaysTemplate)
+            self.backgroundView.image = generateStretchableFilledCircleImage(diameter: ClassicDesign.isEnabled ? 10.0 : 20.0, color: .white)?.withRenderingMode(.alwaysTemplate)
             self.tintMaskView.image = self.backgroundView.image
         }
         self.tintMaskView.tintColor = .black
         
         var titleColor = theme.chat.inputButtonPanel.buttonTextColor
         
-        if let color = button.style?.color {
+        if ClassicDesign.isEnabled, button.style?.color == nil {
+            if self.classicImageTheme !== theme {
+                self.classicImageTheme = theme
+                let fillColor = theme.chat.inputButtonPanel.buttonFillColor
+                let strokeColor = theme.chat.inputButtonPanel.buttonStrokeColor
+                self.classicImage = generateImage(CGSize(width: 12.0, height: 12.0), rotatedContext: { size, context in
+                    context.clear(CGRect(origin: CGPoint(), size: size))
+                    context.setFillColor(strokeColor.cgColor)
+                    context.addPath(UIBezierPath(roundedRect: CGRect(origin: CGPoint(), size: size), cornerRadius: 5.0).cgPath)
+                    context.fillPath()
+                    context.setBlendMode(.copy)
+                    context.setFillColor(fillColor.cgColor)
+                    context.addPath(UIBezierPath(roundedRect: CGRect(origin: CGPoint(), size: CGSize(width: size.width, height: size.height - 1.0)), cornerRadius: 5.0).cgPath)
+                    context.fillPath()
+                })?.stretchableImage(withLeftCapWidth: 6, topCapHeight: 6)
+            }
+            self.backgroundView.image = self.classicImage
+            self.backgroundView.tintColor = nil
+        } else if ClassicDesign.isEnabled, self.backgroundView.image === self.classicImage {
+            self.backgroundView.image = self.tintMaskView.image
+        }
+        
+        if ClassicDesign.isEnabled, button.style?.color == nil {
+        } else if let color = button.style?.color {
             switch color {
             case .primary:
                 self.backgroundView.tintColor = theme.list.itemCheckColors.fillColor
@@ -177,13 +203,22 @@ private final class ChatButtonKeyboardInputButtonNode: HighlightTrackingButtonNo
         }
         
         let textSize = self.textNode.updateLayout(CGSize(width: maxTextWidth, height: self.bounds.height))
+        let textHasRTL = self.textNode.cachedLayout?.hasRTL ?? false
         
         var textFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((self.bounds.width - textSize.width) / 2.0), y: floorToScreenPixels((self.bounds.height - textSize.height) / 2.0)), size: textSize)
         if let iconView = self.icon?.view {
             let contentX = floor((size.width - textSize.width - iconSize.width - iconSpacing) * 0.5)
-            textFrame.origin.x = contentX + iconSize.width + iconSpacing
+            // The icon leads the title in reading order, so it follows the title visually in RTL.
+            let iconX: CGFloat
+            if textHasRTL {
+                textFrame.origin.x = contentX
+                iconX = contentX + textSize.width + iconSpacing
+            } else {
+                textFrame.origin.x = contentX + iconSize.width + iconSpacing
+                iconX = contentX
+            }
             
-            let iconFrame = CGRect(origin: CGPoint(x: contentX, y: floor((size.height - iconSize.height) * 0.5)), size: iconSize)
+            let iconFrame = CGRect(origin: CGPoint(x: iconX, y: floor((size.height - iconSize.height) * 0.5)), size: iconSize)
             if iconView.superview == nil {
                 iconView.isUserInteractionEnabled = false
                 self.view.addSubview(iconView)
@@ -203,6 +238,7 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode, UIScrollViewDeleg
     private let backgroundTintView: UIImageView
     private let backgroundTintMaskView: UIView
     private let backgroundChromeView: UIImageView
+    private var classicSeparatorView: UIView?
     
     private let scrollNode: ASScrollNode
     
@@ -230,12 +266,19 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode, UIScrollViewDeleg
         self.view.addSubview(self.backgroundView)
         
         self.view.addSubview(self.backgroundTintView)
-        if let filter = CALayer.luminanceToAlpha() {
+        if !ClassicDesign.isEnabled, let filter = CALayer.luminanceToAlpha() {
             self.backgroundTintMaskView.layer.filters = [filter]
             self.backgroundTintView.mask = self.backgroundTintMaskView
         }
         
         self.view.addSubview(self.backgroundChromeView)
+        if ClassicDesign.isEnabled {
+            self.backgroundChromeView.isHidden = true
+            let classicSeparatorView = UIView()
+            classicSeparatorView.isUserInteractionEnabled = false
+            self.classicSeparatorView = classicSeparatorView
+            self.view.addSubview(classicSeparatorView)
+        }
         
         self.addSubnode(self.scrollNode)
         self.scrollNode.view.delaysContentTouches = false
@@ -245,12 +288,12 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode, UIScrollViewDeleg
         self.scrollNode.view.delegate = self
         
         self.scrollNode.view.clipsToBounds = true
-        self.scrollNode.cornerRadius = 30.0
+        self.scrollNode.cornerRadius = ClassicDesign.isEnabled ? 0.0 : 30.0
         self.scrollNode.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         self.scrollNode.view.scrollsToTop = false
         
         self.backgroundTintMaskView.clipsToBounds = true
-        self.backgroundTintMaskView.layer.cornerRadius = 30.0
+        self.backgroundTintMaskView.layer.cornerRadius = ClassicDesign.isEnabled ? 0.0 : 30.0
         self.backgroundTintMaskView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
     }
     
@@ -289,8 +332,8 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode, UIScrollViewDeleg
         self.message = interfaceState.keyboardButtonsMessage.flatMap(EngineMessage.init)
         
         if let markup = validatedMarkup, let message = self.message {
-            let verticalInset: CGFloat = 18.0
-            let sideInset: CGFloat = 18.0 + leftInset
+            let verticalInset: CGFloat = ClassicDesign.isEnabled ? 10.0 : 18.0
+            let sideInset: CGFloat = (ClassicDesign.isEnabled ? 6.0 : 18.0) + leftInset
             var buttonHeight: CGFloat = 43.0
             let columnSpacing: CGFloat = 6.0
             let rowSpacing: CGFloat = 5.0
@@ -350,6 +393,22 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode, UIScrollViewDeleg
             
             var backgroundFrame = CGRect(origin: CGPoint(), size: CGSize(width: width, height: panelHeight))
             backgroundFrame.size.height += 32.0
+            
+            if ClassicDesign.isEnabled {
+                self.backgroundTintView.image = nil
+                self.backgroundTintView.backgroundColor = interfaceState.theme.chat.inputButtonPanel.panelBackgroundColor
+                transition.updateFrame(view: self.backgroundTintView, frame: backgroundFrame)
+                transition.updateFrame(view: self.backgroundTintMaskView, frame: CGRect(origin: CGPoint(), size: backgroundFrame.size))
+                self.backgroundView.updateColor(color: .clear, forceKeepBlur: true, transition: .immediate)
+                transition.updateFrame(view: self.backgroundView, frame: backgroundFrame)
+                self.backgroundView.update(size: backgroundFrame.size, cornerRadius: 0.0, transition: transition)
+                if let classicSeparatorView = self.classicSeparatorView {
+                    classicSeparatorView.backgroundColor = interfaceState.theme.chat.inputButtonPanel.panelSeparatorColor
+                    transition.updateFrame(view: classicSeparatorView, frame: CGRect(origin: CGPoint(), size: CGSize(width: width, height: UIScreenPixel)))
+                }
+                return (panelHeight, 0.0)
+            }
+            
             let keyboardCornerRadius: CGFloat = 30.0
             
             if self.backgroundChromeView.image == nil || updatedTheme {
@@ -426,7 +485,7 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode, UIScrollViewDeleg
                     break
                 case let .urlAuth(url, buttonId):
                     if let message = self.message {
-                        self.controllerInteraction.requestMessageActionUrlAuth(url, .message(id: message.id, buttonId: buttonId))
+                        self.controllerInteraction.requestMessageActionUrlAuth(url, .message(id: message._asMessage().callbackTargetMessageId, buttonId: buttonId))
                     }
                 case let .setupPoll(isQuiz):
                     self.controllerInteraction.openPollCreation(nil, isQuiz)
@@ -439,13 +498,19 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode, UIScrollViewDeleg
                         self.controllerInteraction.openPeer(peer, .info(nil), nil, .default)
                     })
                 case let .openWebView(url, simple):
-                    self.controllerInteraction.openWebView(markupButton.title, url, simple, .generic)
+                    // nil: a reply-keyboard button has no inline loading state, so the
+                    // `.requestInProgress` title panel stays its progress indicator.
+                    self.controllerInteraction.openWebView(markupButton.title, url, simple, .generic, nil)
                 case let .requestPeer(peerType, buttonId, maxQuantity):
                     if let message = self.message {
                         self.controllerInteraction.openRequestedPeerSelection(message.id, peerType, buttonId, maxQuantity)
                     }
                 case let .copyText(payload):
                     self.controllerInteraction.copyText(payload)
+                case .disabled:
+                    // A forward stripped this button's behaviour; tapping does nothing, and it
+                    // must not dismiss a once-keyboard either (dismissIfOnce stays false).
+                    break
             }
             if dismissIfOnce {
                 if let message = self.message {

@@ -105,7 +105,7 @@ final class ChatUnblockInputPanelNode: ChatInputPanelNode {
         let titleSize = self.title.update(
             transition: .immediate,
             component: AnyComponent(MultilineTextComponent(
-                text: .plain(NSAttributedString(string: string, font: Font.regular(17.0), textColor: theme.chat.inputPanel.panelControlColor))
+                text: .plain(NSAttributedString(string: string, font: Font.regular(17.0), textColor: ClassicDesign.isEnabled ? theme.chat.inputPanel.panelControlAccentColor : theme.chat.inputPanel.panelControlColor))
             )),
             environment: {},
             containerSize: CGSize(width: width - leftInset - rightInset, height: 100.0)
@@ -117,7 +117,7 @@ final class ChatUnblockInputPanelNode: ChatInputPanelNode {
         let buttonFrame = CGRect(origin: CGPoint(x: floor((width - buttonSize.width) / 2.0), y: floor((panelHeight - buttonSize.height) * 0.5)), size: buttonSize)
         transition.updateFrame(view: self.button, frame: buttonFrame)
         transition.updateFrame(view: self.backgroundView, frame: buttonFrame)
-        self.backgroundView.update(size: buttonFrame.size, cornerRadius: buttonFrame.height * 0.5, isDark: interfaceState.theme.overallDarkAppearance, tintColor: .init(kind: .panel), transition: ComponentTransition(transition))
+        self.backgroundView.update(size: buttonFrame.size, cornerRadius: buttonFrame.height * 0.5, isDark: interfaceState.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isVisible: !ClassicDesign.isEnabled, transition: ComponentTransition(transition))
         
         let titleFrame = CGRect(origin: CGPoint(x: floor((buttonFrame.width - titleSize.width) * 0.5), y: floor((buttonFrame.height - titleSize.height) * 0.5)), size: titleSize)
         if let titleView = self.title.view {

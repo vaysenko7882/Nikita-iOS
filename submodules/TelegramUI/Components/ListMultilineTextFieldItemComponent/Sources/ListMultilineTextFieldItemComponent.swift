@@ -1,4 +1,5 @@
 import Foundation
+import LottieSettings
 import UIKit
 import Display
 import ComponentFlow
@@ -139,7 +140,7 @@ public final class ListMultilineTextFieldItemComponent: Component {
         tag: AnyObject? = nil
     ) {
         self.externalState = externalState
-        self.style = style
+        self.style = ClassicDesign.isEnabled ? .legacy : style
         self.context = context
         self.theme = theme
         self.strings = strings
@@ -612,7 +613,8 @@ public final class ListMultilineTextFieldItemComponent: Component {
                                 name: animationName
                             ),
                             color: component.theme.chat.inputPanel.inputControlColor.blitOver(component.theme.list.itemBlocksBackgroundColor, alpha: 1.0),
-                            size: modeSelectorSize
+                            size: modeSelectorSize,
+                            lottieSettings: component.context.lottieRenderingSettings
                         )),
                         effectAlignment: .center,
                         action: { [weak self] in

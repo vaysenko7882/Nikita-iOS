@@ -581,6 +581,8 @@ public final class ChatTextInputPanelComponent: Component {
                     },
                     stopMediaRecording: {
                     },
+                    stopIncomingStreamingMessage: {
+                    },
                     lockMediaRecording: {
                     },
                     resumeMediaRecording: {
@@ -864,6 +866,7 @@ public final class ChatTextInputPanelComponent: Component {
                         
                     }
                 )
+                panelNode.isClassicBarStyle = false
                 self.panelNode = panelNode
                 self.addSubview(panelNode.view)
                 panelNode.interfaceInteraction = self.interfaceInteraction

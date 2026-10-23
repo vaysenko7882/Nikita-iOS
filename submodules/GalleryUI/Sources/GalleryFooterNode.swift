@@ -8,6 +8,7 @@ import ComponentDisplayAdapters
 
 public final class GalleryFooterNode: ASDisplayNode {
     private let edgeEffectView: EdgeEffectView
+    private let classicBackgroundNode: ASDisplayNode?
     private var contentsFrame = CGRect()
     
     private var currentThumbnailPanelHeight: CGFloat?
@@ -23,9 +24,22 @@ public final class GalleryFooterNode: ASDisplayNode {
         self.edgeEffectView = EdgeEffectView()
         self.edgeEffectView.isUserInteractionEnabled = false
         
+        if ClassicDesign.isEnabled {
+            let classicBackgroundNode = ASDisplayNode()
+            classicBackgroundNode.backgroundColor = UIColor(white: 0.0, alpha: 0.6)
+            classicBackgroundNode.isUserInteractionEnabled = false
+            self.classicBackgroundNode = classicBackgroundNode
+        } else {
+            self.classicBackgroundNode = nil
+        }
+        
         super.init()
         
-        self.view.addSubview(self.edgeEffectView)
+        if let classicBackgroundNode = self.classicBackgroundNode {
+            self.addSubnode(classicBackgroundNode)
+        } else {
+            self.view.addSubview(self.edgeEffectView)
+        }
     }
     
     private var visibilityAlpha: CGFloat = 1.0
@@ -35,6 +49,9 @@ public final class GalleryFooterNode: ASDisplayNode {
         self.visibilityAlpha = alpha
         let transition: ComponentTransition = animated ? .easeInOut(duration: 0.2) : .immediate
         transition.setAlpha(view: self.edgeEffectView, alpha: alpha * self.defaultEdgeEffectAlpha)
+        if let classicBackgroundNode = self.classicBackgroundNode {
+            transition.setAlpha(view: classicBackgroundNode.view, alpha: alpha)
+        }
         self.currentFooterContentNode?.setVisibilityAlpha(alpha, animated: animated)
         self.currentOverlayContentNode?.setVisibilityAlpha(alpha)
     }
@@ -42,6 +59,10 @@ public final class GalleryFooterNode: ASDisplayNode {
     func animateIn(transition: ContainedViewLayoutTransition) {
         self.edgeEffectView.alpha = 0.0
         ComponentTransition(transition).setAlpha(view: self.edgeEffectView, alpha: self.defaultEdgeEffectAlpha * self.visibilityAlpha)
+        if let classicBackgroundNode = self.classicBackgroundNode {
+            classicBackgroundNode.alpha = 0.0
+            ComponentTransition(transition).setAlpha(view: classicBackgroundNode.view, alpha: self.visibilityAlpha)
+        }
         
         if let currentFooterContentNode = self.currentFooterContentNode {
             currentFooterContentNode.animateIn(transition: transition)
@@ -55,6 +76,9 @@ public final class GalleryFooterNode: ASDisplayNode {
     
     func animateOut(transition: ContainedViewLayoutTransition) {
         ComponentTransition(transition).setAlpha(view: self.edgeEffectView, alpha: 0.0)
+        if let classicBackgroundNode = self.classicBackgroundNode {
+            ComponentTransition(transition).setAlpha(view: classicBackgroundNode.view, alpha: 0.0)
+        }
         
         if let currentFooterContentNode = self.currentFooterContentNode {
             currentFooterContentNode.animateOut(transition: transition)
@@ -118,7 +142,11 @@ public final class GalleryFooterNode: ASDisplayNode {
             if footerContentNode.bounds.isEmpty {
                 footerTransition = .immediate
             }
-            let backgroundLayoutInfoValue = footerContentNode.updateLayout(size: layout.size, metrics: layout.metrics, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, bottomInset: cleanInsets.bottom, contentInset: effectiveThumbnailPanelHeight, transition: footerTransition)
+            // The footer is anchored at the bottom, so it spans iPhone Duo's side strip; it keeps clear only of a corner
+            // block at the bottom.
+            let bottomInsets = layout.bottomEdgeSideInsets()
+            footerContentNode.screenSideInsets = (layout.safeInsets.left, layout.safeInsets.right)
+            let backgroundLayoutInfoValue = footerContentNode.updateLayout(size: layout.size, metrics: layout.metrics, leftInset: bottomInsets.left, rightInset: bottomInsets.right, bottomInset: cleanInsets.bottom, contentInset: effectiveThumbnailPanelHeight, transition: footerTransition)
             backgroundLayoutInfo = backgroundLayoutInfoValue
             
             footerTransition.updateFrame(node: footerContentNode, frame: CGRect(origin: CGPoint(x: 0.0, y: layout.size.height - backgroundLayoutInfoValue.height + verticalOffset), size: CGSize(width: layout.size.width, height: backgroundLayoutInfoValue.height)))
@@ -158,6 +186,10 @@ public final class GalleryFooterNode: ASDisplayNode {
             self.defaultEdgeEffectAlpha = 0.5
         }
         ComponentTransition(transition).setAlpha(view: self.edgeEffectView, alpha: self.visibilityAlpha * self.defaultEdgeEffectAlpha)
+        if let classicBackgroundNode = self.classicBackgroundNode {
+            edgeEffectTransition.setFrame(view: classicBackgroundNode.view, frame: backgroundFrame)
+            ComponentTransition(transition).setAlpha(view: classicBackgroundNode.view, alpha: self.visibilityAlpha)
+        }
         
         let contentTransition = ContainedViewLayoutTransition.animated(duration: 0.4, curve: .spring)
         if let overlayContentNode = self.currentOverlayContentNode {

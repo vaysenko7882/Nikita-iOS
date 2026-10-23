@@ -5,7 +5,61 @@ import AppBundle
 
 private let gradientImage = UIImage(bundleImageName: "Item List/Icons/Gradient")
 private let backdropImage = UIImage(bundleImageName: "Item List/Icons/Backdrop")
+private func addClassicRoundedRectPath(context: CGContext, rect: CGRect, radius: CGFloat) {
+    context.saveGState()
+    context.translateBy(x: rect.minX, y: rect.minY)
+    context.scaleBy(x: radius, y: radius)
+    let fw = rect.width / radius
+    let fh = rect.height / radius
+    context.move(to: CGPoint(x: fw, y: fh / 2.0))
+    context.addArc(tangent1End: CGPoint(x: fw, y: fh), tangent2End: CGPoint(x: fw/2, y: fh), radius: 1.0)
+    context.addArc(tangent1End: CGPoint(x: 0, y: fh), tangent2End: CGPoint(x: 0, y: fh/2), radius: 1)
+    context.addArc(tangent1End: CGPoint(x: 0, y: 0), tangent2End: CGPoint(x: fw/2, y: 0), radius: 1)
+    context.addArc(tangent1End: CGPoint(x: fw, y: 0), tangent2End: CGPoint(x: fw, y: fh/2), radius: 1)
+    context.closePath()
+    context.restoreGState()
+}
+
+private func renderClassicSettingsIcon(name: String, scaleFactor: CGFloat, backgroundColors: [UIColor]?) -> UIImage? {
+    return generateImage(CGSize(width: 29.0, height: 29.0), contextGenerator: { size, context in
+        let bounds = CGRect(origin: CGPoint(), size: size)
+        context.clear(bounds)
+        
+        if let backgroundColors {
+            addClassicRoundedRectPath(context: context, rect: CGRect(origin: CGPoint(), size: size), radius: 7.0)
+            context.clip()
+            
+            var locations: [CGFloat] = [0.0, 1.0]
+            let colors: [CGColor] = backgroundColors.map(\.cgColor)
+            
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: &locations)!
+            
+            context.drawLinearGradient(gradient, start: CGPoint(x: size.width, y: size.height), end: CGPoint(x: 0.0, y: 0.0), options: CGGradientDrawingOptions())
+            
+            context.resetClip()
+            if let image = generateTintedImage(image: UIImage(bundleImageName: name), color: .white), let cgImage = image.cgImage {
+                let imageSize = CGSize(width: image.size.width * scaleFactor, height: image.size.height * scaleFactor)
+                context.draw(cgImage, in: CGRect(origin: CGPoint(x: (bounds.width - imageSize.width) * 0.5, y: (bounds.height - imageSize.height) * 0.5), size: imageSize))
+            }
+        } else {
+            if let image = UIImage(bundleImageName: name), let cgImage = image.cgImage {
+                let imageSize: CGSize
+                if scaleFactor == 1.0 {
+                    imageSize = size
+                } else {
+                    imageSize = CGSize(width: image.size.width * scaleFactor, height: image.size.height * scaleFactor)
+                }
+                context.draw(cgImage, in: CGRect(origin: CGPoint(x: (bounds.width - imageSize.width) * 0.5, y: (bounds.height - imageSize.height) * 0.5), size: imageSize))
+            }
+        }
+    })
+}
+
 public func renderSettingsIcon(name: String, scaleFactor: CGFloat = 1.0, backgroundColors: [UIColor]? = nil) -> UIImage? {
+    if ClassicDesign.isEnabled {
+        return renderClassicSettingsIcon(name: name, scaleFactor: scaleFactor, backgroundColors: backgroundColors)
+    }
     return generateImage(CGSize(width: 30.0, height: 30.0), contextGenerator: { size, context in
         let bounds = CGRect(origin: CGPoint(), size: size)
         context.clear(bounds)
@@ -108,7 +162,7 @@ public func renderAttachAppIcon(iconImage: UIImage?) -> UIImage? {
 
 let colorRed = UIColor(rgb: 0xFF453A)
 let colorGreen = UIColor(rgb: 0x34C759)
-let colorBlue = UIColor(rgb: 0x0079ff)
+let colorBlue = UIColor(rgb: 0x0a84ff)
 let colorLightBlue = UIColor(rgb: 0x32ADE6)
 let colorTeal = UIColor(rgb: 0x00c7be)
 let colorOrange = UIColor(rgb: 0xFF9F0A)
@@ -217,6 +271,9 @@ public struct PresentationResourcesSettings {
     })
     
     public static let ton = renderSettingsIcon(name: "Item List/Icons/Gram", backgroundColors: [colorBlue])
+    public static let gramEarnings = renderSettingsIcon(name: "Item List/Icons/Earnings", backgroundColors: [colorBlue])
+    
+    public static let money = UIImage(bundleImageName: "Settings/Gram")
 
     public static let madgram = generateImage(CGSize(width: 30.0, height: 30.0), contextGenerator: { size, context in
         let bounds = CGRect(origin: CGPoint(), size: size)
@@ -359,4 +416,6 @@ public struct PresentationResourcesSettings {
     public static let voices = renderSettingsIcon(name: "Item List/Icons/Microphone", backgroundColors: [colorPurple])
     public static let upload = renderSettingsIcon(name: "Item List/Icons/Upload", backgroundColors: [colorBlue])
     public static let download = renderSettingsIcon(name: "Item List/Icons/Download", backgroundColors: [colorGreen])
+    
+    public static let welcome = renderSettingsIcon(name: "Item List/Icons/Hand", backgroundColors: [colorViolet])
 }

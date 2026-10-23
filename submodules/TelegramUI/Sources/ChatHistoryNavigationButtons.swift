@@ -209,8 +209,15 @@ final class ChatHistoryNavigationButtons: ASDisplayNode {
     }
     
     func updateLayout(transition: ContainedViewLayoutTransition) -> CGSize {
-        let buttonSize = CGSize(width: 40.0, height: 40.0)
-        let completeSize = CGSize(width: buttonSize.width, height: buttonSize.height * 2.0 + 8.0)
+        let buttonSize: CGSize
+        let completeSize: CGSize
+        if ClassicDesign.isEnabled {
+            buttonSize = CGSize(width: 38.0, height: 38.0)
+            completeSize = CGSize(width: buttonSize.width, height: buttonSize.height * 2.0 + 12.0)
+        } else {
+            buttonSize = CGSize(width: 40.0, height: 40.0)
+            completeSize = CGSize(width: buttonSize.width, height: buttonSize.height * 2.0 + 8.0)
+        }
         var upOffset: CGFloat = 0.0
         var mentionsOffset: CGFloat = 0.0
         var reactionsOffset: CGFloat = 0.0

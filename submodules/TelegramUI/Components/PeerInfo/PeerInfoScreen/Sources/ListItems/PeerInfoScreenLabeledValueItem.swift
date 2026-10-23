@@ -331,7 +331,7 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
             }
             
             if isExtracted {
-                strongSelf.extractedBackgroundImageNode.image = generateStretchableFilledCircleImage(diameter: 52.0, color: theme.list.plainBackgroundColor)
+                strongSelf.extractedBackgroundImageNode.image = generateStretchableFilledCircleImage(diameter: PeerInfoClassicMetrics.extractedBackgroundDiameter, color: theme.list.plainBackgroundColor)
             }
             
             if let extractedRect = strongSelf.extractedRect, let nonExtractedRect = strongSelf.nonExtractedRect {
@@ -489,6 +489,7 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
         }
                 
         let sideInset: CGFloat = 16.0 + safeInsets.left
+        let sideInsetRight: CGFloat = 16.0 + safeInsets.right
         
         self.bottomSeparatorNode.backgroundColor = presentationData.theme.list.itemBlocksSeparatorColor
         
@@ -596,7 +597,7 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
                 self.textNode.attributedText = createAttributedText(text)
             }
             
-            let textLayout = self.measureTextNode.updateLayoutInfo(CGSize(width: width - sideInset * 2.0 - additionalSideInset, height: .greatestFiniteMagnitude))
+            let textLayout = self.measureTextNode.updateLayoutInfo(CGSize(width: width - sideInset - sideInsetRight - additionalSideInset, height: .greatestFiniteMagnitude))
             var collapsedNumberOfLines = 3
             if textLayout.numberOfLines == 4 {
                 collapsedNumberOfLines = 4
@@ -607,12 +608,12 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
         }
         
 
-        let labelSize = self.labelNode.updateLayout(CGSize(width: width - sideInset * 2.0, height: .greatestFiniteMagnitude))
-        let rightLabelSize = self.rightLabelNode.updateLayout(CGSize(width: width - sideInset * 2.0, height: .greatestFiniteMagnitude))
-        let textLayout = self.textNode.updateLayoutInfo(CGSize(width: width - sideInset * 2.0 - additionalSideInset, height: .greatestFiniteMagnitude))
+        let labelSize = self.labelNode.updateLayout(CGSize(width: width - sideInset - sideInsetRight, height: .greatestFiniteMagnitude))
+        let rightLabelSize = self.rightLabelNode.updateLayout(CGSize(width: width - sideInset - sideInsetRight, height: .greatestFiniteMagnitude))
+        let textLayout = self.textNode.updateLayoutInfo(CGSize(width: width - sideInset - sideInsetRight - additionalSideInset, height: .greatestFiniteMagnitude))
         let textSize = textLayout.size
         
-        let additionalTextSize = self.additionalTextNode.updateLayout(CGSize(width: width - sideInset * 2.0, height: .greatestFiniteMagnitude))
+        let additionalTextSize = self.additionalTextNode.updateLayout(CGSize(width: width - sideInset - sideInsetRight, height: .greatestFiniteMagnitude))
         
         var displayMore = false
         if !self.isExpanded {
@@ -631,10 +632,10 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
             self.expandButonNode.isHidden = true
         }
         
-        var topOffset = 15.0
+        var topOffset = PeerInfoClassicMetrics.labeledValueVerticalInset
         var height = topOffset * 2.0
         let labelFrame = CGRect(origin: CGPoint(x: sideInset, y: topOffset), size: labelSize)
-        let rightLabelFrame = CGRect(origin: CGPoint(x: width - sideInset - rightLabelSize.width, y: topOffset), size: rightLabelSize)
+        let rightLabelFrame = CGRect(origin: CGPoint(x: width - sideInsetRight - rightLabelSize.width, y: topOffset), size: rightLabelSize)
         if labelSize.height > 0.0 {
             topOffset += labelSize.height + 3.0
             height += labelSize.height + 3.0
@@ -721,7 +722,7 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
             spoilerTextNode.textStroke = self.textNode.textStroke
             spoilerTextNode.isUserInteractionEnabled = false
             
-            let _ = spoilerTextNode.updateLayout(CGSize(width: width - sideInset * 2.0 - additionalSideInset, height: .greatestFiniteMagnitude))
+            let _ = spoilerTextNode.updateLayout(CGSize(width: width - sideInset - sideInsetRight - additionalSideInset, height: .greatestFiniteMagnitude))
             spoilerTextNode.frame = textFrame
             
             if spoilerTextNode.supernode == nil {
@@ -740,7 +741,7 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
         let iconButtonFrame = CGRect(x: width - safeInsets.right - height, y: 0.0, width: height, height: height)
         transition.updateFrame(node: self.iconButtonNode, frame: iconButtonFrame)
         if let iconSize = self.iconNode.image?.size {
-            transition.updateFrame(node: self.iconNode, frame: CGRect(origin: CGPoint(x: width - safeInsets.right - sideInset - iconSize.width + 5.0, y: floorToScreenPixels((height - iconSize.height) / 2.0)), size: iconSize))
+            transition.updateFrame(node: self.iconNode, frame: CGRect(origin: CGPoint(x: width - sideInsetRight - iconSize.width + 5.0, y: floorToScreenPixels((height - iconSize.height) / 2.0)), size: iconSize))
         }
         
         if additionalTextSize.height > 0.0 {
@@ -766,7 +767,7 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
                 transition: ComponentTransition(transition),
                 component: AnyComponent(ButtonComponent(
                     background: ButtonComponent.Background(
-                        style: .glass,
+                        style: PeerInfoClassicMetrics.isEnabled ? .legacy : .glass,
                         color: presentationData.theme.list.itemCheckColors.fillColor,
                         foreground: presentationData.theme.list.itemCheckColors.foregroundColor,
                         pressedColor: presentationData.theme.list.itemCheckColors.fillColor.withMultipliedAlpha(0.8)
@@ -780,7 +781,7 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
                     }
                 )),
                 environment: {},
-                containerSize: CGSize(width: width - sideInset * 2.0, height: 52.0)
+                containerSize: CGSize(width: width - sideInset - sideInsetRight, height: PeerInfoClassicMetrics.isEnabled ? 50.0 : 52.0)
             )
             let actionButtonFrame = CGRect(origin: CGPoint(x: sideInset, y: height), size: actionButtonSize)
             if let actionButtonView = actionButton.view {
@@ -802,7 +803,7 @@ private final class PeerInfoScreenLabeledValueItemNode: PeerInfoScreenItemNode {
         self.selectionNode.update(size: CGSize(width: width, height: height + highlightNodeOffset), theme: presentationData.theme, transition: transition)
         transition.updateFrame(node: self.selectionNode, frame: CGRect(origin: CGPoint(x: 0.0, y: -highlightNodeOffset), size: CGSize(width: width, height: height + highlightNodeOffset)))
         
-        let separatorRightInset: CGFloat = 16.0
+        let separatorRightInset: CGFloat = PeerInfoClassicMetrics.separatorRightInset
         
         transition.updateFrame(node: self.bottomSeparatorNode, frame: CGRect(origin: CGPoint(x: sideInset, y: height - UIScreenPixel), size: CGSize(width: width - sideInset - separatorRightInset, height: UIScreenPixel)))
         transition.updateAlpha(node: self.bottomSeparatorNode, alpha: bottomItem == nil ? 0.0 : 1.0)

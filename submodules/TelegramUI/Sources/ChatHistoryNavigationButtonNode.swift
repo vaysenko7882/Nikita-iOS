@@ -8,8 +8,27 @@ import AnimatedCountLabelNode
 import GlassBackgroundComponent
 import ComponentFlow
 import ComponentDisplayAdapters
+import AppBundle
 
 private let badgeFont = Font.with(size: 13.0, traits: [.monospacedNumbers])
+
+private let classicReactionsButtonImage: UIImage? = {
+    return generateImage(CGSize(width: 38.0, height: 38.0), contextGenerator: { size, context in
+        context.clear(CGRect(origin: CGPoint(), size: size))
+        if let image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Reactions"), color: UIColor.white), let cgImage = image.cgImage {
+            context.draw(cgImage, in: CGRect(origin: CGPoint(x: floor((size.width - image.size.width) / 2.0), y: floor((size.height - image.size.height) / 2.0)), size: image.size))
+        }
+    })?.withRenderingMode(.alwaysTemplate)
+}()
+
+private let classicMentionsButtonImage: UIImage? = {
+    return generateImage(CGSize(width: 38.0, height: 38.0), contextGenerator: { size, context in
+        context.clear(CGRect(origin: CGPoint(), size: size))
+        if let image = generateTintedImage(image: UIImage(bundleImageName: "Chat/NavigateToMentionsClassic"), color: UIColor.white), let cgImage = image.cgImage {
+            context.draw(cgImage, in: CGRect(origin: CGPoint(x: floor((size.width - image.size.width) / 2.0), y: floor((size.height - image.size.height) / 2.0)), size: image.size))
+        }
+    })?.withRenderingMode(.alwaysTemplate)
+}()
 
 enum ChatHistoryNavigationButtonType {
     case down
@@ -26,6 +45,24 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
     private let badgeBackgroundView: GlassBackgroundView
     private let badgeTextNode: ImmediateAnimatedCountLabelNode
     private var tapRecognizer: UITapGestureRecognizer?
+    
+    private let isClassic: Bool
+    private var classicButtonView: UIView?
+    private var classicBackgroundNode: NavigationBackgroundNode?
+    private var classicBackgroundContent: WallpaperBubbleBackgroundNode?
+    private var classicStrokeView: UIImageView?
+    private var classicBadgeBackgroundNode: ASImageNode?
+    
+    private var badgeContainerView: UIView {
+        if let classicBadgeBackgroundNode = self.classicBadgeBackgroundNode {
+            return classicBadgeBackgroundNode.view
+        }
+        return self.badgeBackgroundView
+    }
+    
+    private var buttonDiameter: CGFloat {
+        return self.isClassic ? 38.0 : 40.0
+    }
     
     var tapped: (() -> Void)? {
         didSet {
@@ -55,6 +92,7 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
         self.theme = theme
         self.preferClearGlass = preferClearGlass
         self.type = type
+        self.isClassic = ClassicDesign.isEnabled
         
         self.containerNode = ContextExtractedContentContainingNode()
 
@@ -85,6 +123,11 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
         
         super.init()
         
+        if self.isClassic {
+            self.setupClassic(theme: theme, backgroundNode: backgroundNode)
+            return
+        }
+        
         let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.onTapGesture(_:)))
         self.tapRecognizer = tapRecognizer
         self.backgroundView.contentView.addGestureRecognizer(tapRecognizer)
@@ -112,7 +155,99 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
         self.frame = CGRect(origin: CGPoint(), size: size)
     }
     
+    private func setupClassic(theme: PresentationTheme, backgroundNode: WallpaperBackgroundNode) {
+        let size = CGSize(width: 38.0, height: 38.0)
+        
+        let buttonView = UIView()
+        buttonView.frame = CGRect(origin: CGPoint(), size: size)
+        self.classicButtonView = buttonView
+        
+        let classicBackgroundNode = NavigationBackgroundNode(color: theme.chat.inputPanel.panelBackgroundColor)
+        classicBackgroundNode.isUserInteractionEnabled = false
+        classicBackgroundNode.frame = CGRect(origin: CGPoint(), size: size)
+        classicBackgroundNode.update(size: size, cornerRadius: size.width / 2.0, transition: .immediate)
+        self.classicBackgroundNode = classicBackgroundNode
+        
+        let classicStrokeView = UIImageView()
+        classicStrokeView.isUserInteractionEnabled = false
+        classicStrokeView.image = PresentationResourcesChat.chatHistoryNavigationButtonBackground(theme)
+        classicStrokeView.frame = CGRect(origin: CGPoint(), size: size)
+        self.classicStrokeView = classicStrokeView
+        
+        let classicBadgeBackgroundNode = ASImageNode()
+        classicBadgeBackgroundNode.isUserInteractionEnabled = false
+        classicBadgeBackgroundNode.displayWithoutProcessing = true
+        classicBadgeBackgroundNode.displaysAsynchronously = false
+        classicBadgeBackgroundNode.image = PresentationResourcesChat.chatHistoryNavigationButtonBadgeImage(theme)
+        classicBadgeBackgroundNode.alpha = 0.0
+        self.classicBadgeBackgroundNode = classicBadgeBackgroundNode
+        
+        let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.onTapGesture(_:)))
+        self.tapRecognizer = tapRecognizer
+        buttonView.addGestureRecognizer(tapRecognizer)
+        tapRecognizer.isEnabled = false
+        
+        self.addSubnode(self.containerNode)
+        
+        self.containerNode.contentNode.frame = CGRect(origin: CGPoint(), size: size)
+        self.containerNode.contentRect = CGRect(origin: CGPoint(), size: size)
+        
+        self.containerNode.contentNode.view.addSubview(buttonView)
+        buttonView.addSubview(classicBackgroundNode.view)
+        buttonView.addSubview(classicStrokeView)
+        
+        self.imageView.tintColor = theme.rootController.navigationBar.accentTextColor
+        self.imageView.frame = CGRect(origin: CGPoint(), size: size)
+        buttonView.addSubview(self.imageView)
+        self.updateImage()
+        
+        buttonView.addSubview(classicBadgeBackgroundNode.view)
+        classicBadgeBackgroundNode.addSubnode(self.badgeTextNode)
+        
+        self.frame = CGRect(origin: CGPoint(), size: size)
+        
+        self.updateClassicBackgroundContent(backgroundNode: backgroundNode)
+    }
+    
+    private func updateClassicBackgroundContent(backgroundNode: WallpaperBackgroundNode) {
+        guard let buttonView = self.classicButtonView, let classicBackgroundNode = self.classicBackgroundNode else {
+            return
+        }
+        if backgroundNode.hasExtraBubbleBackground() {
+            if self.classicBackgroundContent == nil {
+                if let backgroundContent = backgroundNode.makeBubbleBackground(for: .free) {
+                    backgroundContent.allowsGroupOpacity = true
+                    backgroundContent.clipsToBounds = true
+                    backgroundContent.alpha = 0.3
+                    backgroundContent.cornerRadius = 19.0
+                    backgroundContent.isUserInteractionEnabled = false
+                    backgroundContent.frame = classicBackgroundNode.frame
+                    buttonView.insertSubview(backgroundContent.view, aboveSubview: classicBackgroundNode.view)
+                    self.classicBackgroundContent = backgroundContent
+                }
+            }
+        } else {
+            self.classicBackgroundContent?.view.removeFromSuperview()
+            self.classicBackgroundContent = nil
+        }
+    }
+    
     func updateTheme(theme: PresentationTheme, preferClearGlass: Bool, backgroundNode: WallpaperBackgroundNode) {
+        if self.isClassic {
+            if self.theme !== theme {
+                self.theme = theme
+                
+                self.classicBackgroundNode?.updateColor(color: theme.chat.inputPanel.panelBackgroundColor, transition: .immediate)
+                self.classicStrokeView?.image = PresentationResourcesChat.chatHistoryNavigationButtonBackground(theme)
+                self.classicBadgeBackgroundNode?.image = PresentationResourcesChat.chatHistoryNavigationButtonBadgeImage(theme)
+                self.imageView.tintColor = theme.rootController.navigationBar.accentTextColor
+                self.updateImage()
+                self.updateBadgeSegments()
+            }
+            self.preferClearGlass = preferClearGlass
+            self.updateClassicBackgroundContent(backgroundNode: backgroundNode)
+            return
+        }
         if self.theme !== theme || self.preferClearGlass != preferClearGlass {
             self.theme = theme
             self.preferClearGlass = preferClearGlass
@@ -147,6 +282,33 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
         }
     }
     
+    private func updateImage() {
+        switch self.type {
+        case .down:
+            self.imageView.image = PresentationResourcesChat.chatHistoryNavigationButtonImage(self.theme)
+        case .up:
+            self.imageView.image = PresentationResourcesChat.chatHistoryNavigationUpButtonImage(self.theme)
+        case .mentions:
+            self.imageView.image = classicMentionsButtonImage ?? PresentationResourcesChat.chatHistoryMentionsButtonImage(self.theme)
+        case .reactions:
+            self.imageView.image = classicReactionsButtonImage ?? PresentationResourcesChat.chatHistoryReactionsButtonImage(self.theme)
+        case .pollVotes:
+            self.imageView.image = PresentationResourcesChat.chatHistoryPollVotesButtonImage(self.theme)
+        }
+    }
+    
+    private func updateBadgeSegments() {
+        var segments: [AnimatedCountLabelNode.Segment] = []
+        if let value = Int(self.badge) {
+            self.currentValue = value
+            segments.append(.number(value, NSAttributedString(string: self.badge, font: badgeFont, textColor: self.theme.chat.historyNavigation.badgeTextColor)))
+        } else {
+            self.currentValue = 0
+            segments.append(.text(100, NSAttributedString(string: self.badge, font: badgeFont, textColor: self.theme.chat.historyNavigation.badgeTextColor)))
+        }
+        self.badgeTextNode.segments = segments
+    }
+    
     private var absoluteRect: (CGRect, CGSize)?
     func update(rect: CGRect, within containerSize: CGSize, transition: ContainedViewLayoutTransition) {
         self.absoluteRect = (rect, containerSize)
@@ -175,47 +337,51 @@ class ChatHistoryNavigationButtonNode: ContextControllerSourceNode {
             self.badgeTextNode.segments = segments
             
             let badgeSize = self.badgeTextNode.updateLayout(size: CGSize(width: 200.0, height: 100.0), animated: true)
-            let backgroundSize = CGSize(width: self.badge.count == 1 ? 20.0 : max(20.0, badgeSize.width + 10.0 + 1.0), height: 20.0)
-            let backgroundFrame = CGRect(origin: CGPoint(x: floor((40.0 - backgroundSize.width) / 2.0), y: -7.0), size: backgroundSize)
-            if backgroundFrame.width < self.badgeBackgroundView.frame.width {
-                self.badgeBackgroundView.layer.animateFrame(from: self.badgeBackgroundView.frame, to: backgroundFrame, duration: 0.2)
-                self.badgeBackgroundView.frame = backgroundFrame
+            let badgeHeight: CGFloat = self.isClassic ? 18.0 : 20.0
+            let backgroundSize = CGSize(width: self.badge.count == 1 ? badgeHeight : max(badgeHeight, badgeSize.width + 10.0 + 1.0), height: badgeHeight)
+            let backgroundFrame = CGRect(origin: CGPoint(x: floor((self.buttonDiameter - backgroundSize.width) / 2.0), y: self.isClassic ? -9.0 : -7.0), size: backgroundSize)
+            let badgeContainerView = self.badgeContainerView
+            if backgroundFrame.width < badgeContainerView.frame.width {
+                badgeContainerView.layer.animateFrame(from: badgeContainerView.frame, to: backgroundFrame, duration: 0.2)
+                badgeContainerView.frame = backgroundFrame
             } else {
-                self.badgeBackgroundView.frame = backgroundFrame
+                badgeContainerView.frame = backgroundFrame
             }
             
-            let transition: ContainedViewLayoutTransition = .animated(duration: 0.2, curve: .easeInOut)
-            self.badgeBackgroundView.update(size: backgroundFrame.size, cornerRadius: backgroundFrame.height * 0.5, isDark: theme.overallDarkAppearance, tintColor: .init(kind: .custom(style: .default, color: self.theme.chat.inputPanel.actionControlFillColor)), transition: ComponentTransition(transition))
+            if !self.isClassic {
+                let transition: ContainedViewLayoutTransition = .animated(duration: 0.2, curve: .easeInOut)
+                self.badgeBackgroundView.update(size: backgroundFrame.size, cornerRadius: backgroundFrame.height * 0.5, isDark: theme.overallDarkAppearance, tintColor: .init(kind: .custom(style: .default, color: self.theme.chat.inputPanel.actionControlFillColor)), transition: ComponentTransition(transition))
+            }
             
-            self.badgeTextNode.frame = CGRect(origin: CGPoint(x: floorToScreenPixels((backgroundFrame.width - badgeSize.width) / 2.0), y: 2.0), size: badgeSize)
+            self.badgeTextNode.frame = CGRect(origin: CGPoint(x: floorToScreenPixels((backgroundFrame.width - badgeSize.width) / 2.0), y: self.isClassic ? 1.0 : 2.0), size: badgeSize)
             
-            if self.badgeBackgroundView.alpha < 1.0 {
-                self.badgeBackgroundView.alpha = 1.0
+            if self.badgeContainerView.alpha < 1.0 {
+                self.badgeContainerView.alpha = 1.0
                 
-                self.badgeBackgroundView.layer.animateScale(from: 0.01, to: 1.2, duration: 0.2, removeOnCompletion: false, completion: { [weak self] _ in
+                self.badgeContainerView.layer.animateScale(from: 0.01, to: 1.2, duration: 0.2, removeOnCompletion: false, completion: { [weak self] _ in
                     if let strongSelf = self {
-                        strongSelf.badgeBackgroundView.layer.animateScale(from: 1.15, to: 1.0, duration: 0.12, removeOnCompletion: false, completion: { _ in
-                            strongSelf.badgeBackgroundView.layer.removeAllAnimations()
+                        strongSelf.badgeContainerView.layer.animateScale(from: 1.15, to: 1.0, duration: 0.12, removeOnCompletion: false, completion: { _ in
+                            strongSelf.badgeContainerView.layer.removeAllAnimations()
                         })
                     }
                 })
-                self.badgeBackgroundView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
+                self.badgeContainerView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
             } else if previousValue < self.currentValue {
-                self.badgeBackgroundView.layer.animateScale(from: 1.0, to: 1.2, duration: 0.12, removeOnCompletion: false, completion: { [weak self] finished in
+                self.badgeContainerView.layer.animateScale(from: 1.0, to: 1.2, duration: 0.12, removeOnCompletion: false, completion: { [weak self] finished in
                     if let strongSelf = self {
-                        strongSelf.badgeBackgroundView.layer.animateScale(from: 1.2, to: 1.0, duration: 0.12, removeOnCompletion: false, completion: { _ in
-                            strongSelf.badgeBackgroundView.layer.removeAllAnimations()
+                        strongSelf.badgeContainerView.layer.animateScale(from: 1.2, to: 1.0, duration: 0.12, removeOnCompletion: false, completion: { _ in
+                            strongSelf.badgeContainerView.layer.removeAllAnimations()
                         })
                     }
                 })
             }
         } else {
             self.currentValue = 0
-            if self.badgeBackgroundView.alpha > 0.0 {
-                self.badgeBackgroundView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2)
-                self.badgeBackgroundView.layer.animateScale(from: 1.0, to: 0.01, duration: 0.2)
+            if self.badgeContainerView.alpha > 0.0 {
+                self.badgeContainerView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2)
+                self.badgeContainerView.layer.animateScale(from: 1.0, to: 0.01, duration: 0.2)
             }
-            self.badgeBackgroundView.alpha = 0.0
+            self.badgeContainerView.alpha = 0.0
         }
     }
 }

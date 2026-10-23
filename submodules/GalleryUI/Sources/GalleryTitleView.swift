@@ -13,6 +13,8 @@ import MultilineTextComponent
 
 private let titleFont = Font.semibold(17.0)
 private let dateFont = Font.regular(12.0)
+private let classicTitleFont = Font.medium(15.0)
+private let classicDateFont = Font.regular(14.0)
 
 public final class GalleryTitleView: UIView, NavigationBarTitleView {
     public final class Content: Equatable {
@@ -70,6 +72,11 @@ public final class GalleryTitleView: UIView, NavigationBarTitleView {
     private let titleBackground: GlassBackgroundView
     private let title = ComponentView<Empty>()
     
+    private let classicTitleBackground: UIView?
+    private var isClassic: Bool {
+        return self.classicTitleBackground != nil
+    }
+    
     private var content: Content?
     private var titleString: String?
     
@@ -100,19 +107,39 @@ public final class GalleryTitleView: UIView, NavigationBarTitleView {
         
         self.titleBackgroundContainer.contentView.addSubview(self.titleBackground)
         
+        if ClassicDesign.isEnabled {
+            let classicTitleBackground = UIView()
+            classicTitleBackground.backgroundColor = UIColor(white: 0.0, alpha: 0.6)
+            classicTitleBackground.clipsToBounds = true
+            classicTitleBackground.isUserInteractionEnabled = false
+            self.classicTitleBackground = classicTitleBackground
+        } else {
+            self.classicTitleBackground = nil
+        }
+        
         super.init(frame: CGRect())
         
-        self.addSubview(self.backgroundContainer)
-        
-        self.backgroundView.contentView.addSubview(self.authorNameNode.view)
-        self.backgroundView.contentView.addSubview(self.dateNode.view)
-        
-        self.backgroundContainer.isHidden = true
-        
-        self.addSubview(self.titleBackgroundContainer)
-        self.titleBackgroundContainer.alpha = 0.0
-        
-        self.backgroundView.contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.onTapGesture(_:))))
+        if let classicTitleBackground = self.classicTitleBackground {
+            self.addSubview(self.authorNameNode.view)
+            self.addSubview(self.dateNode.view)
+            
+            self.addSubview(classicTitleBackground)
+            classicTitleBackground.alpha = 0.0
+            
+            self.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.onTapGesture(_:))))
+        } else {
+            self.addSubview(self.backgroundContainer)
+            
+            self.backgroundView.contentView.addSubview(self.authorNameNode.view)
+            self.backgroundView.contentView.addSubview(self.dateNode.view)
+            
+            self.backgroundContainer.isHidden = true
+            
+            self.addSubview(self.titleBackgroundContainer)
+            self.titleBackgroundContainer.alpha = 0.0
+            
+            self.backgroundView.contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.onTapGesture(_:))))
+        }
     }
     
     required public init?(coder: NSCoder) {
@@ -149,13 +176,13 @@ public final class GalleryTitleView: UIView, NavigationBarTitleView {
         }
 
         if let authorNameText {
-            self.authorNameNode.attributedText = NSAttributedString(string: authorNameText, font: titleFont, textColor: .white)
+            self.authorNameNode.attributedText = NSAttributedString(string: authorNameText, font: self.isClassic ? classicTitleFont : titleFont, textColor: .white)
         } else {
             self.authorNameNode.attributedText = nil
         }
 
         if let dateText {
-            self.dateNode.attributedText = NSAttributedString(string: dateText, font: dateFont, textColor: UIColor(white: 1.0, alpha: 0.5))
+            self.dateNode.attributedText = NSAttributedString(string: dateText, font: self.isClassic ? classicDateFont : dateFont, textColor: self.isClassic ? .white : UIColor(white: 1.0, alpha: 0.5))
         } else {
             self.dateNode.attributedText = nil
         }
@@ -170,6 +197,9 @@ public final class GalleryTitleView: UIView, NavigationBarTitleView {
     }
     
     public func updateLayout(availableSize: CGSize, transition: ContainedViewLayoutTransition) -> CGSize {
+        if let classicTitleBackground = self.classicTitleBackground {
+            return self.updateClassicLayout(availableSize: availableSize, titleBackground: classicTitleBackground, transition: transition)
+        }
         let size = availableSize
         
         let leftInset: CGFloat = 8.0 + 14.0
@@ -237,6 +267,42 @@ public final class GalleryTitleView: UIView, NavigationBarTitleView {
         return availableSize
     }
     
+    private func updateClassicLayout(availableSize size: CGSize, titleBackground: UIView, transition: ContainedViewLayoutTransition) -> CGSize {
+        let authorNameSize = self.authorNameNode.measure(CGSize(width: max(1.0, size.width - 8.0 * 2.0), height: CGFloat.greatestFiniteMagnitude))
+        let dateSize = self.dateNode.measure(CGSize(width: max(1.0, size.width - 8.0 * 2.0), height: CGFloat.greatestFiniteMagnitude))
+        
+        if authorNameSize.height.isZero {
+            self.dateNode.frame = CGRect(origin: CGPoint(x: floor((size.width - dateSize.width) / 2.0), y: floor((size.height - dateSize.height) / 2.0)), size: dateSize)
+        } else {
+            let labelsSpacing: CGFloat = 0.0
+            self.authorNameNode.frame = CGRect(origin: CGPoint(x: floor((size.width - authorNameSize.width) / 2.0), y: floor((size.height - dateSize.height - authorNameSize.height - labelsSpacing) / 2.0)), size: authorNameSize)
+            self.dateNode.frame = CGRect(origin: CGPoint(x: floor((size.width - dateSize.width) / 2.0), y: floor((size.height - dateSize.height - authorNameSize.height - labelsSpacing) / 2.0) + authorNameSize.height + labelsSpacing), size: dateSize)
+        }
+        
+        let titleSize = self.title.update(
+            transition: .immediate,
+            component: AnyComponent(MultilineTextComponent(
+                text: .plain(NSAttributedString(string: self.titleString ?? "", font: Font.semibold(12.0), textColor: .white))
+            )),
+            environment: {},
+            containerSize: CGSize(width: 200.0, height: 100.0)
+        )
+        let titleInset: CGFloat = 12.0
+        let titleBackgroundSize = CGSize(width: titleInset * 2.0 + titleSize.width, height: 24.0)
+        let titleBackgroundFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((size.width - titleBackgroundSize.width) * 0.5), y: size.height + 3.0 + 8.0), size: titleBackgroundSize)
+        if let titleView = self.title.view {
+            if titleView.superview == nil {
+                titleBackground.addSubview(titleView)
+            }
+            titleView.frame = titleSize.centered(in: CGRect(origin: CGPoint(), size: titleBackgroundSize))
+        }
+        titleBackground.frame = titleBackgroundFrame
+        titleBackground.layer.cornerRadius = 6.0
+        titleBackground.isHidden = !(self.titleString != nil && self.titleString != "")
+        
+        return size
+    }
+    
     public func animateLayoutTransition() {
     }
     
@@ -247,6 +313,7 @@ public final class GalleryTitleView: UIView, NavigationBarTitleView {
             
             ComponentTransition.easeInOut(duration: 0.2).animateView {
                 self.titleBackgroundContainer.alpha = 1.0
+                self.classicTitleBackground?.alpha = 1.0
             }
         } else {
             self.interactionTimer?.invalidate()
@@ -256,6 +323,7 @@ public final class GalleryTitleView: UIView, NavigationBarTitleView {
                 }
                 ComponentTransition.easeInOut(duration: 0.2).animateView {
                     self.titleBackgroundContainer.alpha = 0.0
+                    self.classicTitleBackground?.alpha = 0.0
                 }
             })
         }

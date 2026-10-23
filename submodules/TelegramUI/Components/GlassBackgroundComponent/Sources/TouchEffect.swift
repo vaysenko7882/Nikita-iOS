@@ -13,6 +13,11 @@ public final class GlassHighlightGestureRecognizer: UIGestureRecognizer, UIGestu
             self.touchEffect?.setParameters(self.parameters, animated: false)
         }
     }
+    public var pressedScale: CGFloat? {
+        didSet {
+            self.parameters.pressedScale = self.pressedScale
+        }
+    }
     
     public override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
@@ -46,6 +51,9 @@ public final class GlassHighlightGestureRecognizer: UIGestureRecognizer, UIGestu
     }
     
     override public func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if ClassicDesign.isEnabled {
+            return
+        }
         if let view = self.touchEffectView ?? self.view, let touch = touches.first {
             let touchLocation = touch.location(in: view)
             let touchEffect = TouchEffect(view: view, highlightContainerView: self.highlightContainerView)
@@ -123,6 +131,7 @@ final class TouchEffect {
             initialVelocity: 0.0
         )
         var pressedSizeIncrease: CGFloat = 20.0
+        var pressedScale: CGFloat?
     }
 
     private weak var view: UIView?
@@ -191,7 +200,10 @@ final class TouchEffect {
 
         let baseScaleX: CGFloat
         let baseScaleY: CGFloat
-        if state.isTracking {
+        if state.isTracking, let pressedScale = self.parameters.pressedScale {
+            baseScaleX = pressedScale
+            baseScaleY = pressedScale
+        } else if state.isTracking {
             if viewWidth < viewHeight {
                 baseScaleY = 1.0 + self.parameters.pressedSizeIncrease / viewHeight
                 baseScaleX = baseScaleY

@@ -430,6 +430,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
     private var backgroundView: BlurredBackgroundView?
     private var backgroundTintView: UIImageView?
     private var backgroundChromeView: UIImageView?
+    private var classicSeparatorView: UIView?
     private var backgroundTintMaskView: UIView?
     private var backgroundTintMaskContentView: UIView?
     private var externalBackground: EmojiPagerContentComponent.ExternalBackground?
@@ -499,7 +500,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
 
         self.clippingView = SparseContainerView()
         self.clippingView.clipsToBounds = true
-        self.clippingView.layer.cornerRadius = keyboardCornerRadius
+        self.clippingView.layer.cornerRadius = ClassicDesign.isEnabled ? 0.0 : keyboardCornerRadius
 
         self.entityKeyboardView = ComponentView()
 
@@ -543,6 +544,15 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
 
         if let backgroundChromeView = self.backgroundChromeView {
             self.view.addSubview(backgroundChromeView)
+            if ClassicDesign.isEnabled {
+                backgroundChromeView.isHidden = true
+            }
+        }
+        if ClassicDesign.isEnabled {
+            let classicSeparatorView = UIView()
+            classicSeparatorView.isUserInteractionEnabled = false
+            self.classicSeparatorView = classicSeparatorView
+            self.view.addSubview(classicSeparatorView)
         }
 
         self.externalTopPanelContainerImpl = PagerExternalTopPanelContainer()
@@ -1881,7 +1891,7 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
         }
         if case let .customChatContents(customChatContents) = interfaceState.subject {
             switch customChatContents.kind {
-            case .quickReplyMessageInput:
+            case .quickReplyMessageInput, .welcomeMessages:
                 break
             case .hashTagSearch, .messageVersionHistory:
                 break
@@ -2040,19 +2050,29 @@ public final class ChatEntityKeyboardInputNode: ChatInputNode {
             }
             backgroundFrame.size.height += 32.0
 
-            if backgroundChromeView.image == nil {
-                backgroundChromeView.image = GlassBackgroundView.generateForegroundImage(size: CGSize(width: keyboardCornerRadius * 2.0, height: keyboardCornerRadius * 2.0), isDark: interfaceState.theme.overallDarkAppearance, fillColor: .clear)
+            if ClassicDesign.isEnabled {
+                backgroundTintView.image = nil
+                backgroundTintView.backgroundColor = interfaceState.theme.chat.inputMediaPanel.backgroundColor
+            } else {
+                if backgroundChromeView.image == nil {
+                    backgroundChromeView.image = GlassBackgroundView.generateForegroundImage(size: CGSize(width: keyboardCornerRadius * 2.0, height: keyboardCornerRadius * 2.0), isDark: interfaceState.theme.overallDarkAppearance, fillColor: .clear)
+                }
+                if backgroundTintView.image == nil {
+                    backgroundTintView.image = generateStretchableFilledCircleImage(diameter: keyboardCornerRadius * 2.0, color: .white)?.withRenderingMode(.alwaysTemplate)
+                }
+                backgroundTintView.tintColor = interfaceState.theme.chat.inputMediaPanel.backgroundColor
             }
-            if backgroundTintView.image == nil {
-                backgroundTintView.image = generateStretchableFilledCircleImage(diameter: keyboardCornerRadius * 2.0, color: .white)?.withRenderingMode(.alwaysTemplate)
-            }
-            backgroundTintView.tintColor = interfaceState.theme.chat.inputMediaPanel.backgroundColor
 
             transition.updateFrame(view: backgroundView, frame: backgroundFrame)
             backgroundView.updateColor(color: .clear, forceKeepBlur: true, transition: .immediate)
-            backgroundView.update(size: backgroundFrame.size, cornerRadius: keyboardCornerRadius, maskedCorners: [.layerMinXMinYCorner, .layerMaxXMinYCorner], transition: transition)
+            backgroundView.update(size: backgroundFrame.size, cornerRadius: ClassicDesign.isEnabled ? 0.0 : keyboardCornerRadius, maskedCorners: [.layerMinXMinYCorner, .layerMaxXMinYCorner], transition: transition)
 
             transition.updateFrame(view: backgroundChromeView, frame: backgroundFrame.insetBy(dx: -1.0, dy: 0.0))
+
+            if let classicSeparatorView = self.classicSeparatorView {
+                classicSeparatorView.backgroundColor = interfaceState.theme.chat.inputMediaPanel.panelSeparatorColor
+                transition.updateFrame(view: classicSeparatorView, frame: CGRect(origin: CGPoint(x: 0.0, y: backgroundFrame.minY), size: CGSize(width: backgroundFrame.width, height: UIScreenPixel)))
+            }
 
             var backgroundTintMaskContentFrame = CGRect(origin: CGPoint(), size: backgroundFrame.size)
             if self.hideInput {
@@ -2672,7 +2692,7 @@ public final class EntityInputView: UIInputView, LegacyMessageInputPanelInputVie
 
         let bottomInset: CGFloat
         if #available(iOS 11.0, *) {
-            bottomInset = max(0.0, UIScreen.main.bounds.height - (self.window?.safeAreaLayoutGuide.layoutFrame.maxY ?? 10000.0))
+            bottomInset = max(0.0, mainWindowScreenBounds.height - (self.window?.safeAreaLayoutGuide.layoutFrame.maxY ?? 10000.0))
         } else {
             bottomInset = 0.0
         }

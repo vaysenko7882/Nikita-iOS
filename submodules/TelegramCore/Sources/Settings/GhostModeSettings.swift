@@ -3,7 +3,7 @@ import MtProtoKit
 import Postbox
 import SwiftSignalKit
 
-let ghostModeStoryNamespace: MessageId.Namespace = Int32.min + 53
+public let ghostModeStoryNamespace: MessageId.Namespace = Int32.min + 53
 
 private struct GhostModeReadStateVersion: Codable {
     var value: Int64
@@ -148,6 +148,178 @@ func ghostModePreviousReadState(transaction: Transaction, peerId: PeerId, namesp
     }
 }
 
+public struct GhostModeResetPlan: Equatable {
+    public struct PeerRollback: Equatable {
+        public let peerId: PeerId
+        public let namespace: MessageId.Namespace
+        public let readState: GhostModePreviousReadState
+
+        public init(peerId: PeerId, namespace: MessageId.Namespace, readState: GhostModePreviousReadState) {
+            self.peerId = peerId
+            self.namespace = namespace
+            self.readState = readState
+        }
+    }
+
+    public struct ThreadRollback: Equatable {
+        public let peerId: PeerId
+        public let threadId: Int64
+        public let readState: GhostModePreviousThreadReadState
+
+        public init(peerId: PeerId, threadId: Int64, readState: GhostModePreviousThreadReadState) {
+            self.peerId = peerId
+            self.threadId = threadId
+            self.readState = readState
+        }
+    }
+
+    public struct StoryRollback: Equatable {
+        public let peerId: PeerId
+        public let maxReadId: Int32
+
+        public init(peerId: PeerId, maxReadId: Int32) {
+            self.peerId = peerId
+            self.maxReadId = maxReadId
+        }
+    }
+
+    public var peerRollbacks: [PeerRollback]
+    public var threadRollbacks: [ThreadRollback]
+    public var storyRollbacks: [StoryRollback]
+    public var peersNeedingServerState: [PeerId]
+    public var consumedMarkers: [GhostModeReadStateMarker]
+
+    public var isEmpty: Bool {
+        return self.consumedMarkers.isEmpty
+    }
+}
+
+public func ghostModeResetPlan(
+    markers: [GhostModeReadStateMarker],
+    includeMessages: Bool,
+    includeStories: Bool
+) -> GhostModeResetPlan {
+    var peerRollbacks: [GhostModeResetPlan.PeerRollback] = []
+    var threadRollbacks: [GhostModeResetPlan.ThreadRollback] = []
+    var storyRollbacks: [GhostModeResetPlan.StoryRollback] = []
+    var peersNeedingServerState: [PeerId] = []
+    var consumedMarkers: [GhostModeReadStateMarker] = []
+
+    for marker in markers {
+        if marker.namespace == ghostModeStoryNamespace {
+            guard includeStories else {
+                continue
+            }
+            if let previousStoryReadId = marker.previousStoryReadId {
+                storyRollbacks.append(GhostModeResetPlan.StoryRollback(
+                    peerId: marker.peerId,
+                    maxReadId: previousStoryReadId
+                ))
+            }
+            consumedMarkers.append(marker)
+            continue
+        }
+
+        guard includeMessages else {
+            continue
+        }
+        if let threadId = marker.threadId {
+            if let previousThreadReadState = marker.previousThreadReadState {
+                threadRollbacks.append(GhostModeResetPlan.ThreadRollback(
+                    peerId: marker.peerId,
+                    threadId: threadId,
+                    readState: previousThreadReadState
+                ))
+            }
+        } else if let previousReadState = marker.previousReadState {
+            peerRollbacks.append(GhostModeResetPlan.PeerRollback(
+                peerId: marker.peerId,
+                namespace: marker.namespace,
+                readState: previousReadState
+            ))
+        } else {
+            peersNeedingServerState.append(marker.peerId)
+        }
+        consumedMarkers.append(marker)
+    }
+
+    return GhostModeResetPlan(
+        peerRollbacks: peerRollbacks,
+        threadRollbacks: threadRollbacks,
+        storyRollbacks: storyRollbacks,
+        peersNeedingServerState: peersNeedingServerState,
+        consumedMarkers: consumedMarkers
+    )
+}
+
+func ghostModeUserWroteLast(transaction: Transaction, peerId: PeerId, namespace: MessageId.Namespace) -> Bool {
+    guard let index = transaction.getTopPeerMessageIndex(peerId: peerId, namespace: namespace) else {
+        return false
+    }
+    guard let message = transaction.getMessage(index.id) else {
+        return false
+    }
+    return message.flags.intersection(.IsIncomingMask).isEmpty
+}
+
+@discardableResult
+func ghostModeApplyResetPlan(transaction: Transaction, plan: GhostModeResetPlan) -> Set<PeerId> {
+    var rolledBackPeerIds = Set<PeerId>()
+    if plan.isEmpty {
+        return rolledBackPeerIds
+    }
+
+    for rollback in plan.storyRollbacks {
+        transaction.setPeerStoryState(
+            peerId: rollback.peerId,
+            state: Stories.PeerState(maxReadId: rollback.maxReadId).postboxRepresentation
+        )
+    }
+
+    for rollback in plan.threadRollbacks {
+        guard var data = transaction.getMessageHistoryThreadInfo(peerId: rollback.peerId, threadId: rollback.threadId)?.data.get(MessageHistoryThreadData.self) else {
+            continue
+        }
+        data.maxIncomingReadId = rollback.readState.maxIncomingReadId
+        data.maxKnownMessageId = rollback.readState.maxKnownMessageId
+        data.incomingUnreadCount = rollback.readState.incomingUnreadCount
+        data.isMarkedUnread = rollback.readState.markedUnread
+        if let entry = StoredMessageHistoryThreadInfo(data) {
+            transaction.setMessageHistoryThreadInfo(peerId: rollback.peerId, threadId: rollback.threadId, info: entry)
+        }
+    }
+
+    var readStates: [PeerId: [MessageId.Namespace: PeerReadState]] = [:]
+    for rollback in plan.peerRollbacks {
+        if ghostModeUserWroteLast(transaction: transaction, peerId: rollback.peerId, namespace: rollback.namespace) {
+            continue
+        }
+        readStates[rollback.peerId, default: [:]][rollback.namespace] = .idBased(
+            maxIncomingReadId: rollback.readState.maxIncomingReadId,
+            maxOutgoingReadId: rollback.readState.maxOutgoingReadId,
+            maxKnownId: rollback.readState.maxKnownId,
+            count: rollback.readState.count,
+            markedUnread: rollback.readState.markedUnread
+        )
+        if rollback.namespace == Namespaces.Message.Cloud {
+            rolledBackPeerIds.insert(rollback.peerId)
+        }
+    }
+    if !readStates.isEmpty {
+        transaction.resetIncomingReadStates(readStates)
+    }
+
+    for marker in plan.consumedMarkers {
+        transaction.removeGhostModeReadState(
+            peerId: marker.peerId,
+            threadId: marker.threadId,
+            namespace: marker.namespace
+        )
+    }
+    updateGhostModeReadStateVersion(transaction: transaction)
+    return rolledBackPeerIds
+}
+
 public func updateGhostModeSettingsInteractively(
     postbox: Postbox,
     _ f: @escaping (GhostModeSettings) -> GhostModeSettings
@@ -161,60 +333,12 @@ public func updateGhostModeSettingsInteractively(
         let shouldRestoreMessageReadStates = previous.hidesMessageReadReceipts && !updated.hidesMessageReadReceipts
         let shouldRestoreStoryReadStates = previous.hidesStoryReadReceipts && !updated.hidesStoryReadReceipts
         if shouldRestoreMessageReadStates || shouldRestoreStoryReadStates {
-            let markers = transaction.getAllGhostModeReadStates()
-            for marker in markers {
-                if marker.namespace == ghostModeStoryNamespace {
-                    guard shouldRestoreStoryReadStates else {
-                        continue
-                    }
-                    if let previousStoryReadId = marker.previousStoryReadId {
-                        transaction.setPeerStoryState(
-                            peerId: marker.peerId,
-                            state: Stories.PeerState(maxReadId: previousStoryReadId).postboxRepresentation
-                        )
-                    }
-                    transaction.removeGhostModeReadState(
-                        peerId: marker.peerId,
-                        threadId: marker.threadId,
-                        namespace: marker.namespace
-                    )
-                    continue
-                }
-                guard shouldRestoreMessageReadStates else {
-                    continue
-                }
-                if let threadId = marker.threadId, let previousThreadReadState = marker.previousThreadReadState {
-                    if var data = transaction.getMessageHistoryThreadInfo(peerId: marker.peerId, threadId: threadId)?.data.get(MessageHistoryThreadData.self) {
-                        data.maxIncomingReadId = previousThreadReadState.maxIncomingReadId
-                        data.maxKnownMessageId = previousThreadReadState.maxKnownMessageId
-                        data.incomingUnreadCount = previousThreadReadState.incomingUnreadCount
-                        data.isMarkedUnread = previousThreadReadState.markedUnread
-                        if let entry = StoredMessageHistoryThreadInfo(data) {
-                            transaction.setMessageHistoryThreadInfo(peerId: marker.peerId, threadId: threadId, info: entry)
-                        }
-                    }
-                } else if let previousReadState = marker.previousReadState {
-                    transaction.resetIncomingReadStates([
-                        marker.peerId: [
-                            marker.namespace: .idBased(
-                                maxIncomingReadId: previousReadState.maxIncomingReadId,
-                                maxOutgoingReadId: previousReadState.maxOutgoingReadId,
-                                maxKnownId: previousReadState.maxKnownId,
-                                count: previousReadState.count,
-                                markedUnread: previousReadState.markedUnread
-                            )
-                        ]
-                    ])
-                } else {
-                    transaction.setNeedsIncomingReadStateSynchronization(marker.peerId)
-                }
-                transaction.removeGhostModeReadState(
-                    peerId: marker.peerId,
-                    threadId: marker.threadId,
-                    namespace: marker.namespace
-                )
-            }
-            updateGhostModeReadStateVersion(transaction: transaction)
+            let plan = ghostModeResetPlan(
+                markers: transaction.getAllGhostModeReadStates(),
+                includeMessages: shouldRestoreMessageReadStates,
+                includeStories: shouldRestoreStoryReadStates
+            )
+            ghostModeApplyResetPlan(transaction: transaction, plan: plan)
         }
     }
     |> ignoreValues

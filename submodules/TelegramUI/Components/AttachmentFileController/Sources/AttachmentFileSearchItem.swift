@@ -73,6 +73,23 @@ final class AttachmentFileSearchItem: ItemListControllerSearch {
     }
     
     func titleContentNode(current: (NavigationBarContentNode & ItemListControllerSearchNavigationContentNode)?) -> (NavigationBarContentNode & ItemListControllerSearchNavigationContentNode)? {
+        if ClassicDesign.isEnabled {
+            let placeholder: String
+            switch self.mode {
+            case .audio:
+                placeholder = self.presentationData.strings.Common_Search
+            case .recent:
+                placeholder = self.presentationData.strings.Attachment_FilesSearchPlaceholder
+            }
+            if let current = current as? ClassicAttachmentFileSearchNavigationContentNode {
+                current.updateTheme(self.presentationData.theme)
+                return current
+            } else {
+                return ClassicAttachmentFileSearchNavigationContentNode(theme: self.presentationData.theme, strings: self.presentationData.strings, placeholder: placeholder, focus: self.focus, cancel: self.cancel, updateActivity: { [weak self] value in
+                    self?.updateActivity = value
+                })
+            }
+        }
         switch self.mode {
         case .audio:
             if let current = current as? AttachmentFileSearchNavigationContentNode {
@@ -155,7 +172,7 @@ private final class AttachmentFileSearchItemNode: ItemListControllerSearchNode {
         transition.updateFrame(node: self.containerNode, frame: CGRect(origin: CGPoint(x: 0.0, y: navigationBarHeight), size: CGSize(width: layout.size.width, height: layout.size.height - navigationBarHeight)))
         self.containerNode.containerLayoutUpdated(layout.withUpdatedSize(CGSize(width: layout.size.width, height: layout.size.height - navigationBarHeight)), navigationBarHeight: 0.0, transition: transition)
         
-        if case .recent = self.mode {
+        if case .recent = self.mode, !ClassicDesign.isEnabled {
             let searchInputSize = self.searchInput.update(
                 transition: .immediate,
                 component: AnyComponent(
@@ -835,10 +852,12 @@ public final class AttachmentFileSearchContainerNode: SearchDisplayControllerCon
         insets.top += navigationBarHeight
         insets.bottom += 60.0
         
-        let inset = max(16.0, floor((layout.size.width - 674.0) / 2.0))
         if layout.size.width >= 320.0 {
-            insets.left += inset
-            insets.right += inset
+            // iPhone Duo: a side with a side strip keeps the list 16pt clear of it; without a strip both margins
+            // are the old value.
+            let margins = layout.listSideMargins(base: max(16.0, floor((layout.size.width - 674.0) / 2.0)))
+            insets.left += margins.left
+            insets.right += margins.right
         }
         
         if self.rightOverlayNode.supernode == nil {
@@ -1176,6 +1195,93 @@ private final class AttachmentFileSearchNavigationContentNode: NavigationBarCont
         transition.setFrame(view: self.close.background, frame: closeFrame)
         self.close.background.update(size: closeFrame.size, cornerRadius: closeFrame.height * 0.5, isDark: self.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: transition)
         
+        return size
+    }
+    
+    func activate() {
+        self.searchBar.activate()
+    }
+    
+    func deactivate() {
+        self.searchBar.deactivate(clear: false)
+    }
+}
+
+private final class ClassicAttachmentFileSearchNavigationContentNode: NavigationBarContentNode, ItemListControllerSearchNavigationContentNode {
+    private var theme: PresentationTheme
+    private let strings: PresentationStrings
+    private let placeholder: String
+    
+    private let focus: () -> Void
+    private let cancel: () -> Void
+    
+    private let searchBar: SearchBarNode
+    
+    private var queryUpdated: ((String) -> Void)?
+    var activity: Bool = false {
+        didSet {
+            self.searchBar.activity = self.activity
+        }
+    }
+    
+    init(theme: PresentationTheme, strings: PresentationStrings, placeholder: String, focus: @escaping () -> Void, cancel: @escaping () -> Void, updateActivity: @escaping (@escaping (Bool) -> Void) -> Void) {
+        self.theme = theme
+        self.strings = strings
+        self.placeholder = placeholder
+        
+        self.focus = focus
+        self.cancel = cancel
+        
+        self.searchBar = SearchBarNode(theme: SearchBarNodeTheme(theme: theme, hasSeparator: false), presentationTheme: theme, strings: strings, fieldStyle: .modern, displayBackground: false)
+        
+        super.init()
+        
+        self.addSubnode(self.searchBar)
+        
+        self.searchBar.cancel = { [weak self] in
+            self?.searchBar.deactivate(clear: false)
+            self?.cancel()
+        }
+        
+        self.searchBar.textUpdated = { [weak self] query, _ in
+            self?.queryUpdated?(query)
+        }
+        
+        self.searchBar.focusUpdated = { [weak self] focus in
+            if focus {
+                self?.focus()
+            }
+        }
+        
+        updateActivity({ [weak self] value in
+            self?.activity = value
+        })
+        
+        self.updatePlaceholder()
+    }
+    
+    func setQueryUpdated(_ f: @escaping (String) -> Void) {
+        self.queryUpdated = f
+    }
+    
+    func updateTheme(_ theme: PresentationTheme) {
+        self.theme = theme
+        self.searchBar.updateThemeAndStrings(theme: SearchBarNodeTheme(theme: self.theme, hasSeparator: false), presentationTheme: self.theme, strings: self.strings)
+        self.updatePlaceholder()
+    }
+    
+    private func updatePlaceholder() {
+        self.searchBar.placeholderString = NSAttributedString(string: self.placeholder, font: searchBarFont, textColor: self.theme.rootController.navigationSearchBar.inputPlaceholderTextColor)
+    }
+    
+    override var nominalHeight: CGFloat {
+        return 56.0
+    }
+    
+    override func updateLayout(size: CGSize, leftInset: CGFloat, rightInset: CGFloat, transition: ContainedViewLayoutTransition) -> CGSize {
+        let searchBarFrame = CGRect(origin: CGPoint(x: 0.0, y: size.height - self.nominalHeight), size: CGSize(width: size.width, height: 56.0))
+        self.searchBar.frame = searchBarFrame
+        self.searchBar.updateLayout(boundingSize: searchBarFrame.size, leftInset: leftInset, rightInset: rightInset, transition: transition)
         return size
     }
     

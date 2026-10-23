@@ -24,6 +24,21 @@ private let smallBoldItalicTextFont = Font.with(size: 14.0, weight: .semibold, t
 private let smallFixedTextFont = Font.monospace(14.0)
 private let backgroundInset: CGFloat = 8.0
 
+private let classicTitleFont = Font.semibold(17.0)
+private let classicTextFont = Font.regular(13.0)
+private let classicBoldTextFont = Font.semibold(13.0)
+private let classicItalicTextFont = Font.italic(13.0)
+private let classicBoldItalicTextFont = Font.with(size: 13.0, weight: .semibold, traits: [.italic])
+private let classicFixedTextFont = Font.monospace(13.0)
+private let classicSmallTextFont = Font.regular(12.0)
+private let classicSmallBoldTextFont = Font.semibold(12.0)
+private let classicSmallItalicTextFont = Font.italic(12.0)
+private let classicSmallFixedTextFont = Font.monospace(12.0)
+private let classicStandaloneTextFont = Font.semibold(17.0)
+private let classicStandaloneBoldTextFont = Font.bold(17.0)
+private let classicStandaloneItalicTextFont = Font.with(size: 17.0, weight: .semibold, traits: [.italic])
+private let classicStandaloneFixedTextFont = Font.monospace(17.0)
+
 public final class AlertTitleComponent: Component {
     public typealias EnvironmentType = AlertComponentEnvironment
     
@@ -65,6 +80,9 @@ public final class AlertTitleComponent: Component {
             
             let environment = environment[AlertComponentEnvironment.self]
             
+            let isClassic = ClassicDesign.isEnabled
+            let alignment: Alignment = isClassic ? .center : component.alignment
+            
             let inset: CGFloat = -6.0
             let titleConstrainedSize = CGSize(width: availableSize.width - inset * 2.0, height: availableSize.height)
             let titleSize = self.title.update(
@@ -72,10 +90,10 @@ public final class AlertTitleComponent: Component {
                 component: AnyComponent(MultilineTextComponent(
                     text: .plain(NSAttributedString(
                         string: component.title,
-                        font: titleFont,
+                        font: isClassic ? classicTitleFont : titleFont,
                         textColor: environment.theme.actionSheet.primaryTextColor
                     )),
-                    horizontalAlignment: component.alignment == .center ? .center : .natural,
+                    horizontalAlignment: alignment == .center ? .center : .natural,
                     maximumNumberOfLines: 0
                 )),
                 environment: {},
@@ -83,7 +101,7 @@ public final class AlertTitleComponent: Component {
             )
             
             let titleOriginX: CGFloat
-            switch component.alignment {
+            switch alignment {
             case .default:
                 titleOriginX = inset
             case .center:
@@ -169,6 +187,7 @@ public final class AlertTextComponent: Component {
     let style: Style
     let insets: UIEdgeInsets
     let action: ([NSAttributedString.Key: Any]) -> Void
+    var isClassicStandaloneText: Bool = false
     
     public init(
         content: Content,
@@ -202,6 +221,9 @@ public final class AlertTextComponent: Component {
         if lhs.insets != rhs.insets {
             return false
         }
+        if lhs.isClassicStandaloneText != rhs.isClassicStandaloneText {
+            return false
+        }
         return true
     }
     
@@ -233,24 +255,52 @@ public final class AlertTextComponent: Component {
             let boldTextFont: UIFont
             let italicTextFont: UIFont
             let fixedTextFont: UIFont
+            let isClassic = ClassicDesign.isEnabled
             switch component.style {
             case let .plain(textStyle), let .background(textStyle):
-                switch textStyle {
-                case .default:
-                    textFont = defaultTextFont
-                    boldTextFont = defaultBoldTextFont
-                    italicTextFont = defaultItalicTextFont
-                    fixedTextFont = defaultFixedTextFont
-                case .small:
-                    textFont = smallTextFont
-                    boldTextFont = smallBoldTextFont
-                    italicTextFont = smallItalicTextFont
-                    fixedTextFont = smallFixedTextFont
-                case .bold:
-                    textFont = defaultBoldTextFont
-                    boldTextFont = defaultBoldTextFont
-                    italicTextFont = defaultBoldItalicTextFont
-                    fixedTextFont = defaultFixedTextFont
+                if isClassic {
+                    if component.isClassicStandaloneText {
+                        textFont = classicStandaloneTextFont
+                        boldTextFont = classicStandaloneBoldTextFont
+                        italicTextFont = classicStandaloneItalicTextFont
+                        fixedTextFont = classicStandaloneFixedTextFont
+                    } else {
+                        switch textStyle {
+                        case .default:
+                            textFont = classicTextFont
+                            boldTextFont = classicBoldTextFont
+                            italicTextFont = classicItalicTextFont
+                            fixedTextFont = classicFixedTextFont
+                        case .small:
+                            textFont = classicSmallTextFont
+                            boldTextFont = classicSmallBoldTextFont
+                            italicTextFont = classicSmallItalicTextFont
+                            fixedTextFont = classicSmallFixedTextFont
+                        case .bold:
+                            textFont = classicBoldTextFont
+                            boldTextFont = classicBoldTextFont
+                            italicTextFont = classicBoldItalicTextFont
+                            fixedTextFont = classicFixedTextFont
+                        }
+                    }
+                } else {
+                    switch textStyle {
+                    case .default:
+                        textFont = defaultTextFont
+                        boldTextFont = defaultBoldTextFont
+                        italicTextFont = defaultItalicTextFont
+                        fixedTextFont = defaultFixedTextFont
+                    case .small:
+                        textFont = smallTextFont
+                        boldTextFont = smallBoldTextFont
+                        italicTextFont = smallItalicTextFont
+                        fixedTextFont = smallFixedTextFont
+                    case .bold:
+                        textFont = defaultBoldTextFont
+                        boldTextFont = defaultBoldTextFont
+                        italicTextFont = defaultBoldItalicTextFont
+                        fixedTextFont = defaultFixedTextFont
+                    }
                 }
             }
             
@@ -274,7 +324,7 @@ public final class AlertTextComponent: Component {
                 finalText = stringWithAppliedEntities(text, entities: entities, baseColor: textColor, linkColor: linkColor, baseFont: textFont, linkFont: textFont, boldFont: boldTextFont, italicFont: italicTextFont, boldItalicFont: italicTextFont, fixedFont: fixedTextFont, blockQuoteFont: textFont, message: nil)
             }
             
-            var hasCenterAlignment = component.alignment == .center
+            var hasCenterAlignment = component.alignment == .center || isClassic
             switch component.style {
             case .background:
                 hasCenterAlignment = true

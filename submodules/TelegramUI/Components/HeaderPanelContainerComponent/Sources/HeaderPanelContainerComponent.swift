@@ -39,17 +39,20 @@ public final class HeaderPanelContainerComponent: Component {
     public let preferClearGlass: Bool
     public let tabs: AnyComponent<Empty>?
     public let panels: [Panel]
+    public let isFooter: Bool
     
     public init(
         theme: PresentationTheme,
         preferClearGlass: Bool = false,
         tabs: AnyComponent<Empty>?,
-        panels: [Panel]
+        panels: [Panel],
+        isFooter: Bool = false
     ) {
         self.theme = theme
         self.preferClearGlass = preferClearGlass
         self.tabs = tabs
         self.panels = panels
+        self.isFooter = isFooter
     }
     
     public static func ==(lhs: HeaderPanelContainerComponent, rhs: HeaderPanelContainerComponent) -> Bool {
@@ -63,6 +66,9 @@ public final class HeaderPanelContainerComponent: Component {
             return false
         }
         if lhs.panels != rhs.panels {
+            return false
+        }
+        if lhs.isFooter != rhs.isFooter {
             return false
         }
         return true
@@ -88,6 +94,9 @@ public final class HeaderPanelContainerComponent: Component {
         
         private var tabsView: ComponentView<Empty>?
         private var panelViews: [AnyHashable: PanelItemView] = [:]
+        
+        private var classicBackgroundNode: NavigationBackgroundNode?
+        private var classicSeparatorLayer: SimpleLayer?
         
         private var component: HeaderPanelContainerComponent?
         private weak var state: EmptyComponentState?
@@ -127,7 +136,9 @@ public final class HeaderPanelContainerComponent: Component {
             self.component = component
             self.state = state
             
-            let sideInset: CGFloat = 16.0
+            let isClassicFlat = ClassicDesign.isEnabled && component.tabs == nil && !component.isFooter
+            let isClassicBare = ClassicDesign.isEnabled && component.tabs != nil && !component.isFooter
+            let sideInset: CGFloat = (isClassicFlat || isClassicBare) ? 0.0 : 16.0
             
             var size = CGSize(width: availableSize.width, height: 0.0)
             
@@ -207,7 +218,7 @@ public final class HeaderPanelContainerComponent: Component {
                         }
                     }
                     
-                    panelView.separator.backgroundColor = component.theme.list.itemPlainSeparatorColor.cgColor
+                    panelView.separator.backgroundColor = ((isClassicFlat || isClassicBare) ? component.theme.rootController.navigationBar.separatorColor : component.theme.list.itemPlainSeparatorColor).cgColor
                     
                     let isFrameUpdated = panelComponentView.frame != panelFrame
                     transition.setFrame(view: panelView, frame: panelFrame, completion: { [weak panelView] completed in
@@ -245,6 +256,16 @@ public final class HeaderPanelContainerComponent: Component {
                 self.panelViews.removeValue(forKey: key)
             }
             
+            if isClassicFlat {
+                self.updateClassicBackground(component: component, size: size, transition: transition)
+                return size
+            } else if isClassicBare {
+                self.updateClassicBare(size: size, transition: transition)
+                return size
+            } else if self.classicBackgroundNode != nil || self.contentContainer.superview !== self.backgroundView.contentView {
+                self.removeClassicBackground()
+            }
+            
             let backgroundSize = CGSize(width: size.width, height: max(40.0, size.height))
             
             transition.setFrame(view: self.backgroundContainer, frame: CGRect(origin: CGPoint(), size: backgroundSize).insetBy(dx: -32.0, dy: -32.0))
@@ -274,6 +295,84 @@ public final class HeaderPanelContainerComponent: Component {
             transition.setCornerRadius(layer: self.contentContainer.layer, cornerRadius: min(cornerRadius, backgroundFrame.height * 0.5))
             
             return size
+        }
+        
+        private func updateClassicBackground(component: HeaderPanelContainerComponent, size: CGSize, transition: ComponentTransition) {
+            let navigationBarTheme = component.theme.rootController.navigationBar
+            
+            self.backgroundContainer.isHidden = true
+            
+            let backgroundNode: NavigationBackgroundNode
+            if let current = self.classicBackgroundNode {
+                backgroundNode = current
+            } else {
+                backgroundNode = NavigationBackgroundNode(color: navigationBarTheme.blurredBackgroundColor, enableBlur: navigationBarTheme.blurredBackgroundColor.alpha < 1.0)
+                backgroundNode.frame = CGRect(origin: CGPoint(), size: CGSize(width: size.width, height: 0.0))
+                self.classicBackgroundNode = backgroundNode
+                self.insertSubview(backgroundNode.view, at: 0)
+            }
+            let separatorLayer: SimpleLayer
+            if let current = self.classicSeparatorLayer {
+                separatorLayer = current
+            } else {
+                separatorLayer = SimpleLayer()
+                separatorLayer.frame = CGRect(origin: CGPoint(), size: CGSize(width: size.width, height: UIScreenPixel))
+                self.classicSeparatorLayer = separatorLayer
+                self.layer.addSublayer(separatorLayer)
+            }
+            
+            if self.contentContainer.superview !== self {
+                self.contentContainer.frame = CGRect(origin: CGPoint(), size: size)
+                self.insertSubview(self.contentContainer, aboveSubview: backgroundNode.view)
+            }
+            
+            let backgroundFrame = CGRect(origin: CGPoint(), size: size)
+            backgroundNode.updateColor(color: navigationBarTheme.blurredBackgroundColor, enableBlur: navigationBarTheme.blurredBackgroundColor.alpha < 1.0, transition: .immediate)
+            transition.setFrame(view: backgroundNode.view, frame: backgroundFrame)
+            backgroundNode.update(size: backgroundFrame.size, transition: transition.containedViewLayoutTransition)
+            
+            separatorLayer.backgroundColor = navigationBarTheme.separatorColor.cgColor
+            transition.setFrame(layer: separatorLayer, frame: CGRect(origin: CGPoint(x: 0.0, y: size.height), size: CGSize(width: size.width, height: UIScreenPixel)))
+            transition.setAlpha(layer: separatorLayer, alpha: size.height > 0.0 ? 1.0 : 0.0)
+            
+            transition.setFrame(view: self.contentContainer, frame: backgroundFrame)
+            transition.setCornerRadius(layer: self.contentContainer.layer, cornerRadius: 0.0)
+        }
+        
+        private func updateClassicBare(size: CGSize, transition: ComponentTransition) {
+            if let classicBackgroundNode = self.classicBackgroundNode {
+                self.classicBackgroundNode = nil
+                classicBackgroundNode.view.removeFromSuperview()
+            }
+            if let classicSeparatorLayer = self.classicSeparatorLayer {
+                self.classicSeparatorLayer = nil
+                classicSeparatorLayer.removeFromSuperlayer()
+            }
+            
+            self.backgroundContainer.isHidden = true
+            
+            if self.contentContainer.superview !== self {
+                self.contentContainer.frame = CGRect(origin: CGPoint(), size: size)
+                self.insertSubview(self.contentContainer, at: 0)
+            }
+            
+            transition.setFrame(view: self.contentContainer, frame: CGRect(origin: CGPoint(), size: size))
+            transition.setCornerRadius(layer: self.contentContainer.layer, cornerRadius: 0.0)
+        }
+        
+        private func removeClassicBackground() {
+            if let classicBackgroundNode = self.classicBackgroundNode {
+                self.classicBackgroundNode = nil
+                classicBackgroundNode.view.removeFromSuperview()
+            }
+            if let classicSeparatorLayer = self.classicSeparatorLayer {
+                self.classicSeparatorLayer = nil
+                classicSeparatorLayer.removeFromSuperlayer()
+            }
+            self.backgroundContainer.isHidden = false
+            if self.contentContainer.superview !== self.backgroundView.contentView {
+                self.backgroundView.contentView.addSubview(self.contentContainer)
+            }
         }
     }
     

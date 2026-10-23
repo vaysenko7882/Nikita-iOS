@@ -25,6 +25,11 @@ public struct GhostModeFeatureStrings {
     public let activeIndicator: String
     public let readAllLocally: String
     public let readAllOnServer: String
+    public let readAllChats: String
+    public let readAllArchive: String
+    public let readAllEverything: String
+    public let hideSection: String
+    public let behaviorSection: String
 }
 
 public struct LocalMessageArchiveFeatureStrings {
@@ -56,6 +61,8 @@ public struct LocalMessageArchiveFeatureStrings {
     public let historyTitle: String
     public let disappearingMediaLimit: String
     public let disappearingMediaLimitInfo: String
+    public let saveSection: String
+    public let storageSection: String
 
     public let usage: (Int, Int, String) -> String
     public let versionCount: (Int) -> String
@@ -63,16 +70,20 @@ public struct LocalMessageArchiveFeatureStrings {
 
 public struct MadgramFeatureStrings {
     public let title: String
-    public let featuresSection: String
-    public let info: String
+    public let privacySection: String
+    public let privacyInfo: String
+    public let messagesSection: String
+    public let messagesInfo: String
+    public let interfaceSection: String
+    public let classicDesign: String
+    public let classicDesignInfo: String
+    public let otherSection: String
     public let forwardWithoutAuthor: String
-    public let powerSection: String
     public let powerSaving: String
     public let powerSavingInfo: String
 }
 
 public struct LocalPremiumFeatureStrings {
-    public let section: String
     public let title: String
     public let info: String
 }
@@ -127,11 +138,9 @@ public struct InterfaceTuningFeatureStrings {
     public let title: String
     public let tabsSection: String
     public let profilesSection: String
-    public let messagesSection: String
     public let storiesSection: String
-    public let mediaSection: String
-    public let privacySection: String
-    public let businessSection: String
+    public let chatsSection: String
+    public let cameraSection: String
 
     public let concealBottomBar: String
     public let concealBottomBarInfo: String
@@ -166,6 +175,8 @@ public struct InterfaceTuningFeatureStrings {
 
     public let hideStoryStrip: String
     public let hideStoryStripInfo: String
+    public let showAppBadge: String
+    public let showAppBadgeInfo: String
     public let disableStoryCameraSwipe: String
     public let disableStoryCameraSwipeInfo: String
     public let confirmStoryOpen: String
@@ -237,7 +248,12 @@ public struct LocalFeatureStrings {
                 burnViewOnceMedia: "Сжечь",
                 activeIndicator: "Режим призрака включён",
                 readAllLocally: "Прочитать локально",
-                readAllOnServer: "Прочитать на сервере"
+                readAllOnServer: "Прочитать на сервере",
+                readAllChats: "Прочитать чаты (без архива)",
+                readAllArchive: "Прочитать архив",
+                readAllEverything: "Прочитать всё",
+                hideSection: "ЧТО СКРЫВАТЬ",
+                behaviorSection: "ПОВЕДЕНИЕ"
             )
             self.localMessageArchive = LocalMessageArchiveFeatureStrings(
                 title: "Удалённые и изменённые",
@@ -268,6 +284,8 @@ public struct LocalFeatureStrings {
                 historyTitle: "История изменений",
                 disappearingMediaLimit: "Лимит для исчезающих",
                 disappearingMediaLimitInfo: "Отдельный потолок для медиа из исчезающих и одноразовых сообщений. Они не смогут занять больше этого объёма, даже если общий лимит выше. При переполнении первыми удаляются самые крупные файлы.",
+                saveSection: "ЧТО СОХРАНЯТЬ",
+                storageSection: "ХРАНЕНИЕ",
                 usage: { messageCount, versionCount, size in
                     return "Сообщений: \(messageCount) · версий: \(versionCount) · размер: \(size)"
                 },
@@ -286,14 +304,12 @@ public struct LocalFeatureStrings {
                 }
             )
             self.interfaceTuning = InterfaceTuningFeatureStrings(
-                title: "Настройка интерфейса",
+                title: "Вкладки, профили и истории",
                 tabsSection: "НИЖНЯЯ ПАНЕЛЬ",
                 profilesSection: "ПРОФИЛИ",
-                messagesSection: "СООБЩЕНИЯ",
                 storiesSection: "ИСТОРИИ",
-                mediaSection: "МЕДИА",
-                privacySection: "ЛОКАЛЬНАЯ ПРИВАТНОСТЬ",
-                businessSection: "БИЗНЕС-БОТ",
+                chatsSection: "ЧАТЫ",
+                cameraSection: "КАМЕРА",
                 concealBottomBar: "Скрывать нижнюю панель",
                 concealBottomBarInfo: "Убирает нижнюю панель навигации. Изменение полностью применяется после перезапуска приложения.",
                 showContactsShortcut: "Показывать «Контакты»",
@@ -324,13 +340,15 @@ public struct LocalFeatureStrings {
                 callbackDataTitle: "Callback data",
                 hideStoryStrip: "Скрывать ленту историй",
                 hideStoryStripInfo: "Убирает истории с верхней части списка чатов, не удаляя их и не меняя состояние на сервере.",
+                showAppBadge: "Плашка MadGram в статус-баре",
+                showAppBadgeInfo: "Показывает капсулу MADGRAM у выреза экрана. Выключите, чтобы её скрыть.",
                 disableStoryCameraSwipe: "Отключить свайп к камере",
                 disableStoryCameraSwipeInfo: "Не открывает камеру историй свайпом от списка чатов.",
                 confirmStoryOpen: "Спрашивать перед просмотром",
                 confirmStoryOpenInfo: "Показывает подтверждение перед началом просмотра истории.",
                 allowStoryRepost: "Предлагать репост в историю",
                 allowStoryRepostInfo: "Показывает действие репоста в историю в системном экране пересылки.",
-                startRoundVideoWithRearCamera: "Начинать с задней камеры",
+                startRoundVideoWithRearCamera: "Начинать кружки с задней камеры",
                 startRoundVideoWithRearCameraInfo: "Открывает запись круглого видео сразу на задней камере.",
                 hideGalleryCamera: "Скрывать камеру в галерее",
                 hideGalleryCameraInfo: "Убирает плитку камеры из галереи при выборе фотографий и видео. Обычная отправка файлов из медиатеки продолжает работать.",
@@ -344,22 +362,26 @@ public struct LocalFeatureStrings {
                 businessBotPanelNotManaged: "Этот чат не управляется бизнес-ботом.",
                 businessBotPanelShow: "Показывать панель",
                 businessBotPanelHideInChat: "Скрыть в этом чате",
-                restartNotice: "Некоторые параметры нижней панели и номера применяются после перезапуска приложения.",
+                restartNotice: "Некоторые параметры нижней панели применяются после перезапуска приложения.",
                 storyConfirmationTitle: "Открыть историю?",
                 storyConfirmationText: "Автор может увидеть ваш просмотр.",
                 storyConfirmationAction: "Просмотреть"
             )
             self.madgram = MadgramFeatureStrings(
-                title: "Madgram",
-                featuresSection: "ФУНКЦИИ MADGRAM",
-                info: "Функции, которых нет в обычном Telegram. Все данные этих функций хранятся только на этом устройстве.",
+                title: "MadGram",
+                privacySection: "ПРИВАТНОСТЬ",
+                privacyInfo: "Скрытие номера применяется после перезапуска приложения.",
+                messagesSection: "СООБЩЕНИЯ",
+                messagesInfo: "Архив удалённых сообщений и фильтры хранятся только на этом устройстве.",
+                interfaceSection: "ИНТЕРФЕЙС",
+                classicDesign: "Классический дизайн",
+                classicDesignInfo: "Возвращает оформление Telegram до Liquid Glass. Применяется после перезапуска приложения.",
+                otherSection: "ПРОЧЕЕ",
                 forwardWithoutAuthor: "Переслать без автора",
-                powerSection: "ЭНЕРГОПОТРЕБЛЕНИЕ",
                 powerSaving: "Щадящий режим",
                 powerSavingInfo: "Постоянно, а не только при низком заряде: без автовоспроизведения видео и GIF, без зацикленных стикеров и эмодзи, без размытия, без фоновой загрузки и фоновых задач, с упрощёнными анимациями интерфейса. Все функции остаются доступны — видео и стикеры запускаются по нажатию."
             )
             self.localPremium = LocalPremiumFeatureStrings(
-                section: "ПРЕМИУМ",
                 title: "Локальный премиум",
                 info: "Разблокирует интерфейс Telegram Premium только на этом устройстве. Возможности, которые проверяет сервер — большие файлы, премиум-реакции и эмодзи, расшифровка голосовых — продолжат требовать подписку."
             )
@@ -436,7 +458,12 @@ public struct LocalFeatureStrings {
                 burnViewOnceMedia: "Спалити",
                 activeIndicator: "Режим привида увімкнено",
                 readAllLocally: "Прочитати локально",
-                readAllOnServer: "Прочитати на сервері"
+                readAllOnServer: "Прочитати на сервері",
+                readAllChats: "Прочитати чати (без архіву)",
+                readAllArchive: "Прочитати архів",
+                readAllEverything: "Прочитати все",
+                hideSection: "ЩО ПРИХОВУВАТИ",
+                behaviorSection: "ПОВЕДІНКА"
             )
             self.localMessageArchive = LocalMessageArchiveFeatureStrings(
                 title: "Видалені та змінені",
@@ -467,6 +494,8 @@ public struct LocalFeatureStrings {
                 historyTitle: "Історія змін",
                 disappearingMediaLimit: "Ліміт для зникаючих",
                 disappearingMediaLimitInfo: "Окремий поріг для медіа зі зникаючих та одноразових повідомлень. Вони не займуть більше за цей обсяг, навіть якщо загальний ліміт вищий. За переповнення першими видаляються найбільші файли.",
+                saveSection: "ЩО ЗБЕРІГАТИ",
+                storageSection: "ЗБЕРІГАННЯ",
                 usage: { messageCount, versionCount, size in
                     return "Повідомлень: \(messageCount) · версій: \(versionCount) · розмір: \(size)"
                 },
@@ -485,14 +514,12 @@ public struct LocalFeatureStrings {
                 }
             )
             self.interfaceTuning = InterfaceTuningFeatureStrings(
-                title: "Налаштування інтерфейсу",
+                title: "Вкладки, профілі та історії",
                 tabsSection: "НИЖНЯ ПАНЕЛЬ",
                 profilesSection: "ПРОФІЛІ",
-                messagesSection: "ПОВІДОМЛЕННЯ",
                 storiesSection: "ІСТОРІЇ",
-                mediaSection: "МЕДІА",
-                privacySection: "ЛОКАЛЬНА ПРИВАТНІСТЬ",
-                businessSection: "БІЗНЕС-БОТ",
+                chatsSection: "ЧАТИ",
+                cameraSection: "КАМЕРА",
                 concealBottomBar: "Приховувати нижню панель",
                 concealBottomBarInfo: "Прибирає нижню панель навігації. Зміна повністю застосовується після перезапуску застосунку.",
                 showContactsShortcut: "Показувати «Контакти»",
@@ -523,13 +550,15 @@ public struct LocalFeatureStrings {
                 callbackDataTitle: "Callback data",
                 hideStoryStrip: "Приховувати стрічку історій",
                 hideStoryStripInfo: "Прибирає історії з верхньої частини списку чатів, не видаляючи їх і не змінюючи стан на сервері.",
+                showAppBadge: "Плашка MadGram у статус-барі",
+                showAppBadgeInfo: "Показує капсулу MADGRAM біля вирізу екрана. Вимкніть, щоб її приховати.",
                 disableStoryCameraSwipe: "Вимкнути свайп до камери",
                 disableStoryCameraSwipeInfo: "Не відкриває камеру історій свайпом зі списку чатів.",
                 confirmStoryOpen: "Запитувати перед переглядом",
                 confirmStoryOpenInfo: "Показує підтвердження перед початком перегляду історії.",
                 allowStoryRepost: "Пропонувати репост в історію",
                 allowStoryRepostInfo: "Показує дію репосту в історію на екрані пересилання.",
-                startRoundVideoWithRearCamera: "Починати із задньої камери",
+                startRoundVideoWithRearCamera: "Починати кружечки із задньої камери",
                 startRoundVideoWithRearCameraInfo: "Відкриває запис круглого відео одразу на задній камері.",
                 hideGalleryCamera: "Приховувати камеру в галереї",
                 hideGalleryCameraInfo: "Прибирає плитку камери з галереї під час вибору фотографій і відео. Звичайне надсилання файлів із медіатеки працює без змін.",
@@ -543,22 +572,26 @@ public struct LocalFeatureStrings {
                 businessBotPanelNotManaged: "Цей чат не керується бізнес-ботом.",
                 businessBotPanelShow: "Показувати панель",
                 businessBotPanelHideInChat: "Приховати в цьому чаті",
-                restartNotice: "Деякі параметри нижньої панелі та номера застосовуються після перезапуску застосунку.",
+                restartNotice: "Деякі параметри нижньої панелі застосовуються після перезапуску застосунку.",
                 storyConfirmationTitle: "Відкрити історію?",
                 storyConfirmationText: "Автор може побачити ваш перегляд.",
                 storyConfirmationAction: "Переглянути"
             )
             self.madgram = MadgramFeatureStrings(
-                title: "Madgram",
-                featuresSection: "ФУНКЦІЇ MADGRAM",
-                info: "Функції, яких немає у звичайному Telegram. Усі дані цих функцій зберігаються лише на цьому пристрої.",
+                title: "MadGram",
+                privacySection: "ПРИВАТНІСТЬ",
+                privacyInfo: "Приховування номера застосовується після перезапуску застосунку.",
+                messagesSection: "ПОВІДОМЛЕННЯ",
+                messagesInfo: "Архів видалених повідомлень і фільтри зберігаються лише на цьому пристрої.",
+                interfaceSection: "ІНТЕРФЕЙС",
+                classicDesign: "Класичний дизайн",
+                classicDesignInfo: "Повертає оформлення Telegram до Liquid Glass. Застосовується після перезапуску застосунку.",
+                otherSection: "ІНШЕ",
                 forwardWithoutAuthor: "Переслати без автора",
-                powerSection: "ЕНЕРГОСПОЖИВАННЯ",
                 powerSaving: "Ощадливий режим",
                 powerSavingInfo: "Постійно, а не лише за низького заряду: без автовідтворення відео та GIF, без зациклених стикерів і емодзі, без розмиття, без фонового завантаження й фонових задач, зі спрощеними анімаціями інтерфейсу. Усі функції лишаються доступними — відео та стикери запускаються дотиком."
             )
             self.localPremium = LocalPremiumFeatureStrings(
-                section: "ПРЕМІУМ",
                 title: "Локальний преміум",
                 info: "Розблоковує інтерфейс Telegram Premium лише на цьому пристрої. Можливості, які перевіряє сервер — великі файли, преміум-реакції та емодзі, розшифрування голосових — і надалі потребують підписки."
             )
@@ -635,7 +668,12 @@ public struct LocalFeatureStrings {
                 burnViewOnceMedia: "Burn",
                 activeIndicator: "Ghost Mode is on",
                 readAllLocally: "Read locally",
-                readAllOnServer: "Read on server"
+                readAllOnServer: "Read on server",
+                readAllChats: "Read Chats (Not Archived)",
+                readAllArchive: "Read Archive",
+                readAllEverything: "Read Everything",
+                hideSection: "WHAT TO HIDE",
+                behaviorSection: "BEHAVIOR"
             )
             self.localMessageArchive = LocalMessageArchiveFeatureStrings(
                 title: "Deleted and Edited",
@@ -666,6 +704,8 @@ public struct LocalFeatureStrings {
                 historyTitle: "Edit History",
                 disappearingMediaLimit: "Disappearing Media Limit",
                 disappearingMediaLimitInfo: "A separate cap for media from disappearing and view-once messages. They never take more than this, even when the overall limit is higher. Largest files are removed first when the cap is reached.",
+                saveSection: "WHAT TO SAVE",
+                storageSection: "STORAGE",
                 usage: { messageCount, versionCount, size in
                     return "Messages: \(messageCount) · versions: \(versionCount) · size: \(size)"
                 },
@@ -674,14 +714,12 @@ public struct LocalFeatureStrings {
                 }
             )
             self.interfaceTuning = InterfaceTuningFeatureStrings(
-                title: "Interface Tuning",
+                title: "Tabs, Profiles and Stories",
                 tabsSection: "BOTTOM BAR",
                 profilesSection: "PROFILES",
-                messagesSection: "MESSAGES",
                 storiesSection: "STORIES",
-                mediaSection: "MEDIA",
-                privacySection: "LOCAL PRIVACY",
-                businessSection: "BUSINESS BOT",
+                chatsSection: "CHATS",
+                cameraSection: "CAMERA",
                 concealBottomBar: "Conceal Bottom Bar",
                 concealBottomBarInfo: "Removes the bottom navigation bar. Restart the app to apply this change everywhere.",
                 showContactsShortcut: "Show Contacts Shortcut",
@@ -712,13 +750,15 @@ public struct LocalFeatureStrings {
                 callbackDataTitle: "Callback data",
                 hideStoryStrip: "Hide Story Strip",
                 hideStoryStripInfo: "Removes stories from the top of the chat list without deleting them or changing server state.",
+                showAppBadge: "MadGram Badge in Status Bar",
+                showAppBadgeInfo: "Shows the MADGRAM capsule next to the screen cutout. Turn off to hide it.",
                 disableStoryCameraSwipe: "Disable Camera Swipe",
                 disableStoryCameraSwipeInfo: "Prevents opening the story camera by swiping from the chat list.",
                 confirmStoryOpen: "Confirm Before Viewing",
                 confirmStoryOpenInfo: "Asks for confirmation before story playback begins.",
                 allowStoryRepost: "Offer Story Repost",
                 allowStoryRepostInfo: "Shows the repost-to-story action on the forwarding screen.",
-                startRoundVideoWithRearCamera: "Start With Rear Camera",
+                startRoundVideoWithRearCamera: "Start Video Messages With Rear Camera",
                 startRoundVideoWithRearCameraInfo: "Starts round-video recording with the rear camera.",
                 hideGalleryCamera: "Hide Camera in Gallery",
                 hideGalleryCameraInfo: "Removes the camera tile from the photo and video picker. Sending existing media from the library continues to work normally.",
@@ -732,22 +772,26 @@ public struct LocalFeatureStrings {
                 businessBotPanelNotManaged: "This chat is not managed by a business bot.",
                 businessBotPanelShow: "Show Panel",
                 businessBotPanelHideInChat: "Hide in This Chat",
-                restartNotice: "Some bottom-bar and phone-number changes apply after restarting the app.",
+                restartNotice: "Some bottom-bar changes apply after restarting the app.",
                 storyConfirmationTitle: "Open this story?",
                 storyConfirmationText: "The author may be able to see your view.",
                 storyConfirmationAction: "View"
             )
             self.madgram = MadgramFeatureStrings(
-                title: "Madgram",
-                featuresSection: "MADGRAM FEATURES",
-                info: "Features that stock Telegram doesn't have. Everything they store stays on this device.",
+                title: "MadGram",
+                privacySection: "PRIVACY",
+                privacyInfo: "Hiding the phone number applies after restarting the app.",
+                messagesSection: "MESSAGES",
+                messagesInfo: "The deleted-message archive and filters are stored only on this device.",
+                interfaceSection: "INTERFACE",
+                classicDesign: "Classic Design",
+                classicDesignInfo: "Brings back Telegram's look from before Liquid Glass. Applies after restarting the app.",
+                otherSection: "OTHER",
                 forwardWithoutAuthor: "Forward without sender",
-                powerSection: "POWER USAGE",
                 powerSaving: "Low Power Profile",
                 powerSavingInfo: "Always on, not just on low battery: no video and GIF autoplay, no looping stickers and emoji, no blur, no background downloads or background work, and simplified interface animations. Nothing is removed — videos and stickers play when you tap them."
             )
             self.localPremium = LocalPremiumFeatureStrings(
-                section: "PREMIUM",
                 title: "Local Premium",
                 info: "Unlocks the Telegram Premium interface on this device only. Anything the server validates — large uploads, premium reactions and emoji, voice transcription — still requires a subscription."
             )

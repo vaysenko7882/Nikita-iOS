@@ -363,6 +363,7 @@ public struct PresentationResourcesItemList {
         if !top && !bottom {
             return nil
         }
+        let glass = glass && !ClassicDesign.isEnabled
         let key: PresentationResourceKey
         if top && bottom {
             key = glass ? PresentationResourceKey.itemListCornersBothGlass : PresentationResourceKey.itemListCornersBoth

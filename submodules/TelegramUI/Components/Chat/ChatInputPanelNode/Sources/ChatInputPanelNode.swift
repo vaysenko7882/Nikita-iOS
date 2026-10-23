@@ -22,7 +22,14 @@ open class ChatInputPanelNode: ASDisplayNode {
     open func updateAbsoluteRect(_ rect: CGRect, within containerSize: CGSize, transition: ContainedViewLayoutTransition) {
     }
     
+    open var isInClassicBar: Bool {
+        return ClassicDesign.isEnabled
+    }
+    
     public final func compactBottomSideInset(bottomInset: CGFloat, deviceMetrics: DeviceMetrics) -> CGFloat {
+        if self.isInClassicBar {
+            return 0.0
+        }
         if bottomInset <= 32.0 && deviceMetrics.screenCornerRadius > 0.0 {
             return 18.0
         } else {

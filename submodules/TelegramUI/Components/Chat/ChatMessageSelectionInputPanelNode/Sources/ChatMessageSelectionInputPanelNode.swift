@@ -144,7 +144,7 @@ private final class GlassButtonView: UIView {
     func update(theme: PresentationTheme, preferClearGlass: Bool, size: CGSize, transition: ComponentTransition) {
         let params = Params(theme: theme, preferClearGlass: preferClearGlass, size: size)
         if self.params != params {
-            self.iconView.tintColor = params.theme.chat.inputPanel.panelControlColor
+            self.iconView.tintColor = ClassicDesign.isEnabled ? params.theme.chat.inputPanel.panelControlAccentColor : params.theme.chat.inputPanel.panelControlColor
             self.params = params
             self.updateImpl(params: params, transition: transition)
         }
@@ -161,7 +161,7 @@ private final class GlassButtonView: UIView {
         transition.setFrame(view: self.button, frame: CGRect(origin: CGPoint(), size: params.size))
         
         transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: params.size))
-        self.backgroundView.update(size: params.size, cornerRadius: min(params.size.width, params.size.height) * 0.5, isDark: params.theme.overallDarkAppearance, tintColor: .init(kind: params.preferClearGlass ? .clear : .panel), isInteractive: true, transition: transition)
+        self.backgroundView.update(size: params.size, cornerRadius: min(params.size.width, params.size.height) * 0.5, isDark: params.theme.overallDarkAppearance, tintColor: .init(kind: params.preferClearGlass ? .clear : .panel), isInteractive: true, isVisible: !ClassicDesign.isEnabled, transition: transition)
         self.backgroundView.isUserInteractionEnabled = isEnabled
         
         self.iconView.alpha = isEnabled ? 1.0 : 0.5

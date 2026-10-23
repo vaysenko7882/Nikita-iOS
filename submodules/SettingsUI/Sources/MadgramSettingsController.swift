@@ -1,8 +1,8 @@
 import AccountContext
+import ComponentFlow
 import Display
 import Foundation
 import ItemListUI
-import Postbox
 import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
@@ -39,7 +39,7 @@ public enum MadgramDeepLinkRoute: String, CaseIterable {
         }
 
         switch route {
-        case "settings", "madgram":
+        case "settings", "madgram", "privacy":
             return .settings
         case "ghost", "ghost-mode":
             return .ghost
@@ -47,7 +47,7 @@ public enum MadgramDeepLinkRoute: String, CaseIterable {
             return .filters
         case "archive", "local-archive", "local-message-archive":
             return .archive
-        case "interface", "tuning", "tabs", "profiles", "stories", "camera", "media", "privacy":
+        case "interface", "tuning", "tabs", "profiles", "stories", "camera", "media":
             return .interface
         case "power", "power-saving":
             return .powerSaving
@@ -86,6 +86,7 @@ private final class MadgramControllerArguments {
     let openMessageFilters: () -> Void
     let openLocalMessageArchive: () -> Void
     let openInterfaceTuning: () -> Void
+    let updateInterfaceTuning: (@escaping (InterfaceTuningSettings) -> InterfaceTuningSettings) -> Void
     let setLocalPremium: (Bool) -> Void
     let setPowerSaving: (Bool) -> Void
     let showInfo: (String, UIView) -> Void
@@ -95,6 +96,7 @@ private final class MadgramControllerArguments {
         openMessageFilters: @escaping () -> Void,
         openLocalMessageArchive: @escaping () -> Void,
         openInterfaceTuning: @escaping () -> Void,
+        updateInterfaceTuning: @escaping (@escaping (InterfaceTuningSettings) -> InterfaceTuningSettings) -> Void,
         setLocalPremium: @escaping (Bool) -> Void,
         setPowerSaving: @escaping (Bool) -> Void,
         showInfo: @escaping (String, UIView) -> Void
@@ -103,6 +105,7 @@ private final class MadgramControllerArguments {
         self.openMessageFilters = openMessageFilters
         self.openLocalMessageArchive = openLocalMessageArchive
         self.openInterfaceTuning = openInterfaceTuning
+        self.updateInterfaceTuning = updateInterfaceTuning
         self.setLocalPremium = setLocalPremium
         self.setPowerSaving = setPowerSaving
         self.showInfo = showInfo
@@ -110,68 +113,84 @@ private final class MadgramControllerArguments {
 }
 
 private enum MadgramSection: Int32 {
-    case features
-    case power
-    case premium
+    case privacy
+    case messages
+    case interface
+    case other
 }
 
 private enum MadgramEntry: ItemListNodeEntry {
-    case featuresHeader(String)
+    case privacyHeader(String)
     case ghostMode(String, String)
-    case messageFilters(String)
-    case localMessageArchive(String)
+    case hidePhoneInSettings(String, String, Bool)
+    case privacyInfo(String)
+    case messagesHeader(String)
+    case localMessageArchive(String, String)
+    case messageFilters(String, String)
+    case messagesInfo(String)
+    case interfaceHeader(String)
+    case classicDesign(String, Bool)
+    case showAppBadge(String, String, Bool)
     case interfaceTuning(String)
-    case featuresInfo(String)
-    case powerHeader(String)
+    case interfaceInfo(String)
+    case otherHeader(String)
     case powerSaving(String, String, Bool)
-    case powerInfo(String)
-    case premiumHeader(String)
     case localPremium(String, String, Bool)
-    case premiumInfo(String)
 
     var section: ItemListSectionId {
         switch self {
-        case .featuresHeader, .ghostMode, .messageFilters, .localMessageArchive, .interfaceTuning, .featuresInfo:
-            return MadgramSection.features.rawValue
-        case .powerHeader, .powerSaving, .powerInfo:
-            return MadgramSection.power.rawValue
-        case .premiumHeader, .localPremium, .premiumInfo:
-            return MadgramSection.premium.rawValue
+        case .privacyHeader, .ghostMode, .hidePhoneInSettings, .privacyInfo:
+            return MadgramSection.privacy.rawValue
+        case .messagesHeader, .localMessageArchive, .messageFilters, .messagesInfo:
+            return MadgramSection.messages.rawValue
+        case .interfaceHeader, .classicDesign, .showAppBadge, .interfaceTuning, .interfaceInfo:
+            return MadgramSection.interface.rawValue
+        case .otherHeader, .powerSaving, .localPremium:
+            return MadgramSection.other.rawValue
         }
     }
 
     var stableId: Int32 {
         switch self {
-        case .featuresHeader: return 0
+        case .privacyHeader: return 0
         case .ghostMode: return 1
-        case .messageFilters: return 2
-        case .localMessageArchive: return 3
-        case .interfaceTuning: return 4
-        case .featuresInfo: return 5
-        case .powerHeader: return 6
-        case .powerSaving: return 7
-        case .powerInfo: return 8
-        case .premiumHeader: return 10
-        case .localPremium: return 11
-        case .premiumInfo: return 12
+        case .hidePhoneInSettings: return 2
+        case .privacyInfo: return 3
+        case .messagesHeader: return 10
+        case .localMessageArchive: return 11
+        case .messageFilters: return 12
+        case .messagesInfo: return 13
+        case .interfaceHeader: return 20
+        case .classicDesign: return 21
+        case .showAppBadge: return 22
+        case .interfaceTuning: return 23
+        case .interfaceInfo: return 24
+        case .otherHeader: return 30
+        case .powerSaving: return 31
+        case .localPremium: return 32
         }
     }
 
     static func ==(lhs: MadgramEntry, rhs: MadgramEntry) -> Bool {
         switch (lhs, rhs) {
-        case let (.featuresHeader(lhsText), .featuresHeader(rhsText)),
-             let (.messageFilters(lhsText), .messageFilters(rhsText)),
-             let (.localMessageArchive(lhsText), .localMessageArchive(rhsText)),
+        case let (.privacyHeader(lhsText), .privacyHeader(rhsText)),
+             let (.privacyInfo(lhsText), .privacyInfo(rhsText)),
+             let (.messagesHeader(lhsText), .messagesHeader(rhsText)),
+             let (.messagesInfo(lhsText), .messagesInfo(rhsText)),
+             let (.interfaceHeader(lhsText), .interfaceHeader(rhsText)),
              let (.interfaceTuning(lhsText), .interfaceTuning(rhsText)),
-             let (.featuresInfo(lhsText), .featuresInfo(rhsText)),
-             let (.powerHeader(lhsText), .powerHeader(rhsText)),
-             let (.powerInfo(lhsText), .powerInfo(rhsText)),
-             let (.premiumHeader(lhsText), .premiumHeader(rhsText)),
-             let (.premiumInfo(lhsText), .premiumInfo(rhsText)):
+             let (.interfaceInfo(lhsText), .interfaceInfo(rhsText)),
+             let (.otherHeader(lhsText), .otherHeader(rhsText)):
             return lhsText == rhsText
-        case let (.ghostMode(lhsText, lhsValue), .ghostMode(rhsText, rhsValue)):
+        case let (.ghostMode(lhsText, lhsValue), .ghostMode(rhsText, rhsValue)),
+             let (.localMessageArchive(lhsText, lhsValue), .localMessageArchive(rhsText, rhsValue)),
+             let (.messageFilters(lhsText, lhsValue), .messageFilters(rhsText, rhsValue)):
             return lhsText == rhsText && lhsValue == rhsValue
-        case let (.localPremium(lhsText, lhsInfo, lhsValue), .localPremium(rhsText, rhsInfo, rhsValue)),
+        case let (.classicDesign(lhsText, lhsValue), .classicDesign(rhsText, rhsValue)):
+            return lhsText == rhsText && lhsValue == rhsValue
+        case let (.hidePhoneInSettings(lhsText, lhsInfo, lhsValue), .hidePhoneInSettings(rhsText, rhsInfo, rhsValue)),
+             let (.showAppBadge(lhsText, lhsInfo, lhsValue), .showAppBadge(rhsText, rhsInfo, rhsValue)),
+             let (.localPremium(lhsText, lhsInfo, lhsValue), .localPremium(rhsText, rhsInfo, rhsValue)),
              let (.powerSaving(lhsText, lhsInfo, lhsValue), .powerSaving(rhsText, rhsInfo, rhsValue)):
             return lhsText == rhsText && lhsInfo == rhsInfo && lhsValue == rhsValue
         default:
@@ -185,47 +204,68 @@ private enum MadgramEntry: ItemListNodeEntry {
 
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! MadgramControllerArguments
+        let switchItem: (String, String?, Bool, @escaping (Bool) -> Void) -> ListViewItem = { title, info, value, updated in
+            var titleBadgeComponent: AnyComponent<Empty>?
+            var titleBadgeAction: ((UIView) -> Void)?
+            if let info {
+                titleBadgeComponent = featureInfoBadgeComponent(color: presentationData.theme.list.itemAccentColor)
+                titleBadgeAction = { sourceView in
+                    arguments.showInfo(info, sourceView)
+                }
+            }
+            return ItemListSwitchItem(
+                presentationData: presentationData,
+                title: title,
+                titleBadgeComponent: titleBadgeComponent,
+                titleBadgeAction: titleBadgeAction,
+                value: value,
+                maximumNumberOfLines: 2,
+                sectionId: self.section,
+                style: .blocks,
+                updated: updated
+            )
+        }
         switch self {
-        case let .featuresHeader(text), let .premiumHeader(text), let .powerHeader(text):
+        case let .privacyHeader(text), let .messagesHeader(text), let .interfaceHeader(text), let .otherHeader(text):
             return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .featuresInfo(text), let .premiumInfo(text), let .powerInfo(text):
+        case let .privacyInfo(text), let .messagesInfo(text), let .interfaceInfo(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case let .ghostMode(text, value):
             return ItemListDisclosureItem(presentationData: presentationData, title: text, label: value, sectionId: self.section, style: .blocks, action: arguments.openGhostMode)
-        case let .messageFilters(text):
-            return ItemListDisclosureItem(presentationData: presentationData, title: text, label: "", sectionId: self.section, style: .blocks, action: arguments.openMessageFilters)
-        case let .localMessageArchive(text):
-            return ItemListDisclosureItem(presentationData: presentationData, title: text, label: "", sectionId: self.section, style: .blocks, action: arguments.openLocalMessageArchive)
+        case let .hidePhoneInSettings(text, info, value):
+            return switchItem(text, info, value, { value in
+                arguments.updateInterfaceTuning { current in
+                    var current = current
+                    current.hidePhoneInSettings = value
+                    return current
+                }
+            })
+        case let .localMessageArchive(text, value):
+            return ItemListDisclosureItem(presentationData: presentationData, title: text, label: value, sectionId: self.section, style: .blocks, action: arguments.openLocalMessageArchive)
+        case let .messageFilters(text, value):
+            return ItemListDisclosureItem(presentationData: presentationData, title: text, label: value, sectionId: self.section, style: .blocks, action: arguments.openMessageFilters)
+        case let .classicDesign(text, value):
+            return switchItem(text, nil, value, { value in
+                arguments.updateInterfaceTuning { current in
+                    var current = current
+                    current.classicDesign = value
+                    return current
+                }
+            })
+        case let .showAppBadge(text, info, value):
+            return switchItem(text, info, value, { value in
+                arguments.updateInterfaceTuning { current in
+                    var current = current
+                    current.showAppBadge = value
+                    return current
+                }
+            })
         case let .interfaceTuning(text):
             return ItemListDisclosureItem(presentationData: presentationData, title: text, label: "", sectionId: self.section, style: .blocks, action: arguments.openInterfaceTuning)
         case let .powerSaving(text, info, value):
-            return ItemListSwitchItem(
-                presentationData: presentationData,
-                title: text,
-                titleBadgeComponent: featureInfoBadgeComponent(color: presentationData.theme.list.itemAccentColor),
-                titleBadgeAction: { sourceView in
-                    arguments.showInfo(info, sourceView)
-                },
-                value: value,
-                maximumNumberOfLines: 2,
-                sectionId: self.section,
-                style: .blocks,
-                updated: arguments.setPowerSaving
-            )
+            return switchItem(text, info, value, arguments.setPowerSaving)
         case let .localPremium(text, info, value):
-            return ItemListSwitchItem(
-                presentationData: presentationData,
-                title: text,
-                titleBadgeComponent: featureInfoBadgeComponent(color: presentationData.theme.list.itemAccentColor),
-                titleBadgeAction: { sourceView in
-                    arguments.showInfo(info, sourceView)
-                },
-                value: value,
-                maximumNumberOfLines: 2,
-                sectionId: self.section,
-                style: .blocks,
-                updated: arguments.setLocalPremium
-            )
+            return switchItem(text, info, value, arguments.setLocalPremium)
         }
     }
 }
@@ -249,6 +289,11 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
         },
         openInterfaceTuning: {
             pushControllerImpl?(interfaceTuningSettingsController(context: context))
+        },
+        updateInterfaceTuning: { f in
+            InterfaceTuningSettingsStore.shared.update { current in
+                return f(current)
+            }
         },
         setLocalPremium: { value in
             let updated = LocalPremiumSettingsStore.shared.update { current in
@@ -281,10 +326,19 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
         }
     )
 
-    let ghostModeSettings = context.account.postbox.preferencesView(keys: [PreferencesKeys.ghostModeSettings])
-    |> map { view -> GhostModeSettings in
-        return view.values[PreferencesKeys.ghostModeSettings]?.get(GhostModeSettings.self) ?? .defaultSettings
+    let ghostModeSettings = context.engine.messages.ghostModeSettings()
+
+    let isLocalMessageArchiveEnabled = context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.ApplicationSpecificPreference(key: PreferencesKeys.deletedMessageArchiveSettings))
+    |> map { entry -> Bool in
+        return (entry?.get(DeletedMessageArchiveSettings.self) ?? .defaultSettings).isEnabled
     }
+    |> distinctUntilChanged
+
+    let hiddenSenderCount = messageFilterSettingsSignal()
+    |> map { settings -> Int in
+        return settings.shadowBannedPeerIds.count
+    }
+    |> distinctUntilChanged
 
     let sharedData = context.sharedContext.accountManager.sharedData(keys: [ApplicationSpecificSharedDataKeys.automaticMediaDownloadSettings, ApplicationSpecificSharedDataKeys.presentationThemeSettings])
     |> map { sharedData -> Bool in
@@ -303,24 +357,37 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
     }
     |> distinctUntilChanged
 
-    let signal = combineLatest(context.sharedContext.presentationData, ghostModeSettings, localPremiumPromise.get(), sharedData)
-    |> map { presentationData, ghostModeSettings, localPremiumSettings, isPowerSavingEnabled -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    let signal = combineLatest(
+        context.sharedContext.presentationData,
+        ghostModeSettings,
+        localPremiumPromise.get(),
+        sharedData,
+        isLocalMessageArchiveEnabled,
+        hiddenSenderCount,
+        interfaceTuningSettingsSignal()
+    )
+    |> map { presentationData, ghostModeSettings, localPremiumSettings, isPowerSavingEnabled, isLocalMessageArchiveEnabled, hiddenSenderCount, interfaceTuningSettings -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let strings = presentationData.strings.localFeatures
         let entries: [MadgramEntry] = [
-            .featuresHeader(strings.madgram.featuresSection),
+            .privacyHeader(strings.madgram.privacySection),
             .ghostMode(strings.ghostMode.title, ghostModeSettings.isEnabled ? strings.ghostMode.on : strings.ghostMode.off),
-            .messageFilters(strings.messageFilter.title),
-            .localMessageArchive(strings.localMessageArchive.title),
+            .hidePhoneInSettings(strings.interfaceTuning.hidePhoneInSettings, strings.interfaceTuning.hidePhoneInSettingsInfo, interfaceTuningSettings.hidePhoneInSettings),
+            .privacyInfo(strings.madgram.privacyInfo),
+
+            .messagesHeader(strings.madgram.messagesSection),
+            .localMessageArchive(strings.localMessageArchive.title, isLocalMessageArchiveEnabled ? strings.ghostMode.on : strings.ghostMode.off),
+            .messageFilters(strings.messageFilter.title, hiddenSenderCount > 0 ? "\(hiddenSenderCount)" : ""),
+            .messagesInfo(strings.madgram.messagesInfo),
+
+            .interfaceHeader(strings.madgram.interfaceSection),
+            .classicDesign(strings.madgram.classicDesign, interfaceTuningSettings.classicDesign),
+            .showAppBadge(strings.interfaceTuning.showAppBadge, strings.interfaceTuning.showAppBadgeInfo, interfaceTuningSettings.showAppBadge),
             .interfaceTuning(strings.interfaceTuning.title),
-            .featuresInfo(strings.madgram.info),
+            .interfaceInfo(strings.madgram.classicDesignInfo),
 
-            .powerHeader(strings.madgram.powerSection),
+            .otherHeader(strings.madgram.otherSection),
             .powerSaving(strings.madgram.powerSaving, strings.madgram.powerSavingInfo, isPowerSavingEnabled),
-            .powerInfo(strings.madgram.powerSavingInfo),
-
-            .premiumHeader(strings.localPremium.section),
-            .localPremium(strings.localPremium.title, strings.localPremium.info, localPremiumSettings.isEnabled),
-            .premiumInfo(strings.localPremium.info)
+            .localPremium(strings.localPremium.title, strings.localPremium.info, localPremiumSettings.isEnabled)
         ]
         return (
             ItemListControllerState(

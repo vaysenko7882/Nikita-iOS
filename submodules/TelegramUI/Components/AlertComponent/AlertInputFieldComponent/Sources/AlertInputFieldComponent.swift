@@ -254,14 +254,24 @@ public final class AlertInputFieldComponent: Component {
             self.textField.tintColor = environment.theme.actionSheet.controlAccentColor
             self.textField.sideInset = 16.0
             
-            let backgroundPadding: CGFloat = 14.0
-            let size = CGSize(width: availableSize.width, height: 50.0)
+            let isClassic = ClassicDesign.isEnabled
+            let fieldHeight: CGFloat = isClassic ? 36.0 : 50.0
+            let backgroundPadding: CGFloat = isClassic ? 8.0 : 14.0
+            let size = CGSize(width: availableSize.width, height: fieldHeight)
             
+            let backgroundComponent: AnyComponent<Empty>
+            if isClassic {
+                backgroundComponent = AnyComponent(
+                    RoundedRectangle(color: environment.theme.actionSheet.inputHollowBackgroundColor, cornerRadius: 6.0, stroke: 1.0, strokeColor: environment.theme.actionSheet.inputBorderColor)
+                )
+            } else {
+                backgroundComponent = AnyComponent(
+                    FilledRoundedRectangleComponent(color: environment.theme.actionSheet.primaryTextColor.withMultipliedAlpha(0.1), cornerRadius: .value(25.0), smoothCorners: false)
+                )
+            }
             let backgroundSize = self.background.update(
                 transition: transition,
-                component: AnyComponent(
-                    FilledRoundedRectangleComponent(color: environment.theme.actionSheet.primaryTextColor.withMultipliedAlpha(0.1), cornerRadius: .value(25.0), smoothCorners: false)
-                ),
+                component: backgroundComponent,
                 environment: {},
                 containerSize: CGSize(width: size.width + backgroundPadding * 2.0, height: size.height)
             )
@@ -273,7 +283,7 @@ public final class AlertInputFieldComponent: Component {
                 transition.setFrame(view: backgroundView, frame: backgroundFrame)
             }
             
-            let textFieldSize = CGSize(width: availableSize.width - 24.0, height: 50.0)
+            let textFieldSize = CGSize(width: availableSize.width + (component.hasClearButton ? -24.0 : 24.0), height: fieldHeight)
             let textFieldFrame = CGRect(origin: CGPoint(x: -12.0, y: topInset), size: textFieldSize)
             transition.setFrame(view: self.textField, frame: textFieldFrame)
             
@@ -287,7 +297,7 @@ public final class AlertInputFieldComponent: Component {
                     )))
                 ),
                 environment: {},
-                containerSize: CGSize(width: size.width, height: 50.0)
+                containerSize: CGSize(width: size.width, height: fieldHeight)
             )
             let placeholderFrame = CGRect(origin: CGPoint(x: 4.0, y: floorToScreenPixels(textFieldFrame.midY - placeholderSize.height / 2.0)), size: placeholderSize)
             if let placeholderView = self.placeholder.view {

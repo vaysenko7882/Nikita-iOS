@@ -329,6 +329,7 @@ private final class InnerActionsContainerNode: ASDisplayNode {
 final class InnerTextSelectionTipContainerNode: ASDisplayNode {
     private let presentationData: PresentationData
     private var background: (container: GlassBackgroundContainerView, background: GlassBackgroundView)?
+    private let classicShadowNode: ASImageNode?
     private let textNode: TextNodeWithEntities
     private var textSelectionNode: TextSelectionNode?
     private let iconNode: ASImageNode
@@ -354,6 +355,17 @@ final class InnerTextSelectionTipContainerNode: ASDisplayNode {
             self.background = (GlassBackgroundContainerView(), GlassBackgroundView())
         } else {
             self.background = nil
+        }
+        if ClassicDesign.isEnabled, !isInline {
+            let classicShadowNode = ASImageNode()
+            classicShadowNode.displaysAsynchronously = false
+            classicShadowNode.displayWithoutProcessing = true
+            classicShadowNode.isUserInteractionEnabled = false
+            classicShadowNode.image = UIImage(bundleImageName: "Components/Context Menu/Shadow")?.stretchableImage(withLeftCapWidth: 60, topCapHeight: 60)
+            classicShadowNode.contentMode = .scaleToFill
+            self.classicShadowNode = classicShadowNode
+        } else {
+            self.classicShadowNode = nil
         }
         
         self.textNode = TextNodeWithEntities()
@@ -452,6 +464,10 @@ final class InnerTextSelectionTipContainerNode: ASDisplayNode {
         })
         self.textSelectionNode = textSelectionNode
         
+        if let classicShadowNode = self.classicShadowNode {
+            self.addSubnode(classicShadowNode)
+        }
+        
         let parentView: UIView
         if let background = self.background {
             self.view.addSubview(background.container)
@@ -523,14 +539,16 @@ final class InnerTextSelectionTipContainerNode: ASDisplayNode {
     }
     
     func updateLayout(widthClass: ContainerViewLayoutSizeClass, presentation: ContextControllerActionsStackNode.Presentation, width: CGFloat, transition: ContainedViewLayoutTransition) -> CGSize {
-        let topInset: CGFloat = self.background != nil ? 16.0 : 9.0
-        let bottomInset: CGFloat = self.background != nil ? 16.0 : 9.0
-        let horizontalInset: CGFloat = 18.0
+        let isClassic = ClassicDesign.isEnabled
+        let topInset: CGFloat = isClassic ? 10.0 : (self.background != nil ? 16.0 : 9.0)
+        let bottomInset: CGFloat = isClassic ? 10.0 : (self.background != nil ? 16.0 : 9.0)
+        let horizontalInset: CGFloat = isClassic ? 16.0 : 18.0
         let standardIconWidth: CGFloat = 32.0
-        let iconSideInset: CGFloat = 20.0
+        let iconSideInset: CGFloat = isClassic ? 12.0 : 20.0
         
-        let textFont = Font.regular(floor(presentationData.listsFontSize.baseDisplaySize * 13.0 / 17.0))
-        let boldTextFont = Font.bold(floor(presentationData.listsFontSize.baseDisplaySize * 13.0 / 17.0))
+        let textFontSize: CGFloat = isClassic ? 14.0 : 13.0
+        let textFont = Font.regular(floor(presentationData.listsFontSize.baseDisplaySize * textFontSize / 17.0))
+        let boldTextFont = Font.bold(floor(presentationData.listsFontSize.baseDisplaySize * textFontSize / 17.0))
         let textColor = self.presentationData.theme.contextMenu.primaryColor
         let linkColor = self.presentationData.theme.overallDarkAppearance ? UIColor(rgb: 0x64d2ff) : self.presentationData.theme.contextMenu.badgeFillColor
         
@@ -555,15 +573,20 @@ final class InnerTextSelectionTipContainerNode: ASDisplayNode {
             shimmeringForegroundColor = presentationData.theme.contextMenu.primaryColor.withMultipliedAlpha(0.07)
         }
         
-        let textRightInset: CGFloat = 8.0
+        var textRightInset: CGFloat = 8.0
         var textLeftInset: CGFloat = horizontalInset
         
-        if let _ = self.iconNode.image {
+        if isClassic {
+            textRightInset = horizontalInset
+            if let _ = self.iconNode.image {
+                textRightInset += iconSize.width - 2.0
+            }
+        } else if let _ = self.iconNode.image {
             textLeftInset = 60.0
         }
         
         let makeTextLayout = TextNodeWithEntities.asyncLayout(self.textNode)
-        let (textLayout, textApply) = makeTextLayout(TextNodeLayoutArguments(attributedString: attributedText, backgroundColor: nil, minimumNumberOfLines: 0, maximumNumberOfLines: 0, truncationType: .end, constrainedSize: CGSize(width: width - textLeftInset - textRightInset, height: .greatestFiniteMagnitude), alignment: .left, lineSpacing: 0.12, cutout: nil, insets: UIEdgeInsets(), lineColor: nil, textShadowColor: nil, textStroke: nil))
+        let (textLayout, textApply) = makeTextLayout(TextNodeLayoutArguments(attributedString: attributedText, backgroundColor: nil, minimumNumberOfLines: 0, maximumNumberOfLines: 0, truncationType: .end, constrainedSize: CGSize(width: width - textLeftInset - textRightInset, height: .greatestFiniteMagnitude), alignment: .left, lineSpacing: isClassic ? 0.0 : 0.12, cutout: nil, insets: UIEdgeInsets(), lineColor: nil, textShadowColor: nil, textStroke: nil))
         let _ = textApply(self.arguments?.withUpdatedPlaceholderColor(shimmeringForegroundColor))
         
         let textFrame = CGRect(origin: CGPoint(x: textLeftInset, y: topInset), size: textLayout.size)
@@ -588,8 +611,23 @@ final class InnerTextSelectionTipContainerNode: ASDisplayNode {
         transition.updateFrame(node: self.placeholderNode, frame: CGRect(origin: CGPoint(x: horizontalInset, y: floorToScreenPixels((size.height - lineHeight) / 2.0)), size: CGSize(width: width - horizontalInset * 2.0, height: lineHeight)))
         transition.updateAlpha(node: self.placeholderNode, alpha: textFrame.height.isZero ? 1.0 : 0.0)
         
-        let iconFrame = CGRect(origin: CGPoint(x: iconSideInset + floor((standardIconWidth - iconSize.width) / 2.0), y: floor((size.height - iconSize.height) / 2.0)), size: iconSize)
+        let iconX: CGFloat
+        if isClassic {
+            iconX = size.width - standardIconWidth - iconSideInset + floor((standardIconWidth - iconSize.width) / 2.0)
+        } else {
+            iconX = iconSideInset + floor((standardIconWidth - iconSize.width) / 2.0)
+        }
+        let iconFrame = CGRect(origin: CGPoint(x: iconX, y: floor((size.height - iconSize.height) / 2.0)), size: iconSize)
         transition.updateFrame(node: self.iconNode, frame: iconFrame)
+        
+        if let classicShadowNode = self.classicShadowNode {
+            switch presentation {
+            case .modal:
+                classicShadowNode.isHidden = true
+            case .inline, .additional:
+                classicShadowNode.isHidden = false
+            }
+        }
         
         if let textSelectionNode = self.textSelectionNode {
             transition.updateFrame(node: textSelectionNode, frame: textFrame)
@@ -600,13 +638,21 @@ final class InnerTextSelectionTipContainerNode: ASDisplayNode {
     }
     
     func setActualSize(size: CGSize, transition: ContainedViewLayoutTransition) {
+        if let classicShadowNode = self.classicShadowNode {
+            transition.updateFrame(node: classicShadowNode, frame: CGRect(origin: CGPoint(), size: size).insetBy(dx: -30.0, dy: -30.0))
+        }
+        
         let transition = ComponentTransition(transition)
         
         if let background = self.background {
             background.container.update(size: size, isDark: self.presentationData.theme.overallDarkAppearance, transition: transition)
             transition.setFrame(view: background.container, frame: CGRect(origin: CGPoint(), size: size))
             
-            background.background.update(size: size, cornerRadius: min(30.0, size.height * 0.5), isDark: self.presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), transition: transition)
+            if ClassicDesign.isEnabled {
+                background.background.update(size: size, cornerRadius: 14.0, isDark: self.presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .custom(style: .default, color: self.presentationData.theme.contextMenu.backgroundColor)), transition: transition)
+            } else {
+                background.background.update(size: size, cornerRadius: min(30.0, size.height * 0.5), isDark: self.presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), transition: transition)
+            }
             transition.setFrame(view: background.background, frame: CGRect(origin: CGPoint(), size: size))
         }
     }

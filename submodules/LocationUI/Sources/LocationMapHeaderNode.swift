@@ -1,4 +1,5 @@
 import Foundation
+import LottieSettings
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -151,7 +152,7 @@ public final class LocationMapHeaderNode: ASDisplayNode {
         self.placesBackgroundNode.isUserInteractionEnabled = true
 
         self.placesButtonNode = HighlightTrackingButtonNode()
-        self.placesButtonNode.setTitle(presentationData.strings.Map_PlacesInThisArea, with: Font.medium(17.0), with: self.glass ? presentationData.theme.rootController.navigationBar.primaryTextColor : buttonColor, for: .normal)
+        self.placesButtonNode.setTitle(presentationData.strings.Map_PlacesInThisArea, with: (ClassicDesign.isEnabled && !glass) ? Font.regular(17.0) : Font.medium(17.0), with: self.glass ? presentationData.theme.rootController.navigationBar.primaryTextColor : buttonColor, for: .normal)
 
         self.weatherButton = HighlightTrackingButton()
 
@@ -187,6 +188,13 @@ public final class LocationMapHeaderNode: ASDisplayNode {
                 if let placesBackgroundView = self.placesBackgroundView {
                     self.placesBackgroundNode.view.addSubview(placesBackgroundView)
                 }
+            } else if ClassicDesign.isEnabled && self.optionsBackgroundView == nil {
+                self.addSubnode(self.optionsBackgroundNode)
+                self.optionsBackgroundNode.addSubnode(self.optionsSeparatorNode)
+                self.optionsBackgroundNode.addSubnode(self.optionsSecondSeparatorNode)
+                self.optionsBackgroundNode.addSubnode(self.infoButtonNode)
+                self.optionsBackgroundNode.addSubnode(self.locationButtonNode)
+                self.optionsBackgroundNode.addSubnode(self.notificationButtonNode)
             } else {
                 if let optionsBackgroundView = self.optionsBackgroundView {
                     self.optionsSeparatorNode.isHidden = true
@@ -202,7 +210,11 @@ public final class LocationMapHeaderNode: ASDisplayNode {
         }
 
         self.addSubnode(self.placesBackgroundNode)
-        self.placesBackgroundView?.contentView.addSubview(self.placesButtonNode.view)
+        if ClassicDesign.isEnabled && self.placesBackgroundView == nil {
+            self.placesBackgroundNode.addSubnode(self.placesButtonNode)
+        } else {
+            self.placesBackgroundView?.contentView.addSubview(self.placesButtonNode.view)
+        }
         if let weatherBackgroundView = self.weatherBackgroundView {
             weatherBackgroundView.isHidden = true
             self.view.addSubview(weatherBackgroundView)
@@ -342,7 +354,10 @@ public final class LocationMapHeaderNode: ASDisplayNode {
         let inset: CGFloat = 6.0
         
         let placesButtonSize = CGSize(width: 180.0 + panelInset * 2.0, height: 45.0 + panelInset * 2.0)
-        let placesButtonFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((size.width - placesButtonSize.width) / 2.0), y: navigationBarHeight + topPadding - 6.0), size: placesButtonSize).insetBy(dx: 5.0, dy: 6.0)
+        var placesButtonFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((size.width - placesButtonSize.width) / 2.0), y: navigationBarHeight + topPadding - 6.0), size: placesButtonSize).insetBy(dx: 5.0, dy: 6.0)
+        if ClassicDesign.isEnabled && !self.glass {
+            placesButtonFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((size.width - placesButtonSize.width) / 2.0), y: navigationBarHeight + topPadding + inset), size: placesButtonSize)
+        }
         transition.updateFrame(node: self.placesBackgroundNode, frame: placesButtonFrame)
         
         if let placesBackgroundView = self.placesBackgroundView {
@@ -436,7 +451,8 @@ public final class LocationMapHeaderNode: ASDisplayNode {
                             content: LottieComponent.ResourceContent(context: weatherContext, file: weatherEmojiFile, attemptSynchronously: false, providesPlaceholder: true),
                             placeholderColor: self.presentationData.theme.rootController.navigationBar.primaryTextColor.withAlphaComponent(0.1),
                             renderingScale: 2.0,
-                            loop: true
+                            loop: true,
+                            lottieSettings: weatherContext.lottieRenderingSettings
                         )
                     ),
                     environment: {},
@@ -541,7 +557,10 @@ public final class LocationMapHeaderNode: ASDisplayNode {
             transition.updateAlpha(node: self.notificationButtonNode, alpha: self.proximityNotification != nil ? 1.0 : 0.0)
             transition.updateAlpha(node: self.optionsSecondSeparatorNode, alpha: self.proximityNotification != nil ? 1.0 : 0.0)
             
-            let backgroundFrame = CGRect(x: size.width - inset - buttonSize.width - panelInset * 2.0 - layout.safeInsets.right - 6.0, y: size.height - panelHeight - inset - 14.0 - controlsBottomPadding, width: buttonSize.width + panelInset * 2.0, height: panelHeight + panelInset * 2.0)
+            var backgroundFrame = CGRect(x: size.width - inset - buttonSize.width - panelInset * 2.0 - layout.safeInsets.right - 6.0, y: size.height - panelHeight - inset - 14.0 - controlsBottomPadding, width: buttonSize.width + panelInset * 2.0, height: panelHeight + panelInset * 2.0)
+            if ClassicDesign.isEnabled && !self.glass {
+                backgroundFrame = CGRect(x: size.width - inset - buttonSize.width - panelInset * 2.0 - layout.safeInsets.right, y: navigationBarHeight + controlsTopPadding + inset, width: buttonSize.width + panelInset * 2.0, height: panelHeight + panelInset * 2.0)
+            }
             transition.updateFrame(node: self.optionsBackgroundNode, frame: backgroundFrame)
             if let optionsBackgroundView = self.optionsBackgroundView {
                 let backgroundViewFrame = backgroundFrame.insetBy(dx: 4.0, dy: 4.0)

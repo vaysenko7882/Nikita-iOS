@@ -29,21 +29,24 @@ private enum GhostModeSection: Int32 {
 
 private enum GhostModeEntry: ItemListNodeEntry {
     case enabled(Bool)
+    case masterInfo(String)
+    case privacyHeader(String)
     case suppressRead(Bool, Bool)
     case suppressStories(Bool, Bool)
     case suppressOnline(Bool, Bool)
     case suppressTyping(Bool, Bool)
     case keepViewOnceMedia(Bool, Bool)
+    case behaviorHeader(String)
     case revealOnInteractions(Bool, Bool)
     case autoOffline(Bool, Bool)
 
     var section: ItemListSectionId {
         switch self {
-        case .enabled:
+        case .enabled, .masterInfo:
             return GhostModeSection.master.rawValue
-        case .suppressRead, .suppressStories, .suppressOnline, .suppressTyping, .keepViewOnceMedia:
+        case .privacyHeader, .suppressRead, .suppressStories, .suppressOnline, .suppressTyping, .keepViewOnceMedia:
             return GhostModeSection.privacy.rawValue
-        case .revealOnInteractions, .autoOffline:
+        case .behaviorHeader, .revealOnInteractions, .autoOffline:
             return GhostModeSection.behavior.rawValue
         }
     }
@@ -51,13 +54,16 @@ private enum GhostModeEntry: ItemListNodeEntry {
     var stableId: Int32 {
         switch self {
         case .enabled: return 0
-        case .suppressRead: return 1
-        case .suppressStories: return 2
-        case .suppressOnline: return 3
-        case .suppressTyping: return 4
-        case .keepViewOnceMedia: return 5
-        case .revealOnInteractions: return 6
-        case .autoOffline: return 7
+        case .masterInfo: return 1
+        case .privacyHeader: return 2
+        case .suppressRead: return 3
+        case .suppressStories: return 4
+        case .suppressOnline: return 5
+        case .suppressTyping: return 6
+        case .keepViewOnceMedia: return 7
+        case .behaviorHeader: return 8
+        case .revealOnInteractions: return 9
+        case .autoOffline: return 10
         }
     }
 
@@ -65,6 +71,10 @@ private enum GhostModeEntry: ItemListNodeEntry {
         switch (lhs, rhs) {
         case let (.enabled(lhs), .enabled(rhs)):
             return lhs == rhs
+        case let (.masterInfo(lhsText), .masterInfo(rhsText)),
+             let (.privacyHeader(lhsText), .privacyHeader(rhsText)),
+             let (.behaviorHeader(lhsText), .behaviorHeader(rhsText)):
+            return lhsText == rhsText
         case let (.suppressRead(lhsValue, lhsEnabled), .suppressRead(rhsValue, rhsEnabled)),
              let (.suppressStories(lhsValue, lhsEnabled), .suppressStories(rhsValue, rhsEnabled)),
              let (.suppressOnline(lhsValue, lhsEnabled), .suppressOnline(rhsValue, rhsEnabled)),
@@ -85,14 +95,20 @@ private enum GhostModeEntry: ItemListNodeEntry {
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! GhostModeControllerArguments
         let strings = presentationData.strings.localFeatures.ghostMode
-        let switchItem: (String, String, Bool, Bool, @escaping (GhostModeSettings, Bool) -> GhostModeSettings) -> ListViewItem = { title, info, value, enabled, update in
+        let switchItem: (String, String?, Bool, Bool, @escaping (GhostModeSettings, Bool) -> GhostModeSettings) -> ListViewItem = { title, info, value, enabled, update in
+            var titleBadgeComponent: AnyComponent<Empty>?
+            var titleBadgeAction: ((UIView) -> Void)?
+            if let info {
+                titleBadgeComponent = featureInfoBadgeComponent(color: presentationData.theme.list.itemAccentColor)
+                titleBadgeAction = { sourceView in
+                    arguments.showInfo(info, sourceView)
+                }
+            }
             return ItemListSwitchItem(
                 presentationData: presentationData,
                 title: title,
-                titleBadgeComponent: featureInfoBadgeComponent(color: presentationData.theme.list.itemAccentColor),
-                titleBadgeAction: { sourceView in
-                    arguments.showInfo(info, sourceView)
-                },
+                titleBadgeComponent: titleBadgeComponent,
+                titleBadgeAction: titleBadgeAction,
                 value: value,
                 enabled: enabled,
                 sectionId: self.section,
@@ -106,11 +122,15 @@ private enum GhostModeEntry: ItemListNodeEntry {
         }
         switch self {
         case let .enabled(value):
-            return switchItem(strings.title, strings.masterInfo, value, true, { current, value in
+            return switchItem(strings.title, nil, value, true, { current, value in
                 var current = current
                 current.isEnabled = value
                 return current
             })
+        case let .masterInfo(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        case let .privacyHeader(text), let .behaviorHeader(text):
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
         case let .suppressRead(value, enabled):
             return switchItem(strings.suppressMessageReadReceipts, strings.suppressMessageReadReceiptsInfo, value, enabled, { current, value in
                 var current = current
@@ -159,14 +179,11 @@ private enum GhostModeEntry: ItemListNodeEntry {
 
 public func ghostModeSettingsController(context: AccountContext) -> ViewController {
     var presentTooltip: ((String, UIView) -> Void)?
-    let settings = context.account.postbox.preferencesView(keys: [PreferencesKeys.ghostModeSettings])
-    |> map { view -> GhostModeSettings in
-        return view.values[PreferencesKeys.ghostModeSettings]?.get(GhostModeSettings.self) ?? .defaultSettings
-    }
+    let settings = context.engine.messages.ghostModeSettings()
 
     let arguments = GhostModeControllerArguments(
         update: { f in
-            let _ = updateGhostModeSettingsInteractively(postbox: context.account.postbox, f).start()
+            let _ = context.engine.messages.updateGhostModeSettingsInteractively(f).start()
         },
         showInfo: { text, sourceView in
             presentTooltip?(text, sourceView)
@@ -179,11 +196,14 @@ public func ghostModeSettingsController(context: AccountContext) -> ViewControll
         let strings = presentationData.strings.localFeatures.ghostMode
         let entries: [GhostModeEntry] = [
             .enabled(settings.isEnabled),
+            .masterInfo(strings.masterInfo),
+            .privacyHeader(strings.hideSection),
             .suppressRead(settings.suppressMessageReadReceipts, enabled),
             .suppressStories(settings.suppressStoryReadReceipts, enabled),
             .suppressOnline(settings.suppressOnlineStatus, enabled),
             .suppressTyping(settings.suppressTypingStatus, enabled),
             .keepViewOnceMedia(settings.keepViewOnceMedia, enabled),
+            .behaviorHeader(strings.behaviorSection),
             .revealOnInteractions(settings.revealOnInteractions, enabled),
             .autoOffline(settings.goOfflineAutomatically, enabled)
         ]

@@ -79,8 +79,13 @@ public final class ChatAvatarNavigationNode: ASDisplayNode {
             strongSelf.contextAction?(strongSelf.containerNode, gesture)
         }
         
-        self.containerNode.frame = CGRect(origin: CGPoint(), size: CGSize(width: 44.0, height: 44.0))
-        self.avatarNode.frame = self.containerNode.bounds.insetBy(dx: 3.0, dy: 3.0)
+        if ClassicDesign.isEnabled {
+            self.containerNode.frame = CGRect(origin: CGPoint(), size: CGSize(width: 37.0, height: 37.0)).offsetBy(dx: 10.0, dy: 1.0)
+            self.avatarNode.frame = self.containerNode.bounds
+        } else {
+            self.containerNode.frame = CGRect(origin: CGPoint(), size: CGSize(width: 44.0, height: 44.0))
+            self.avatarNode.frame = self.containerNode.bounds.insetBy(dx: 3.0, dy: 3.0)
+        }
     }
     
     deinit {
@@ -346,6 +351,9 @@ public final class ChatAvatarNavigationNode: ASDisplayNode {
     }
     
     override public func calculateSizeThatFits(_ constrainedSize: CGSize) -> CGSize {
+        if ClassicDesign.isEnabled {
+            return CGSize(width: 37.0, height: 37.0)
+        }
         return CGSize(width: 44.0, height: 44.0)
     }
     

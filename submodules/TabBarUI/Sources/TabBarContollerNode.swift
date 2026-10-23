@@ -6,8 +6,10 @@ import TelegramPresentationData
 import ComponentFlow
 import ComponentDisplayAdapters
 import TabBarComponent
+import TabBarLayout
 import TelegramUIPreferences
 import GlassControls
+import LottieSettings
 
 final class TabBarControllerNode: ASDisplayNode {
     private struct Params: Equatable {
@@ -15,25 +17,29 @@ final class TabBarControllerNode: ASDisplayNode {
         let toolbar: Toolbar?
         let isTabBarHidden: Bool
         let currentControllerSearchState: ViewController.TabBarSearchState?
+        /// The side placement depends on it, and with it the bottom inset the tab gets.
+        let itemCount: Int
         
         init(
             layout: ContainerViewLayout,
             toolbar: Toolbar?,
             isTabBarHidden: Bool,
-            currentControllerSearchState: ViewController.TabBarSearchState?
+            currentControllerSearchState: ViewController.TabBarSearchState?,
+            itemCount: Int
         ) {
             self.layout = layout
             self.toolbar = toolbar
             self.isTabBarHidden = isTabBarHidden
             self.currentControllerSearchState = currentControllerSearchState
+            self.itemCount = itemCount
         }
     }
     
     private struct LayoutResult {
         let params: Params
-        let bottomInset: CGFloat
+        let bottomInset: CGFloat?
         
-        init(params: Params, bottomInset: CGFloat) {
+        init(params: Params, bottomInset: CGFloat?) {
             self.params = params
             self.bottomInset = bottomInset
         }
@@ -57,6 +63,8 @@ final class TabBarControllerNode: ASDisplayNode {
     private let contextAction: (Int, ContextExtractedContentContainingView, ContextGesture) -> Void
     
     private let tabBarView = ComponentView<Empty>()
+    let classicTabBarNode: TabBarNode?
+    private var classicToolbarNode: ToolbarNode?
     
     private let disabledOverlayNode: ASDisplayNode
     private var toolbar: ComponentView<Empty>?
@@ -71,6 +79,8 @@ final class TabBarControllerNode: ASDisplayNode {
     private weak var currentController: ViewController?
     
     private var layoutResult: LayoutResult?
+    /// What the last layout pass applied to the bar; its placement is nil while the bar is horizontal.
+    private var appliedPlacement: TabBarAppliedPlacement?
     private var isUpdateRequested: Bool = false
     private var isChangingSelectedIndex: Bool = false
     private var interfaceSettings: InterfaceTuningSettings
@@ -123,6 +133,13 @@ final class TabBarControllerNode: ASDisplayNode {
         self.activateSearch = activateSearch
         self.deactivateSearch = deactivateSearch
         self.interfaceSettings = InterfaceTuningSettingsStore.shared.current
+        if ClassicDesign.isEnabled {
+            let classicTabBarNode = TabBarNode(theme: theme, itemSelected: itemSelected, contextAction: contextAction, swipeAction: swipeAction, lottieSettings: .noAccountFallback)
+            classicTabBarNode.showsLabels = InterfaceTuningSettingsStore.shared.current.showTabLabels
+            self.classicTabBarNode = classicTabBarNode
+        } else {
+            self.classicTabBarNode = nil
+        }
 
         super.init()
         
@@ -155,6 +172,10 @@ final class TabBarControllerNode: ASDisplayNode {
         
         //self.addSubnode(self.tabBarNode)
         //self.addSubnode(self.disabledOverlayNode)
+        if let classicTabBarNode = self.classicTabBarNode {
+            self.addSubnode(classicTabBarNode)
+            self.addSubnode(self.disabledOverlayNode)
+        }
     }
 
     deinit {
@@ -197,6 +218,10 @@ final class TabBarControllerNode: ASDisplayNode {
         self.backgroundColor = theme.list.plainBackgroundColor
         
         self.disabledOverlayNode.backgroundColor = theme.rootController.tabBar.backgroundColor.withAlphaComponent(0.5)
+        if let classicTabBarNode = self.classicTabBarNode {
+            classicTabBarNode.updateTheme(theme)
+            self.classicToolbarNode?.updateTheme(ToolbarTheme(rootControllerTheme: theme))
+        }
         self.requestUpdate()
     }
     
@@ -212,8 +237,18 @@ final class TabBarControllerNode: ASDisplayNode {
         }
     }
     
-    func containerLayoutUpdated(_ layout: ContainerViewLayout, toolbar: Toolbar?, transition: ContainedViewLayoutTransition) -> CGFloat {
-        let params = Params(layout: layout, toolbar: toolbar, isTabBarHidden: self.tabBarHidden, currentControllerSearchState: self.currentController?.tabBarSearchState)
+    /// Where the bar goes in `layout` when it is vertical, nil for the horizontal bar. Every path that lays
+    /// out a tab asks this, so they agree on whether the bar's inset applies.
+    func sidePlacement(for layout: ContainerViewLayout) -> TabBarSidePlacement? {
+        if self.classicTabBarNode != nil {
+            return nil
+        }
+        return tabBarSidePlacement(layout: layout, itemCount: self.tabBarItems.count)
+    }
+    
+    /// The bottom inset the current tab gets, or nil to leave the tab's own.
+    func containerLayoutUpdated(_ layout: ContainerViewLayout, toolbar: Toolbar?, transition: ContainedViewLayoutTransition) -> CGFloat? {
+        let params = Params(layout: layout, toolbar: toolbar, isTabBarHidden: self.tabBarHidden, currentControllerSearchState: self.currentController?.tabBarSearchState, itemCount: self.tabBarItems.count)
         if let layoutResult = self.layoutResult, layoutResult.params == params {
             return layoutResult.bottomInset
         } else {
@@ -228,7 +263,11 @@ final class TabBarControllerNode: ASDisplayNode {
         self.view.setNeedsLayout()
     }
     
-    private func updateImpl(params: Params, transition: ContainedViewLayoutTransition) -> CGFloat {
+    private func updateImpl(params: Params, transition: ContainedViewLayoutTransition) -> CGFloat? {
+        if let classicTabBarNode = self.classicTabBarNode {
+            return self.updateClassicImpl(tabBarNode: classicTabBarNode, params: params, transition: transition)
+        }
+        
         var panelsBottomInset: CGFloat = params.layout.insets(options: []).bottom
         if params.layout.metrics.widthClass == .regular, let inputHeight = params.layout.inputHeight, inputHeight != 0.0 {
             panelsBottomInset = inputHeight + 8.0
@@ -249,6 +288,28 @@ final class TabBarControllerNode: ASDisplayNode {
         var sideInset: CGFloat = 12.0
         if tabBarBottomInset <= 28.0 {
             sideInset = 20.0
+        }
+        
+        let sidePlacement = self.sidePlacement(for: params.layout)
+        let previousAppliedPlacement = self.tabBarView.view == nil ? nil : self.appliedPlacement
+        let appliedPlacement = TabBarAppliedPlacement(placement: sidePlacement, containerSize: params.layout.size, isHidden: self.tabBarHidden)
+        self.appliedPlacement = appliedPlacement
+        // Folding or unfolding switches the axis without animation. A rotation that moves the vertical bar
+        // fades it from its old place to its new one instead of moving it across the screen.
+        var transition = transition
+        var tabBarFrameTransition = transition
+        var crossfadeDuration: Double?
+        switch tabBarPlacementChange(from: previousAppliedPlacement, to: appliedPlacement) {
+        case .animate:
+            break
+        case .immediate:
+            transition = .immediate
+            tabBarFrameTransition = .immediate
+        case .crossfade:
+            tabBarFrameTransition = .immediate
+            if case let .animated(duration, _) = transition {
+                crossfadeDuration = duration
+            }
         }
         
         var selectedId: AnyHashable?
@@ -301,7 +362,7 @@ final class TabBarControllerNode: ASDisplayNode {
                         }
                     )
                 },
-                search: self.interfaceSettings.showSearchShortcut ? self.currentController?.tabBarSearchState.flatMap { tabBarSearchState in
+                search: (sidePlacement == nil && self.interfaceSettings.showSearchShortcut) ? self.currentController?.tabBarSearchState.flatMap { tabBarSearchState in
                     return TabBarComponent.Search(
                         isActive: tabBarSearchState.isActive,
                         activate: { [weak self] in
@@ -320,6 +381,8 @@ final class TabBarControllerNode: ASDisplayNode {
                 } : nil,
                 selectedId: selectedId,
                 outerInsets: UIEdgeInsets(top: 0.0, left: sideInset, bottom: tabBarBottomInset, right: sideInset),
+                axis: sidePlacement == nil ? .horizontal : .vertical,
+                isCompact: tabBarIsCompact(layout: params.layout, sidePlacement: sidePlacement),
                 layoutOptions: TabBarComponent.LayoutOptions(
                     showTabLabels: self.interfaceSettings.showTabLabels,
                     showSearchShortcut: self.interfaceSettings.showSearchShortcut,
@@ -327,22 +390,45 @@ final class TabBarControllerNode: ASDisplayNode {
                 )
             )),
             environment: {},
-            containerSize: CGSize(width: params.layout.size.width - sideInset * 2.0, height: 100.0)
+            containerSize: sidePlacement?.frame.size ?? CGSize(width: params.layout.size.width - sideInset * 2.0, height: 100.0)
         )
-        let tabBarFrame = CGRect(origin: CGPoint(x: floor((params.layout.size.width - tabBarSize.width) * 0.5), y: params.layout.size.height - (self.tabBarHidden ? 0.0 : (tabBarSize.height + tabBarBottomInset))), size: tabBarSize)
+        let tabBarFrame: CGRect
+        if let sidePlacement {
+            tabBarFrame = self.tabBarHidden ? sidePlacement.hiddenFrame(containerWidth: params.layout.size.width) : sidePlacement.frame
+        } else {
+            tabBarFrame = CGRect(origin: CGPoint(x: floor((params.layout.size.width - tabBarSize.width) * 0.5), y: params.layout.size.height - (self.tabBarHidden ? 0.0 : (tabBarSize.height + tabBarBottomInset))), size: tabBarSize)
+        }
         
         if let tabBarComponentView = self.tabBarView.view {
             if tabBarComponentView.superview == nil {
                 self.view.addSubview(tabBarComponentView)
             }
-            transition.updateFrame(view: tabBarComponentView, frame: tabBarFrame)
-            transition.updateAlpha(layer: tabBarComponentView.layer, alpha: params.toolbar == nil ? 1.0 : 0.0)
+            let tabBarAlpha: CGFloat = params.toolbar == nil ? 1.0 : 0.0
+            if let crossfadeDuration, let previousAppliedPlacement, let previousPlacement = previousAppliedPlacement.placement {
+                if !previousAppliedPlacement.isHidden && tabBarComponentView.alpha > 0.0, let snapshotView = tabBarComponentView.snapshotView(afterScreenUpdates: false) {
+                    snapshotView.frame = previousPlacement.movedFrame(from: previousAppliedPlacement.containerSize, to: params.layout.size)
+                    self.view.insertSubview(snapshotView, aboveSubview: tabBarComponentView)
+                    snapshotView.layer.animateAlpha(from: 1.0, to: 0.0, duration: crossfadeDuration * 0.5, removeOnCompletion: false, completion: { [weak snapshotView] _ in
+                        snapshotView?.removeFromSuperview()
+                    })
+                }
+                if !self.tabBarHidden && tabBarAlpha > 0.0 {
+                    tabBarComponentView.layer.animateAlpha(from: 0.0, to: tabBarAlpha, duration: crossfadeDuration * 0.5, delay: crossfadeDuration * 0.5)
+                }
+            }
+            tabBarFrameTransition.updateFrame(view: tabBarComponentView, frame: tabBarFrame)
+            transition.updateAlpha(layer: tabBarComponentView.layer, alpha: tabBarAlpha)
         }
         
-        transition.updateFrame(node: self.disabledOverlayNode, frame: tabBarFrame)
+        tabBarFrameTransition.updateFrame(node: self.disabledOverlayNode, frame: tabBarFrame)
         
         let toolbarHeight = 44.0
-        let toolbarFrame = CGRect(origin: CGPoint(x: sideInset, y: params.layout.size.height - panelsBottomInset - toolbarHeight), size: CGSize(width: params.layout.size.width - sideInset * 2.0, height: toolbarHeight))
+        let toolbarFrame: CGRect
+        if sidePlacement != nil {
+            toolbarFrame = tabBarSideToolbarFrame(layout: params.layout, sideMargin: sideInset, bottomInset: panelsBottomInset, height: toolbarHeight)
+        } else {
+            toolbarFrame = CGRect(origin: CGPoint(x: sideInset, y: params.layout.size.height - panelsBottomInset - toolbarHeight), size: CGSize(width: params.layout.size.width - sideInset * 2.0, height: toolbarHeight))
+        }
         
         if let toolbarData = params.toolbar {
             let toolbar: ComponentView<Empty>
@@ -427,10 +513,71 @@ final class TabBarControllerNode: ASDisplayNode {
             }
         }
         
+        if sidePlacement != nil {
+            // The content already keeps clear of the strip through the side safe inset; only the edit
+            // toolbar at the bottom needs an inset.
+            return params.toolbar != nil ? panelsBottomInset + toolbarHeight : nil
+        }
         return params.layout.size.height - tabBarFrame.minY
     }
     
+    private func updateClassicImpl(tabBarNode: TabBarNode, params: Params, transition: ContainedViewLayoutTransition) -> CGFloat? {
+        let layout = params.layout
+        
+        let tabBarHeight = classicTabBarHeight(layout: layout)
+        let bottomInset = classicTabBarBottomInset(layout: layout)
+        
+        let tabBarFrame = CGRect(origin: CGPoint(x: 0.0, y: layout.size.height - (self.tabBarHidden ? 0.0 : tabBarHeight)), size: CGSize(width: layout.size.width, height: tabBarHeight))
+        
+        tabBarNode.showsLabels = self.interfaceSettings.showTabLabels
+        transition.updateFrame(node: tabBarNode, frame: tabBarFrame)
+        tabBarNode.updateLayout(size: layout.size, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, additionalSideInsets: layout.additionalInsets, bottomInset: bottomInset, transition: transition)
+        
+        transition.updateFrame(node: self.disabledOverlayNode, frame: tabBarFrame)
+        
+        if let toolbar = params.toolbar {
+            if let toolbarNode = self.classicToolbarNode {
+                transition.updateFrame(node: toolbarNode, frame: tabBarFrame)
+                toolbarNode.updateLayout(size: tabBarFrame.size, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, additionalSideInsets: layout.additionalInsets, bottomInset: bottomInset, toolbar: toolbar, transition: transition)
+            } else {
+                let toolbarNode = ToolbarNode(theme: ToolbarTheme(rootControllerTheme: self.theme), displaySeparator: true, left: { [weak self] in
+                    self?.toolbarActionSelected(.left)
+                }, right: { [weak self] in
+                    self?.toolbarActionSelected(.right)
+                }, middle: { [weak self] in
+                    self?.toolbarActionSelected(.middle)
+                })
+                toolbarNode.frame = tabBarFrame
+                toolbarNode.updateLayout(size: tabBarFrame.size, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, additionalSideInsets: layout.additionalInsets, bottomInset: bottomInset, toolbar: toolbar, transition: .immediate)
+                self.addSubnode(toolbarNode)
+                self.classicToolbarNode = toolbarNode
+                if transition.isAnimated {
+                    toolbarNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
+                }
+            }
+        } else if let toolbarNode = self.classicToolbarNode {
+            self.classicToolbarNode = nil
+            transition.updateAlpha(node: toolbarNode, alpha: 0.0, completion: { [weak toolbarNode] _ in
+                toolbarNode?.removeFromSupernode()
+            })
+        }
+        
+        return tabBarHeight
+    }
+    
+    func updateClassicBackgroundAlpha(_ alpha: CGFloat, transition: ContainedViewLayoutTransition) {
+        guard let classicTabBarNode = self.classicTabBarNode else {
+            return
+        }
+        let alpha = max(0.0, min(1.0, alpha))
+        transition.updateAlpha(node: classicTabBarNode.backgroundNode, alpha: alpha, delay: 0.1)
+        transition.updateAlpha(node: classicTabBarNode.separatorNode, alpha: alpha, delay: 0.1)
+    }
+    
     func frameForControllerTab(at index: Int) -> CGRect? {
+        if let classicTabBarNode = self.classicTabBarNode {
+            return classicTabBarNode.frameForControllerTab(at: index).flatMap { classicTabBarNode.view.convert($0, to: self.view) }
+        }
         guard let tabBarView = self.tabBarView.view as? TabBarComponent.View else {
             return nil
         }
@@ -441,8 +588,19 @@ final class TabBarControllerNode: ASDisplayNode {
     }
     
     func isPointInsideContentArea(point: CGPoint) -> Bool {
+        if let classicTabBarNode = self.classicTabBarNode {
+            return point.y < classicTabBarNode.frame.minY
+        }
         guard let tabBarView = self.tabBarView.view else {
             return false
+        }
+        if let sidePlacement = self.appliedPlacement?.placement {
+            switch sidePlacement.edge {
+            case .left:
+                return point.x > tabBarView.frame.maxX
+            case .right:
+                return point.x < tabBarView.frame.minX
+            }
         }
         if point.y < tabBarView.frame.minY {
             return true
@@ -452,12 +610,31 @@ final class TabBarControllerNode: ASDisplayNode {
     
     func updateTabBarItems(items: [TabBarNodeItem]) {
         self.tabBarItems = items
+        self.classicTabBarNode?.tabBarItems = items
         self.requestUpdate()
     }
     
     func updateSelectedIndex(index: Int) {
         self.selectedIndex = index
         self.isChangingSelectedIndex = true
+        self.classicTabBarNode?.selectedIndex = index
         self.requestUpdate()
+    }
+}
+
+func classicTabBarBottomInset(layout: ContainerViewLayout) -> CGFloat {
+    var options: ContainerViewLayoutInsetOptions = []
+    if layout.metrics.widthClass == .regular {
+        options.insert(.input)
+    }
+    return layout.insets(options: options).bottom
+}
+
+func classicTabBarHeight(layout: ContainerViewLayout) -> CGFloat {
+    let bottomInset = classicTabBarBottomInset(layout: layout)
+    if !layout.safeInsets.left.isZero {
+        return 34.0 + bottomInset
+    } else {
+        return 49.0 + bottomInset
     }
 }

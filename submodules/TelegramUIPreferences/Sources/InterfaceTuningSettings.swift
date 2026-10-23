@@ -8,6 +8,8 @@ public struct InterfaceTuningSettings: Codable, Equatable {
     public var showTabLabels: Bool
     public var showSearchShortcut: Bool
     public var stretchBottomBar: Bool
+    public var showAppBadge: Bool
+    public var classicDesign: Bool
 
     public var showProfileIdentifiers: Bool
     public var showDataCenter: Bool
@@ -34,6 +36,8 @@ public struct InterfaceTuningSettings: Codable, Equatable {
         showTabLabels: Bool,
         showSearchShortcut: Bool,
         stretchBottomBar: Bool,
+        showAppBadge: Bool = true,
+        classicDesign: Bool = false,
         showProfileIdentifiers: Bool,
         showDataCenter: Bool,
         showRegistrationDate: Bool,
@@ -55,6 +59,8 @@ public struct InterfaceTuningSettings: Codable, Equatable {
         self.showTabLabels = showTabLabels
         self.showSearchShortcut = showSearchShortcut
         self.stretchBottomBar = stretchBottomBar
+        self.showAppBadge = showAppBadge
+        self.classicDesign = classicDesign
         self.showProfileIdentifiers = showProfileIdentifiers
         self.showDataCenter = showDataCenter
         self.showRegistrationDate = showRegistrationDate
@@ -73,6 +79,7 @@ public struct InterfaceTuningSettings: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case concealBottomBar, showContactsShortcut, showCallsShortcut, showTabLabels, showSearchShortcut, stretchBottomBar
+        case showAppBadge, classicDesign
         case showProfileIdentifiers, showDataCenter, showRegistrationDate, showChatCreationDate
         case showCallbackData
         case hideStoryStrip, disableStoryCameraSwipe, confirmStoryOpen, allowStoryRepost
@@ -88,6 +95,8 @@ public struct InterfaceTuningSettings: Codable, Equatable {
         self.showTabLabels = try container.decodeIfPresent(Bool.self, forKey: .showTabLabels) ?? true
         self.showSearchShortcut = try container.decodeIfPresent(Bool.self, forKey: .showSearchShortcut) ?? true
         self.stretchBottomBar = try container.decodeIfPresent(Bool.self, forKey: .stretchBottomBar) ?? false
+        self.showAppBadge = try container.decodeIfPresent(Bool.self, forKey: .showAppBadge) ?? true
+        self.classicDesign = try container.decodeIfPresent(Bool.self, forKey: .classicDesign) ?? false
         self.showProfileIdentifiers = try container.decodeIfPresent(Bool.self, forKey: .showProfileIdentifiers) ?? false
         self.showDataCenter = try container.decodeIfPresent(Bool.self, forKey: .showDataCenter) ?? false
         self.showRegistrationDate = try container.decodeIfPresent(Bool.self, forKey: .showRegistrationDate) ?? false
@@ -118,6 +127,8 @@ public struct InterfaceTuningSettings: Codable, Equatable {
         showTabLabels: true,
         showSearchShortcut: true,
         stretchBottomBar: false,
+        showAppBadge: true,
+        classicDesign: false,
         showProfileIdentifiers: false,
         showDataCenter: false,
         showRegistrationDate: false,

@@ -59,19 +59,6 @@ final class MessageFilterTests: XCTestCase {
         XCTAssertEqual(settings, decoded)
     }
 
-    func testPaginationUsesUnfilteredBoundaryWhileFiltering() {
-        let inactiveSettings = MessageFilterSettings.defaultSettings
-        XCTAssertEqual(inactiveSettings.paginationAnchor(visible: 20, unfiltered: 10), 20)
-
-        let activeSettings = MessageFilterSettings(
-            hideBlockedUsersMessages: false,
-            shadowBannedPeerIds: [42],
-            blockedPeerIdsCache: []
-        )
-        XCTAssertEqual(activeSettings.paginationAnchor(visible: 20, unfiltered: 10), 10)
-        XCTAssertEqual(activeSettings.paginationAnchor(visible: 20, unfiltered: nil), 20)
-    }
-
     func testLegacyInterfaceTuningSettingsUseVisibleBusinessPanels() throws {
         let legacy = """
         {

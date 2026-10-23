@@ -112,6 +112,8 @@ public final class LocationPickerController: ViewController, AttachmentContainab
         initialLocation: CLLocationCoordinate2D? = nil,
         completion: @escaping (TelegramMediaMap, Int64?, String?, String?, String?) -> Void
     ) {
+        let style: Style = ClassicDesign.isEnabled ? .legacy : style
+        
         self.context = context
         self.style = style
         self.mode = mode
@@ -121,14 +123,17 @@ public final class LocationPickerController: ViewController, AttachmentContainab
         self.presentationData = updatedPresentationData?.initial ?? context.sharedContext.currentPresentationData.with { $0 }
         self.updatedPresentationData = updatedPresentationData
         
-        let navigationBarPresentationData = NavigationBarPresentationData(theme: NavigationBarTheme(rootControllerTheme: self.presentationData.theme, hideBackground: style == .glass, hideSeparator: true), strings: NavigationBarStrings(presentationStrings: self.presentationData.strings))
+        let navigationBarPresentationData = NavigationBarPresentationData(theme: NavigationBarTheme(rootControllerTheme: self.presentationData.theme, edgeEffectColor: style == .glass ? .clear : nil), strings: NavigationBarStrings(presentationStrings: self.presentationData.strings))
         
         super.init(navigationBarPresentationData: navigationBarPresentationData)
         
         self.navigationPresentation = .modal
-        self._hasGlassStyle = true
+        self._hasGlassStyle = !ClassicDesign.isEnabled
         
-        if case .share = mode {
+        if ClassicDesign.isEnabled {
+            self.title = self.presentationData.strings.Map_ChooseLocationTitle
+            self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.Common_Cancel, style: .plain, target: self, action: #selector(self.cancelPressed))
+        } else if case .share = mode {
             self.navigationItem.leftBarButtonItem = UIBarButtonItem(customView: UIView())
         } else {
             self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: "___close", style: .plain, target: self, action: #selector(self.cancelPressed))
@@ -142,7 +147,7 @@ public final class LocationPickerController: ViewController, AttachmentContainab
             }
             strongSelf.presentationData = presentationData
             
-            let navigationBarPresentationData = NavigationBarPresentationData(theme: NavigationBarTheme(rootControllerTheme: strongSelf.presentationData.theme, hideBackground: style == .glass, hideSeparator: true), strings: NavigationBarStrings(presentationStrings: strongSelf.presentationData.strings))
+            let navigationBarPresentationData = NavigationBarPresentationData(theme: NavigationBarTheme(rootControllerTheme: strongSelf.presentationData.theme, edgeEffectColor: style == .glass ? .clear : nil), strings: NavigationBarStrings(presentationStrings: strongSelf.presentationData.strings))
             
             strongSelf.navigationBar?.updatePresentationData(navigationBarPresentationData, transition: .immediate)
             strongSelf.searchNavigationContentNode?.updatePresentationData(strongSelf.presentationData)

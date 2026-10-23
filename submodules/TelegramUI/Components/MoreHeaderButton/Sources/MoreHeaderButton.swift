@@ -1,4 +1,5 @@
 import Foundation
+import LottieSettings
 import UIKit
 import Display
 import AsyncDisplayKit
@@ -52,7 +53,11 @@ public final class MoreHeaderButton: HighlightableButtonNode {
             strongSelf.contextAction?(strongSelf.containerNode, gesture)
         }
 
-        self.containerNode.frame = CGRect(origin: CGPoint(), size: CGSize(width: 44.0, height: 44.0))
+        if ClassicDesign.isEnabled {
+            self.containerNode.frame = CGRect(origin: CGPoint(), size: CGSize(width: 30.0, height: 44.0))
+        } else {
+            self.containerNode.frame = CGRect(origin: CGPoint(), size: CGSize(width: 44.0, height: 44.0))
+        }
         self.referenceNode.frame = self.containerNode.bounds
 
         //self.iconNode.image = MoreHeaderButton.optionsCircleImage(color: color)
@@ -86,9 +91,10 @@ public final class MoreHeaderButton: HighlightableButtonNode {
                 transition: .immediate,
                 component: AnyComponent(LottieComponent(
                     content: LottieComponent.AppBundleContent(
-                        name: "anim_morewide"
+                        name: ClassicDesign.isEnabled ? "anim_moredots" : "anim_morewide"
                     ),
-                    color: self.color
+                    color: self.color,
+                    lottieSettings: .noAccountFallback
                 )),
                 environment: {},
                 containerSize: animationSize
@@ -97,7 +103,7 @@ public final class MoreHeaderButton: HighlightableButtonNode {
                 if animationComponentView.superview == nil {
                     self.view.addSubview(animationComponentView)
                 }
-                animationComponentView.frame = CGRect(origin: CGPoint(x: floor((self.containerNode.bounds.width - animationSize.width) / 2.0), y: floor((self.containerNode.bounds.height - animationSize.height) / 2.0)), size: animationSize)
+                animationComponentView.frame = CGRect(origin: CGPoint(x: self.containerNode.frame.minX + floor((self.containerNode.bounds.width - animationSize.width) / 2.0), y: floor((self.containerNode.bounds.height - animationSize.height) / 2.0)), size: animationSize)
             }
         }
         if animated {
@@ -172,8 +178,25 @@ public final class MoreHeaderButton: HighlightableButtonNode {
         super.didLoad()
         self.view.isOpaque = false
     }
+    
+    override public func layout() {
+        super.layout()
+        
+        if ClassicDesign.isEnabled {
+            let containerX: CGFloat = self.bounds.width > 30.0 ? floor((self.bounds.width - 30.0) / 2.0) : 0.0
+            if self.containerNode.frame.minX != containerX {
+                self.containerNode.frame = CGRect(origin: CGPoint(x: containerX, y: 0.0), size: self.containerNode.bounds.size)
+                if let animationComponentView = self.animationView.view {
+                    animationComponentView.frame.origin.x = containerX + floor((self.containerNode.bounds.width - animationComponentView.bounds.width) / 2.0)
+                }
+            }
+        }
+    }
 
     override public func calculateSizeThatFits(_ constrainedSize: CGSize) -> CGSize {
+        if ClassicDesign.isEnabled {
+            return CGSize(width: 22.0, height: 44.0)
+        }
         return CGSize(width: 44.0, height: 44.0)
     }
 

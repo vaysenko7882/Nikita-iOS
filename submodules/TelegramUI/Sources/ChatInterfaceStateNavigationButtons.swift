@@ -1,11 +1,19 @@
 import Foundation
 import UIKit
 import AsyncDisplayKit
+import Display
 import TelegramCore
 import TelegramPresentationData
 import AccountContext
 import ChatPresentationInterfaceState
 import ChatNavigationButton
+
+private func classicNavigationButtonImage(_ image: UIImage?) -> UIImage? {
+    if ClassicDesign.isEnabled {
+        return image?.withRenderingMode(.alwaysTemplate)
+    }
+    return image
+}
 
 func leftNavigationButtonForChatInterfaceState(_ presentationInterfaceState: ChatPresentationInterfaceState, subject: ChatControllerSubject?, strings: PresentationStrings, currentButton: ChatNavigationButton?, target: Any?, selector: Selector?) -> ChatNavigationButton? {
     if let _ = presentationInterfaceState.interfaceState.selectionState {
@@ -62,7 +70,7 @@ func leftNavigationButtonForChatInterfaceState(_ presentationInterfaceState: Cha
         switch customChatContents.kind {
         case .hashTagSearch, .messageVersionHistory:
             break
-        case .quickReplyMessageInput, .businessLinkSetup:
+        case .quickReplyMessageInput, .businessLinkSetup, .welcomeMessages:
             if let currentButton = currentButton, currentButton.action == .dismiss {
                 return currentButton
             } else {
@@ -106,7 +114,7 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
         if case .search(isTags) = currentButton?.action {
             return currentButton
         } else {
-            let buttonItem = UIBarButtonItem(image: isTags ? PresentationResourcesRootController.navigationCompactTagsSearchIcon(presentationInterfaceState.theme) : PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme), style: .plain, target: target, action: selector)
+            let buttonItem = UIBarButtonItem(image: classicNavigationButtonImage(isTags ? PresentationResourcesRootController.navigationCompactTagsSearchIcon(presentationInterfaceState.theme) : PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme)), style: .plain, target: target, action: selector)
             buttonItem.accessibilityLabel = strings.Conversation_Search
             return ChatNavigationButton(action: .search(hasTags: isTags), buttonItem: buttonItem)
         }
@@ -119,7 +127,7 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
             if case .search(false) = currentButton?.action {
                 return currentButton
             } else {
-                let buttonItem = UIBarButtonItem(image: PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme), style: .plain, target: target, action: selector)
+                let buttonItem = UIBarButtonItem(image: classicNavigationButtonImage(PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme)), style: .plain, target: target, action: selector)
                 buttonItem.accessibilityLabel = strings.Conversation_Search
                 return ChatNavigationButton(action: .search(hasTags: false), buttonItem: buttonItem)
             }
@@ -135,7 +143,7 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
             if case .search(false) = currentButton?.action {
                 return currentButton
             } else {
-                let buttonItem = UIBarButtonItem(image: PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme), style: .plain, target: target, action: selector)
+                let buttonItem = UIBarButtonItem(image: classicNavigationButtonImage(PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme)), style: .plain, target: target, action: selector)
                 buttonItem.accessibilityLabel = strings.Conversation_Search
                 return ChatNavigationButton(action: .search(hasTags: false), buttonItem: buttonItem)
             }
@@ -194,6 +202,8 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
                 buttonItem.accessibilityLabel = strings.Common_Done
                 return ChatNavigationButton(action: .edit, buttonItem: buttonItem)
             }
+        case .welcomeMessages:
+            return nil
         }
     }
     
@@ -203,7 +213,7 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
             if case .search = currentButton?.action {
                 return currentButton
             } else {
-                let buttonItem = UIBarButtonItem(image: PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme), style: .plain, target: target, action: selector)
+                let buttonItem = UIBarButtonItem(image: classicNavigationButtonImage(PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme)), style: .plain, target: target, action: selector)
                 buttonItem.accessibilityLabel = strings.Conversation_Search
                 return ChatNavigationButton(action: .search(hasTags: false), buttonItem: buttonItem)
             }
@@ -221,7 +231,7 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
                 if case .search = currentButton?.action {
                     return currentButton
                 } else {
-                    let buttonItem = UIBarButtonItem(image: PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme), style: .plain, target: target, action: selector)
+                    let buttonItem = UIBarButtonItem(image: classicNavigationButtonImage(PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme)), style: .plain, target: target, action: selector)
                     buttonItem.accessibilityLabel = strings.Conversation_Search
                     return ChatNavigationButton(action: .search(hasTags: false), buttonItem: buttonItem)
                 }
@@ -261,7 +271,7 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
                 if case .search(isTags) = currentButton?.action {
                     return currentButton
                 } else {
-                    let buttonItem = UIBarButtonItem(image: isTags ? PresentationResourcesRootController.navigationCompactTagsSearchIcon(presentationInterfaceState.theme) : PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme), style: .plain, target: target, action: selector)
+                    let buttonItem = UIBarButtonItem(image: classicNavigationButtonImage(isTags ? PresentationResourcesRootController.navigationCompactTagsSearchIcon(presentationInterfaceState.theme) : PresentationResourcesRootController.navigationCompactSearchIcon(presentationInterfaceState.theme)), style: .plain, target: target, action: selector)
                     buttonItem.accessibilityLabel = strings.Conversation_Search
                     return ChatNavigationButton(action: .search(hasTags: isTags), buttonItem: buttonItem)
                 }

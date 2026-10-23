@@ -38,6 +38,28 @@ final class LocationBroadcastNavigationAccessoryPanel: ASDisplayNode {
     private var validLayout: (CGSize, CGFloat, CGFloat)?
     private var peersAndMode: ([EnginePeer], LocationBroadcastNavigationAccessoryPanelMode, Bool)?
     
+    private static func accentColor(_ theme: PresentationTheme) -> UIColor {
+        return ClassicDesign.isEnabled ? theme.rootController.navigationBar.accentTextColor : theme.chat.inputPanel.panelControlColor
+    }
+    
+    private static func closeImage(_ theme: PresentationTheme) -> UIImage? {
+        if ClassicDesign.isEnabled {
+            return PresentationResourcesRootController.navigationPlayerCloseButton(theme)
+        }
+        return generateImage(CGSize(width: 12.0, height: 12.0), contextGenerator: { size, context in
+            context.clear(CGRect(origin: CGPoint(), size: size))
+            context.setStrokeColor(theme.chat.inputPanel.panelControlColor.cgColor)
+            context.setLineWidth(1.33)
+            context.setLineCap(.round)
+            context.move(to: CGPoint(x: 1.0, y: 1.0))
+            context.addLine(to: CGPoint(x: size.width - 1.0, y: size.height - 1.0))
+            context.strokePath()
+            context.move(to: CGPoint(x: size.width - 1.0, y: 1.0))
+            context.addLine(to: CGPoint(x: 1.0, y: size.height - 1.0))
+            context.strokePath()
+        })
+    }
+    
     init(accountPeerId: EnginePeer.Id, theme: PresentationTheme, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, tapAction: @escaping () -> Void, close: @escaping (UIView) -> Void) {
         self.accountPeerId = accountPeerId
         self.theme = theme
@@ -53,9 +75,9 @@ final class LocationBroadcastNavigationAccessoryPanel: ASDisplayNode {
         self.iconNode.isLayerBacked = true
         self.iconNode.displayWithoutProcessing = true
         self.iconNode.displaysAsynchronously = false
-        self.iconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat List/LiveLocationPanelIcon"), color: theme.chat.inputPanel.panelControlColor)
+        self.iconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat List/LiveLocationPanelIcon"), color: LocationBroadcastNavigationAccessoryPanel.accentColor(theme))
         
-        self.wavesNode = LiveLocationWavesNode(color: self.theme.chat.inputPanel.panelControlColor)
+        self.wavesNode = LiveLocationWavesNode(color: LocationBroadcastNavigationAccessoryPanel.accentColor(self.theme))
         
         self.titleNode = TextNode()
         self.titleNode.isUserInteractionEnabled = false
@@ -64,18 +86,7 @@ final class LocationBroadcastNavigationAccessoryPanel: ASDisplayNode {
         self.subtitleNode.isUserInteractionEnabled = false
         
         self.closeButton = HighlightableButtonNode()
-        self.closeButton.setImage(generateImage(CGSize(width: 12.0, height: 12.0), contextGenerator: { size, context in
-            context.clear(CGRect(origin: CGPoint(), size: size))
-            context.setStrokeColor(theme.chat.inputPanel.panelControlColor.cgColor)
-            context.setLineWidth(1.33)
-            context.setLineCap(.round)
-            context.move(to: CGPoint(x: 1.0, y: 1.0))
-            context.addLine(to: CGPoint(x: size.width - 1.0, y: size.height - 1.0))
-            context.strokePath()
-            context.move(to: CGPoint(x: size.width - 1.0, y: 1.0))
-            context.addLine(to: CGPoint(x: 1.0, y: size.height - 1.0))
-            context.strokePath()
-        }), for: [])
+        self.closeButton.setImage(LocationBroadcastNavigationAccessoryPanel.closeImage(theme), for: [])
         self.closeButton.hitTestSlop = UIEdgeInsets(top: -8.0, left: -8.0, bottom: -8.0, right: -8.0)
         self.closeButton.displaysAsynchronously = false
         
@@ -105,21 +116,10 @@ final class LocationBroadcastNavigationAccessoryPanel: ASDisplayNode {
         self.theme = presentationData.theme
         self.strings = presentationData.strings
         
-        self.iconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat List/LiveLocationPanelIcon"), color: theme.chat.inputPanel.panelControlColor)
+        self.iconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat List/LiveLocationPanelIcon"), color: LocationBroadcastNavigationAccessoryPanel.accentColor(self.theme))
         
-        self.wavesNode.color = self.theme.chat.inputPanel.panelControlColor
-        self.closeButton.setImage(generateImage(CGSize(width: 12.0, height: 12.0), contextGenerator: { size, context in
-            context.clear(CGRect(origin: CGPoint(), size: size))
-            context.setStrokeColor(theme.chat.inputPanel.panelControlColor.cgColor)
-            context.setLineWidth(1.33)
-            context.setLineCap(.round)
-            context.move(to: CGPoint(x: 1.0, y: 1.0))
-            context.addLine(to: CGPoint(x: size.width - 1.0, y: size.height - 1.0))
-            context.strokePath()
-            context.move(to: CGPoint(x: size.width - 1.0, y: 1.0))
-            context.addLine(to: CGPoint(x: 1.0, y: size.height - 1.0))
-            context.strokePath()
-        }), for: [])
+        self.wavesNode.color = LocationBroadcastNavigationAccessoryPanel.accentColor(self.theme)
+        self.closeButton.setImage(LocationBroadcastNavigationAccessoryPanel.closeImage(self.theme), for: [])
     }
     
     func updateLayout(size: CGSize, leftInset: CGFloat, rightInset: CGFloat, transition: ContainedViewLayoutTransition) {
@@ -146,7 +146,7 @@ final class LocationBroadcastNavigationAccessoryPanel: ASDisplayNode {
                         $0.id != self.accountPeerId
                     }
                     if filteredPeers.count == 0 {
-                        subtitleString = NSAttributedString(string: self.strings.Conversation_LiveLocationYou, font: subtitleFont, textColor: self.theme.chat.inputPanel.panelControlColor)
+                        subtitleString = NSAttributedString(string: self.strings.Conversation_LiveLocationYou, font: subtitleFont, textColor: LocationBroadcastNavigationAccessoryPanel.accentColor(self.theme))
                     } else {
                         let otherString: String
                         if filteredPeers.count == 1 {
@@ -161,7 +161,7 @@ final class LocationBroadcastNavigationAccessoryPanel: ASDisplayNode {
                             rawText = otherString
                         }
                         let body = MarkdownAttributeSet(font: subtitleFont, textColor: self.theme.rootController.navigationBar.secondaryTextColor)
-                        let accent = MarkdownAttributeSet(font: subtitleFont, textColor: self.theme.chat.inputPanel.panelControlColor)
+                        let accent = MarkdownAttributeSet(font: subtitleFont, textColor: LocationBroadcastNavigationAccessoryPanel.accentColor(self.theme))
                         subtitleString = parseMarkdownIntoAttributedString(rawText, attributes: MarkdownAttributes(body: body, bold: accent, link: body, linkAttribute: { _ in nil }))
                     }
                         

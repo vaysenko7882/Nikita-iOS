@@ -1,4 +1,5 @@
 import Foundation
+import LottieSettings
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -163,6 +164,13 @@ private final class BadgeNode: ASDisplayNode {
     }
 }
 
+private func classicSolidButtonCornerRadius(_ cornerRadius: CGFloat, height: CGFloat) -> CGFloat {
+    if ClassicDesign.isEnabled, height >= 40.0, cornerRadius >= height * 0.5 - 1.0 {
+        return 11.0
+    }
+    return cornerRadius
+}
+
 public final class SolidRoundedButtonNode: ASDisplayNode {
     private var theme: SolidRoundedButtonTheme
     private var glass: Bool
@@ -262,7 +270,7 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
                     self.animationNode?.removeFromSupernode()
                     self.animationNode = nil
                     
-                    let animationNode = SimpleAnimationNode(animationName: animation, size: CGSize(width: 30.0, height: 30.0))
+                    let animationNode = SimpleAnimationNode(animationName: animation, size: CGSize(width: 30.0, height: 30.0), lottieSettings: .noAccountFallback)
                     animationNode.customColor = self.theme.foregroundColor
                     animationNode.isUserInteractionEnabled = false
                     self.addSubnode(animationNode)
@@ -275,7 +283,11 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
                     if self.isShimmering {
                         self.animationTimer?.invalidate()
                         
-                        Queue.mainQueue().after(1.25) {
+                        Queue.mainQueue().after(1.25) { [weak self] in
+                            guard let self else {
+                                return
+                            }
+
                             self.animationNode?.play()
                             
                             let timer = SwiftSignalKit.Timer(timeout: self.animationLoopTime, repeat: true, completion: { [weak self] in
@@ -344,8 +356,10 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
     }
     
     public init(title: String? = nil, icon: UIImage? = nil, theme: SolidRoundedButtonTheme, glass: Bool = false, glassInset: Bool = false, font: SolidRoundedButtonFont = .bold, fontSize: CGFloat = 17.0, height: CGFloat = 48.0, cornerRadius: CGFloat = 24.0, isShimmering: Bool = false) {
+        let cornerRadius = classicSolidButtonCornerRadius(cornerRadius, height: height)
+        
         self.theme = theme
-        self.glass = glass
+        self.glass = glass && !ClassicDesign.isEnabled
         self.glassInset = glassInset
         self.font = font
         self.fontSize = fontSize
@@ -1031,7 +1045,7 @@ public final class SolidRoundedButtonView: UIView {
                     self.animationNode?.view.removeFromSuperview()
                     self.animationNode = nil
                     
-                    let animationNode = SimpleAnimationNode(animationName: animation, size: CGSize(width: 30.0, height: 30.0))
+                    let animationNode = SimpleAnimationNode(animationName: animation, size: CGSize(width: 30.0, height: 30.0), lottieSettings: .noAccountFallback)
                     animationNode.customColor = self.theme.foregroundColor
                     animationNode.isUserInteractionEnabled = false
                     self.addSubview(animationNode.view)
@@ -1044,7 +1058,11 @@ public final class SolidRoundedButtonView: UIView {
                     if self.gloss {
                         self.animationTimer?.invalidate()
                         
-                        Queue.mainQueue().after(1.25) {
+                        Queue.mainQueue().after(1.25) { [weak self] in
+                            guard let self else {
+                                return
+                            }
+
                             self.animationNode?.play()
                             
                             let timer = SwiftSignalKit.Timer(timeout: self.animationLoopTime, repeat: true, completion: { [weak self] in
@@ -1099,6 +1117,8 @@ public final class SolidRoundedButtonView: UIView {
     public var progressType: SolidRoundedButtonProgressType = .fullSize
     
     public init(title: String? = nil, label: String? = nil, badge: String? = nil, icon: UIImage? = nil, theme: SolidRoundedButtonTheme, font: SolidRoundedButtonFont = .bold, fontSize: CGFloat = 17.0, height: CGFloat = 48.0, cornerRadius: CGFloat = 24.0, gloss: Bool = false) {
+        let cornerRadius = classicSolidButtonCornerRadius(cornerRadius, height: height)
+        
         self.theme = theme
         self.font = font
         self.fontSize = fontSize

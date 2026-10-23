@@ -53,58 +53,65 @@ private enum LocalMessageArchiveSection: Int32 {
 }
 
 private enum LocalMessageArchiveEntry: ItemListNodeEntry {
+    case saveHeader(String)
     case saveDeletedMessages(Bool)
     case saveEditedVersions(Bool)
     case saveMessagesFromArchivedChats(Bool)
+    case keepAcrossLaunches(Bool, Bool)
     case markerHeader(String)
     case marker(String)
     case markerInfo(String)
-    case keepAcrossLaunches(Bool, Bool)
+    case storageHeader(String)
     case mediaLimit(String, Bool)
     case disappearingMediaLimit(String, Bool)
     case usage(String)
     case clearMedia
     case clearArchive
+    case storageInfo(String)
 
     var section: ItemListSectionId {
         switch self {
-        case .saveDeletedMessages, .saveEditedVersions, .saveMessagesFromArchivedChats:
+        case .saveHeader, .saveDeletedMessages, .saveEditedVersions, .saveMessagesFromArchivedChats, .keepAcrossLaunches:
             return LocalMessageArchiveSection.settings.rawValue
         case .markerHeader, .marker, .markerInfo:
             return LocalMessageArchiveSection.marker.rawValue
-        case .mediaLimit, .disappearingMediaLimit, .usage, .clearMedia, .clearArchive:
+        case .storageHeader, .mediaLimit, .disappearingMediaLimit, .usage, .clearMedia, .clearArchive, .storageInfo:
             return LocalMessageArchiveSection.storage.rawValue
-        case .keepAcrossLaunches:
-            return LocalMessageArchiveSection.settings.rawValue
         }
     }
 
     var stableId: Int32 {
         switch self {
-        case .saveDeletedMessages:
+        case .saveHeader:
             return 0
-        case .saveEditedVersions:
+        case .saveDeletedMessages:
             return 1
-        case .saveMessagesFromArchivedChats:
+        case .saveEditedVersions:
             return 2
-        case .markerHeader:
+        case .saveMessagesFromArchivedChats:
             return 3
-        case .marker:
-            return 4
-        case .markerInfo:
-            return 5
         case .keepAcrossLaunches:
+            return 4
+        case .markerHeader:
+            return 5
+        case .marker:
             return 6
-        case .mediaLimit:
+        case .markerInfo:
             return 7
-        case .disappearingMediaLimit:
+        case .storageHeader:
             return 8
-        case .usage:
+        case .mediaLimit:
             return 9
-        case .clearMedia:
+        case .disappearingMediaLimit:
             return 10
-        case .clearArchive:
+        case .usage:
             return 11
+        case .clearMedia:
+            return 12
+        case .clearArchive:
+            return 13
+        case .storageInfo:
+            return 14
         }
     }
 
@@ -116,7 +123,7 @@ private enum LocalMessageArchiveEntry: ItemListNodeEntry {
             return lhsValue == rhsValue
         case let (.saveMessagesFromArchivedChats(lhsValue), .saveMessagesFromArchivedChats(rhsValue)):
             return lhsValue == rhsValue
-        case let (.markerHeader(lhsText), .markerHeader(rhsText)), let (.marker(lhsText), .marker(rhsText)), let (.markerInfo(lhsText), .markerInfo(rhsText)):
+        case let (.saveHeader(lhsText), .saveHeader(rhsText)), let (.markerHeader(lhsText), .markerHeader(rhsText)), let (.marker(lhsText), .marker(rhsText)), let (.markerInfo(lhsText), .markerInfo(rhsText)), let (.storageHeader(lhsText), .storageHeader(rhsText)), let (.storageInfo(lhsText), .storageInfo(rhsText)):
             return lhsText == rhsText
         case let (.keepAcrossLaunches(lhsValue, lhsEnabled), .keepAcrossLaunches(rhsValue, rhsEnabled)):
             return lhsValue == rhsValue && lhsEnabled == rhsEnabled
@@ -141,6 +148,10 @@ private enum LocalMessageArchiveEntry: ItemListNodeEntry {
         let arguments = arguments as! LocalMessageArchiveControllerArguments
         let strings = presentationData.strings.localFeatures.localMessageArchive
         switch self {
+        case let .saveHeader(text), let .storageHeader(text):
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
+        case let .storageInfo(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case let .saveDeletedMessages(value):
             return ItemListSwitchItem(
                 presentationData: presentationData,
@@ -241,7 +252,7 @@ private enum LocalMessageArchiveEntry: ItemListNodeEntry {
                 action: arguments.selectDisappearingMediaLimit
             )
         case let .usage(value):
-            return ItemListDisclosureItem(presentationData: presentationData, title: strings.archiveUsage, label: value, sectionId: self.section, style: .blocks, action: nil)
+            return ItemListDisclosureItem(presentationData: presentationData, title: strings.archiveUsage, label: value, sectionId: self.section, style: .blocks, disclosureStyle: .none, action: nil)
         case .clearMedia:
             return ItemListActionItem(presentationData: presentationData, title: strings.clearMedia, kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.clearMedia)
         case .clearArchive:
@@ -256,9 +267,9 @@ public func localMessageArchiveSettingsController(context: AccountContext) -> Vi
     let presentationData = context.sharedContext.currentPresentationData.with { $0 }
     let initialStrings = presentationData.strings.localFeatures.localMessageArchive
 
-    let settings = context.account.postbox.preferencesView(keys: [PreferencesKeys.deletedMessageArchiveSettings])
-    |> map { view -> DeletedMessageArchiveSettings in
-        return view.values[PreferencesKeys.deletedMessageArchiveSettings]?.get(DeletedMessageArchiveSettings.self) ?? .defaultSettings
+    let settings = context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.ApplicationSpecificPreference(key: PreferencesKeys.deletedMessageArchiveSettings))
+    |> map { entry -> DeletedMessageArchiveSettings in
+        return entry?.get(DeletedMessageArchiveSettings.self) ?? .defaultSettings
     }
     let stats = Promise<DeletedMessageArchiveStats>()
     let refreshStats: () -> Void = {
@@ -268,35 +279,35 @@ public func localMessageArchiveSettingsController(context: AccountContext) -> Vi
 
     let arguments = LocalMessageArchiveControllerArguments(
         toggleSaveDeletedMessages: { value in
-            let _ = updateDeletedMessageArchiveSettingsInteractively(postbox: context.account.postbox, { current in
+            let _ = context.engine.messages.updateDeletedMessageArchiveSettingsInteractively({ current in
                 var current = current
                 current.saveDeletedMessages = value
                 return current
             }).start()
         },
         toggleSaveEditedVersions: { value in
-            let _ = updateDeletedMessageArchiveSettingsInteractively(postbox: context.account.postbox, { current in
+            let _ = context.engine.messages.updateDeletedMessageArchiveSettingsInteractively({ current in
                 var current = current
                 current.saveEditedVersions = value
                 return current
             }).start()
         },
         toggleSaveMessagesFromArchivedChats: { value in
-            let _ = updateDeletedMessageArchiveSettingsInteractively(postbox: context.account.postbox, { current in
+            let _ = context.engine.messages.updateDeletedMessageArchiveSettingsInteractively({ current in
                 var current = current
                 current.saveMessagesFromArchivedChats = value
                 return current
             }).start()
         },
         updateDeletedMessageMarker: { value in
-            let _ = updateDeletedMessageArchiveSettingsInteractively(postbox: context.account.postbox, { current in
+            let _ = context.engine.messages.updateDeletedMessageArchiveSettingsInteractively({ current in
                 var current = current
                 current.deletedMessageMarker = String(value.prefix(DeletedMessageArchiveSettings.deletedMessageMarkerLimit))
                 return current
             }).start()
         },
         toggleKeepAcrossLaunches: { value in
-            let _ = updateDeletedMessageArchiveSettingsInteractively(postbox: context.account.postbox, { current in
+            let _ = context.engine.messages.updateDeletedMessageArchiveSettingsInteractively({ current in
                 var current = current
                 current.keepAcrossLaunches = value
                 return current
@@ -307,7 +318,7 @@ public func localMessageArchiveSettingsController(context: AccountContext) -> Vi
             var items: [ActionSheetItem] = DeletedMessageArchiveSettings.allowedMediaLimitGigabytes.map { value in
                 return ActionSheetButtonItem(title: "\(value) \(initialStrings.gigabytesSuffix)", action: { [weak sheet] in
                     sheet?.dismissAnimated()
-                    let _ = (updateDeletedMessageArchiveSettingsInteractively(postbox: context.account.postbox, { current in
+                    let _ = (context.engine.messages.updateDeletedMessageArchiveSettingsInteractively({ current in
                         var current = current
                         current.mediaLimitGigabytes = value
                         return current
@@ -328,7 +339,7 @@ public func localMessageArchiveSettingsController(context: AccountContext) -> Vi
             var items: [ActionSheetItem] = DeletedMessageArchiveSettings.allowedDisappearingMediaLimitGigabytes.map { value in
                 return ActionSheetButtonItem(title: "\(value) \(initialStrings.gigabytesSuffix)", action: { [weak sheet] in
                     sheet?.dismissAnimated()
-                    let _ = (updateDeletedMessageArchiveSettingsInteractively(postbox: context.account.postbox, { current in
+                    let _ = (context.engine.messages.updateDeletedMessageArchiveSettingsInteractively({ current in
                         var current = current
                         current.disappearingMediaLimitGigabytes = value
                         return current
@@ -369,18 +380,21 @@ public func localMessageArchiveSettingsController(context: AccountContext) -> Vi
         )
         let archiveEnabled = settings.isEnabled
         let entries: [LocalMessageArchiveEntry] = [
+            .saveHeader(strings.saveSection),
             .saveDeletedMessages(settings.saveDeletedMessages),
             .saveEditedVersions(settings.saveEditedVersions),
             .saveMessagesFromArchivedChats(settings.saveMessagesFromArchivedChats),
+            .keepAcrossLaunches(settings.keepAcrossLaunches, archiveEnabled),
             .markerHeader(strings.deletedMessageMarker.uppercased()),
             .marker(settings.deletedMessageMarker),
             .markerInfo(strings.deletedMessageMarkerInfo),
-            .keepAcrossLaunches(settings.keepAcrossLaunches, archiveEnabled),
+            .storageHeader(strings.storageSection),
             .mediaLimit("\(settings.mediaLimitGigabytes) \(strings.gigabytesSuffix)", archiveEnabled),
             .disappearingMediaLimit("\(settings.disappearingMediaLimitGigabytes) \(strings.gigabytesSuffix)", archiveEnabled),
             .usage(usage),
             .clearMedia,
-            .clearArchive
+            .clearArchive,
+            .storageInfo(strings.clearActionsInfo)
         ]
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),

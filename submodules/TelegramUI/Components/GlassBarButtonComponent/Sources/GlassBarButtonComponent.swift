@@ -116,6 +116,10 @@ public final class GlassBarButtonComponent: Component {
             self.containerView.addTarget(self, action: #selector(self.pressed), for: .touchUpInside)
             
             self.containerView.highligthedChanged = { [weak self] highlighted in
+                if ClassicDesign.isEnabled {
+                    self?.updateClassicHighlight(highlighted: highlighted)
+                    return
+                }
                 guard let self, let component = self.component, component.animateScale else {
                     return
                 }
@@ -133,6 +137,22 @@ public final class GlassBarButtonComponent: Component {
         
         public required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
+        }
+        
+        private func updateClassicHighlight(highlighted: Bool) {
+            guard let component = self.component else {
+                return
+            }
+            if !component.animateScale && !([.glass, .tintedGlass] as [DisplayState]).contains(component.state ?? .glass) {
+                return
+            }
+            if highlighted {
+                self.containerView.layer.removeAnimation(forKey: "opacity")
+                self.containerView.alpha = 0.4
+            } else {
+                self.containerView.alpha = 1.0
+                self.containerView.layer.animateAlpha(from: 0.4, to: 1.0, duration: 0.2)
+            }
         }
         
         @objc private func pressed() {
@@ -174,6 +194,10 @@ public final class GlassBarButtonComponent: Component {
                     animateAppearance = true
                     self.componentView = nil
                     if let view = componentView.view {
+                        if !transition.animation.isImmediate {
+                            view.layer.rasterizationScale = UIScreenScale
+                            view.layer.shouldRasterize = true
+                        }
                         transition.setScale(view: view, scale: 0.01)
                         transition.setAlpha(view: view, alpha: 0.0, completion: { _ in
                             view.removeFromSuperview()
@@ -211,7 +235,7 @@ public final class GlassBarButtonComponent: Component {
                     view.isUserInteractionEnabled = false
                     self.containerView.addSubview(view)
                     if animateAppearance {
-                        transition.animateScale(view: view, from: 0.01, to: 1.0)
+                        transition.animateScale(view: view, from: 0.01, to: 1.0, completion: transition.animation.isImmediate ? nil : view.layer.beginRasterizedAnimation())
                         transition.animateAlpha(view: view, from: 0.0, to: 1.0)
                     }
                 }
@@ -358,6 +382,10 @@ public final class BarComponentHostNode: ASDisplayNode {
             if let componentView = self.componentView {
                 self.componentView = nil
                 if let view = componentView.view {
+                    if !transition.animation.isImmediate {
+                        view.layer.rasterizationScale = UIScreenScale
+                        view.layer.shouldRasterize = true
+                    }
                     transition.setAlpha(view: view, alpha: 0.0, completion: { _ in
                         view.removeFromSuperview()
                     })
@@ -389,7 +417,7 @@ public final class BarComponentHostNode: ASDisplayNode {
                     
                     if !transition.animation.isImmediate {
                         transition.animateAlpha(view: view, from: 0.0, to: 1.0)
-                        transition.animateScale(view: view, from: 0.01, to: 1.0)
+                        transition.animateScale(view: view, from: 0.01, to: 1.0, completion: view.layer.beginRasterizedAnimation())
                     }
                 }
                 view.frame = CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: self.size)
