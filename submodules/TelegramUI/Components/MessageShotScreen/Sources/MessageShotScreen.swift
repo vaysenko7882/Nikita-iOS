@@ -296,6 +296,24 @@ private final class MessageShotScreenNode: ASDisplayNode {
         return EngineMessage(updatedMessage)
     }
 
+    private func bubbleReservesAvatarSpace(_ message: EngineMessage) -> Bool {
+        let accountPeerId = self.context.account.peerId
+        guard message.effectivelyIncoming(accountPeerId), message.author != nil else {
+            return false
+        }
+        let peerId = message.id.peerId
+        if peerId.isRepliesOrSavedMessages(accountPeerId: accountPeerId) {
+            return true
+        }
+        guard peerId.isGroupOrChannel else {
+            return false
+        }
+        if let channel = message.peers[peerId] as? TelegramChannel, case .broadcast = channel.info {
+            return false
+        }
+        return true
+    }
+
     private var groupedMessages: [[EngineMessage]] {
         var result: [[EngineMessage]] = []
         for message in self.messages {
@@ -346,7 +364,13 @@ private final class MessageShotScreenNode: ASDisplayNode {
         }
 
         let contentWidth = containerSize.width
-        let params = ListViewItemLayoutParams(width: contentWidth, leftInset: self.options.showAvatar ? 37.0 : 0.0, rightInset: 0.0, availableHeight: layout.size.height)
+        let itemParams: [ListViewItemLayoutParams] = groupedMessages.map { group in
+            var leftInset: CGFloat = 0.0
+            if self.options.showAvatar, let message = group.first, !self.bubbleReservesAvatarSpace(message) {
+                leftInset = 37.0
+            }
+            return ListViewItemLayoutParams(width: contentWidth, leftInset: leftInset, rightInset: 0.0, availableHeight: layout.size.height)
+        }
 
         if let messageNodes = self.messageNodes {
             for i in 0 ..< items.count {
@@ -357,7 +381,7 @@ private final class MessageShotScreenNode: ASDisplayNode {
                 )
                 items[i].updateNode(async: { $0() }, node: {
                     return itemNode
-                }, params: params, neighbors: neighbors, animation: .None, completion: { (itemLayout, apply) in
+                }, params: itemParams[i], neighbors: neighbors, animation: .None, completion: { (itemLayout, apply) in
                     itemNode.contentSize = itemLayout.contentSize
                     itemNode.insets = itemLayout.insets
                     itemNode.frame = CGRect(origin: itemNode.frame.origin, size: CGSize(width: contentWidth, height: itemLayout.size.height))
@@ -373,7 +397,7 @@ private final class MessageShotScreenNode: ASDisplayNode {
                     previous: i == items.count - 1 ? nil : items[i + 1].neighborDescriptor,
                     next: i == 0 ? nil : items[i - 1].neighborDescriptor
                 )
-                items[i].nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: true, neighbors: neighbors, completion: { node, apply in
+                items[i].nodeConfiguredForParams(async: { $0() }, params: itemParams[i], synchronousLoads: true, neighbors: neighbors, completion: { node, apply in
                     itemNode = node
                     apply().1(ListViewItemApply())
                 })

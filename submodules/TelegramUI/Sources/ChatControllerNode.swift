@@ -2483,7 +2483,9 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             var classicBottomExtension: CGFloat = 0.0
             if !classicPanelsHeight.isZero {
                 if cleanInsets.bottom < insets.bottom {
-                    if case .regular = layout.metrics.widthClass, insets.bottom < 88.0 {
+                    if self.inputNode == nil, let inputHeight = layout.inputHeight, inputHeight > 0.0 {
+                        classicBottomExtension = insets.bottom
+                    } else if case .regular = layout.metrics.widthClass, insets.bottom < 88.0 {
                         classicBottomExtension = insets.bottom
                     }
                 } else {

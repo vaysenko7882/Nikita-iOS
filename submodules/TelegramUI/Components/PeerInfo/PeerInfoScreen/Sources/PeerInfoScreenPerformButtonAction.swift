@@ -7,6 +7,7 @@ import TelegramCore
 import UndoUI
 import ContextUI
 import TelegramPresentationData
+import TelegramUIPreferences
 import NotificationPeerExceptionController
 import NotificationExceptionsScreen
 import TranslateUI
@@ -879,6 +880,23 @@ extension PeerInfoScreenNode {
                             if let c {
                                 self?.openClearHistory(contextController: c, clearPeerHistory: clearPeerHistory, chatPeer: EnginePeer(user))
                             }
+                        })))
+                    }
+                    
+                    if user.id != strongSelf.context.account.peerId {
+                        let filterStrings = presentationData.strings.localFeatures.messageFilter
+                        let authorId = user.id.toInt64()
+                        let isHidden = MessageFilterSettingsStore.shared.current.isShadowBanned(authorId)
+                        items.append(.action(ContextMenuActionItem(text: isHidden ? filterStrings.showMessages : filterStrings.hideMessages, icon: { theme in
+                            generateTintedImage(image: UIImage(bundleImageName: isHidden ? "Chat/Context Menu/Unmute" : "Chat/Context Menu/Muted"), color: theme.contextMenu.primaryColor)
+                        }, action: { [weak self] _, f in
+                            f(.dismissWithoutContent)
+                            
+                            let nowHidden = MessageFilterSettingsStore.shared.toggleShadowBan(peerId: authorId)
+                            guard let self else {
+                                return
+                            }
+                            self.controller?.present(UndoOverlayController(presentationData: self.presentationData, content: .info(title: nil, text: nowHidden ? filterStrings.messagesHidden : filterStrings.messagesShown, timeout: nil, customUndoText: nil), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .current)
                         })))
                     }
                     
