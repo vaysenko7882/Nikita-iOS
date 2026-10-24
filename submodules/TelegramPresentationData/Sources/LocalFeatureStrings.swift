@@ -101,6 +101,9 @@ public struct MessageFilterFeatureStrings {
     public let messagesHidden: String
     public let messagesShown: String
     public let show: String
+    public let shareLinkWarningTitle: String
+    public let shareLinkWarningText: String
+    public let shareLinkWarningOpen: String
 }
 
 public struct MessageShotFeatureStrings {
@@ -397,7 +400,10 @@ public struct LocalFeatureStrings {
                 hiddenMessagePlaceholder: "Сообщение скрыто",
                 messagesHidden: "Сообщения этого отправителя скрыты.",
                 messagesShown: "Сообщения этого отправителя снова видны.",
-                show: "Показывать"
+                show: "Показывать",
+                shareLinkWarningTitle: "Ссылка для отправки сообщения",
+                shareLinkWarningText: "Эта ссылка предлагает разослать в чаты сообщение ниже. Такими ссылками распространяют спам: если его отправить, Telegram может ограничить или заблокировать ваш аккаунт.",
+                shareLinkWarningOpen: "Всё равно открыть"
             )
             self.messageShot = MessageShotFeatureStrings(
                 title: "Скриншот",
@@ -607,7 +613,10 @@ public struct LocalFeatureStrings {
                 hiddenMessagePlaceholder: "Повідомлення приховано",
                 messagesHidden: "Повідомлення цього відправника приховано.",
                 messagesShown: "Повідомлення цього відправника знову видно.",
-                show: "Показувати"
+                show: "Показувати",
+                shareLinkWarningTitle: "Посилання для надсилання повідомлення",
+                shareLinkWarningText: "Це посилання пропонує розіслати в чати повідомлення нижче. Такими посиланнями поширюють спам: якщо його надіслати, Telegram може обмежити або заблокувати ваш акаунт.",
+                shareLinkWarningOpen: "Все одно відкрити"
             )
             self.messageShot = MessageShotFeatureStrings(
                 title: "Скриншот",
@@ -807,7 +816,10 @@ public struct LocalFeatureStrings {
                 hiddenMessagePlaceholder: "Message hidden",
                 messagesHidden: "Messages from this sender are now hidden.",
                 messagesShown: "Messages from this sender are visible again.",
-                show: "Show"
+                show: "Show",
+                shareLinkWarningTitle: "Message Sharing Link",
+                shareLinkWarningText: "This link asks you to send the message below to your chats. Links like this are used to spread spam: sending it can get your account limited or banned by Telegram.",
+                shareLinkWarningOpen: "Open Anyway"
             )
             self.messageShot = MessageShotFeatureStrings(
                 title: "Screenshot",

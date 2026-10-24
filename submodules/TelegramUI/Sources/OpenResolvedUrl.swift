@@ -673,105 +673,127 @@ func openResolvedUrlImpl(
             })
             dismissInput()
         case let .share(url, text, to):
-            let continueWithPeer: (EnginePeer.Id, Int64?) -> Void = { [navigationController] peerId, threadId in
-                let textInputState: ChatTextInputState?
-                if let text = text, !text.isEmpty {
-                    if let url = url, !url.isEmpty {
-                        let urlString = NSMutableAttributedString(string: "\(url)\n")
-                        let textString = NSAttributedString(string: "\(text)")
-                        let selectionRange: Range<Int> = urlString.length ..< (urlString.length + textString.length)
-                        urlString.append(textString)
-                        textInputState = ChatTextInputState(inputText: urlString, selectionRange: selectionRange)
+            let proceedWithShare: () -> Void = {
+                let continueWithPeer: (EnginePeer.Id, Int64?) -> Void = { [navigationController] peerId, threadId in
+                    let textInputState: ChatTextInputState?
+                    if let text = text, !text.isEmpty {
+                        if let url = url, !url.isEmpty {
+                            let urlString = NSMutableAttributedString(string: "\(url)\n")
+                            let textString = NSAttributedString(string: "\(text)")
+                            let selectionRange: Range<Int> = urlString.length ..< (urlString.length + textString.length)
+                            urlString.append(textString)
+                            textInputState = ChatTextInputState(inputText: urlString, selectionRange: selectionRange)
+                        } else {
+                            textInputState = ChatTextInputState(inputText: NSAttributedString(string: "\(text)"))
+                        }
+                    } else if let url = url, !url.isEmpty {
+                        textInputState = ChatTextInputState(inputText: NSAttributedString(string: "\(url)"))
                     } else {
-                        textInputState = ChatTextInputState(inputText: NSAttributedString(string: "\(text)"))
+                        textInputState = nil
                     }
-                } else if let url = url, !url.isEmpty {
-                    textInputState = ChatTextInputState(inputText: NSAttributedString(string: "\(url)"))
-                } else {
-                    textInputState = nil
-                }
                 
-                let updateControllers = { [weak navigationController] in
-                    guard let navigationController else {
-                        return
-                    }
-                    let chatController: Signal<ChatController, NoError>
-                    if let threadId {
-                        chatController = chatControllerForForumThreadImpl(context: context, peerId: peerId, threadId: threadId, initialTextInputState: textInputState)
-                    } else {
-                        chatController = .single(ChatControllerImpl(context: context, chatLocation: .peer(id: peerId), initialTextInputState: textInputState))
-                    }
-
-                    let _ = (chatController
-                    |> deliverOnMainQueue).start(next: { [weak navigationController] chatController in
+                    let updateControllers = { [weak navigationController] in
                         guard let navigationController else {
                             return
                         }
-                        var controllers = navigationController.viewControllers.filter { controller in
-                            if controller is PeerSelectionController {
-                                return false
-                            }
-                            return true
+                        let chatController: Signal<ChatController, NoError>
+                        if let threadId {
+                            chatController = chatControllerForForumThreadImpl(context: context, peerId: peerId, threadId: threadId, initialTextInputState: textInputState)
+                        } else {
+                            chatController = .single(ChatControllerImpl(context: context, chatLocation: .peer(id: peerId), initialTextInputState: textInputState))
                         }
-                        controllers.append(chatController)
-                        navigationController.setViewControllers(controllers, animated: true)
-                    })
-                }
 
-                updateControllers()
+                        let _ = (chatController
+                        |> deliverOnMainQueue).start(next: { [weak navigationController] chatController in
+                            guard let navigationController else {
+                                return
+                            }
+                            var controllers = navigationController.viewControllers.filter { controller in
+                                if controller is PeerSelectionController {
+                                    return false
+                                }
+                                return true
+                            }
+                            controllers.append(chatController)
+                            navigationController.setViewControllers(controllers, animated: true)
+                        })
+                    }
+
+                    updateControllers()
+                }
+            
+                if let to = to {
+                    if to.hasPrefix("@") {
+                        let _ = (context.engine.peers.resolvePeerByName(name: String(to[to.index(to.startIndex, offsetBy: 1)...]), referrer: nil)
+                        |> mapToSignal { result -> Signal<EnginePeer?, NoError> in
+                            guard case let .result(result) = result else {
+                                return .complete()
+                            }
+                            return .single(result)
+                        }
+                        |> deliverOnMainQueue).startStandalone(next: { peer in
+                            if let peer = peer {
+                                context.sharedContext.applicationBindings.dismissNativeController()
+                                continueWithPeer(peer.id, nil)
+                            }
+                        })
+                    } else {
+                        let _ = (context.engine.peers.resolvePeerByPhone(phone: to)
+                        |> deliverOnMainQueue).startStandalone(next: { peer in
+                            if let peer = peer {
+                                context.sharedContext.applicationBindings.dismissNativeController()
+                                continueWithPeer(peer.id, nil)
+                            }
+                        })
+                        /*let query = to.trimmingCharacters(in: CharacterSet(charactersIn: "0123456789").inverted)
+                        let _ = (context.account.postbox.searchContacts(query: query)
+                        |> deliverOnMainQueue).startStandalone(next: { (peers, _) in
+                            for case let peer as TelegramUser in peers {
+                                if peer.phone == query {
+                                    context.sharedContext.applicationBindings.dismissNativeController()
+                                    continueWithPeer(peer.id)
+                                    break
+                                }
+                            }
+                        })*/
+                    }
+                } else {
+                    if let url = url, !url.isEmpty {
+                        let shareController = context.sharedContext.makeShareScreen(context: context, params: ShareControllerParams(subject: .url(url), presetText: text, externalShare: false, immediateExternalShare: false, actionCompleted: {
+                            present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), nil)
+                        }))
+                        present(shareController, nil)
+                        context.sharedContext.applicationBindings.dismissNativeController()
+                    } else {
+                        let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled], hasFilters: true, selectForumThreads: true))
+                        controller.peerSelected = { peer, threadId in
+                            continueWithPeer(peer.id, threadId)
+                        }
+                        context.sharedContext.applicationBindings.dismissNativeController()
+                        navigationController?.pushViewController(controller)
+                    }
+                }
             }
             
-            if let to = to {
-                if to.hasPrefix("@") {
-                    let _ = (context.engine.peers.resolvePeerByName(name: String(to[to.index(to.startIndex, offsetBy: 1)...]), referrer: nil)
-                    |> mapToSignal { result -> Signal<EnginePeer?, NoError> in
-                        guard case let .result(result) = result else {
-                            return .complete()
-                        }
-                        return .single(result)
-                    }
-                    |> deliverOnMainQueue).startStandalone(next: { peer in
-                        if let peer = peer {
-                            context.sharedContext.applicationBindings.dismissNativeController()
-                            continueWithPeer(peer.id, nil)
-                        }
-                    })
-                } else {
-                    let _ = (context.engine.peers.resolvePeerByPhone(phone: to)
-                    |> deliverOnMainQueue).startStandalone(next: { peer in
-                        if let peer = peer {
-                            context.sharedContext.applicationBindings.dismissNativeController()
-                            continueWithPeer(peer.id, nil)
-                        }
-                    })
-                    /*let query = to.trimmingCharacters(in: CharacterSet(charactersIn: "0123456789").inverted)
-                    let _ = (context.account.postbox.searchContacts(query: query)
-                    |> deliverOnMainQueue).startStandalone(next: { (peers, _) in
-                        for case let peer as TelegramUser in peers {
-                            if peer.phone == query {
-                                context.sharedContext.applicationBindings.dismissNativeController()
-                                continueWithPeer(peer.id)
-                                break
-                            }
-                        }
-                    })*/
-                }
-            } else {
-                if let url = url, !url.isEmpty {
-                    let shareController = context.sharedContext.makeShareScreen(context: context, params: ShareControllerParams(subject: .url(url), presetText: text, externalShare: false, immediateExternalShare: false, actionCompleted: {
-                        present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), nil)
-                    }))
-                    present(shareController, nil)
-                    context.sharedContext.applicationBindings.dismissNativeController()
-                } else {
-                    let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled], hasFilters: true, selectForumThreads: true))
-                    controller.peerSelected = { peer, threadId in
-                        continueWithPeer(peer.id, threadId)
-                    }
-                    context.sharedContext.applicationBindings.dismissNativeController()
-                    navigationController?.pushViewController(controller)
-                }
+            var sharedContent: [String] = []
+            if let url, !url.isEmpty {
+                sharedContent.append(url)
             }
+            if let text, !text.isEmpty {
+                sharedContent.append(text)
+            }
+            let filterStrings = presentationData.strings.localFeatures.messageFilter
+            var warningText = filterStrings.shareLinkWarningText
+            if !sharedContent.isEmpty {
+                warningText += "\n\n«" + sharedContent.joined(separator: "\n") + "»"
+            }
+            dismissInput()
+            present(textAlertController(context: context, updatedPresentationData: updatedPresentationData, title: filterStrings.shareLinkWarningTitle, text: warningText, actions: [
+                TextAlertAction(type: .genericAction, title: filterStrings.shareLinkWarningOpen, action: {
+                    proceedWithShare()
+                }),
+                TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_Cancel, action: {})
+            ], actionLayout: .vertical), nil)
         case let .wallpaper(parameter):
             var controller: ViewController?
             

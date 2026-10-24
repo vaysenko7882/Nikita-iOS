@@ -2191,7 +2191,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
                     style: self.panelStyle == .glass ? .glass : .legacy,
                     type: type,
                     isFirstOrLast: i == 0 || i == buttons.count - 1,
-                    isSelected: false,
+                    isSelected: self.panelStyle == .legacy && i == self.selectedIndex,
                     isAnimating: i == self.selectedIndex,
                     strings: self.presentationData.strings,
                     theme: self.presentationData.theme,
@@ -2303,6 +2303,9 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
         }
 
         let contentSize = CGSize(width: mostRightX, height: self.buttonSize.height)
+        if case .legacy = self.panelStyle {
+            self.itemsContainer.frame = CGRect(origin: CGPoint(), size: CGSize(width: max(contentSize.width, layout.size.width), height: contentSize.height))
+        }
         if self.scrollNode.view.bounds.width > 0.0 {
             if contentSize != self.scrollNode.view.contentSize {
                 self.scrollNode.view.contentSize = contentSize
@@ -2642,6 +2645,13 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
         let tabBarFrame = glassTabBarFrame(layout: layout, buttonCount: buttons.count)
         if case .glass = self.panelStyle {
             let scrollFrame = CGRect(origin: CGPoint(x: tabBarFrame.minX + 3.0, y: topAccessoryHeight + (isSelecting ? -11.0 : 0.0)), size: CGSize(width: tabBarFrame.width - 3.0 * 2.0, height: self.buttonSize.height))
+            transition.updatePosition(node: self.scrollNode, position: scrollFrame.center)
+            transition.updateBounds(node: self.scrollNode, bounds: CGRect(origin: CGPoint(x: self.scrollNode.view.contentOffset.x, y: 0.0), size: scrollFrame.size))
+        } else {
+            if self.itemsContainer.superview !== self.scrollNode.view {
+                self.scrollNode.view.addSubview(self.itemsContainer)
+            }
+            let scrollFrame = CGRect(origin: CGPoint(x: 0.0, y: topAccessoryHeight), size: CGSize(width: layout.size.width, height: self.buttonSize.height))
             transition.updatePosition(node: self.scrollNode, position: scrollFrame.center)
             transition.updateBounds(node: self.scrollNode, bounds: CGRect(origin: CGPoint(x: self.scrollNode.view.contentOffset.x, y: 0.0), size: scrollFrame.size))
         }
