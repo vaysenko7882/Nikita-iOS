@@ -1,0 +1,37 @@
+name: Check Nikita source and Mac toolchain
+on:
+  push:
+    branches: [master, nikita/main]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - run: python3 -m unittest discover -s tools/nikita/tests -v
+      - run: bash -n tools/nikita/build.sh
+  swift-syntax:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode and verify Swift syntax
+        run: |
+          NIKITA_XCODE=$(python3 -c 'import json; print(json.load(open("versions.json"))["xcode"])')
+          sudo xcode-select -s "/Applications/Xcode_${NIKITA_XCODE}.app/Contents/Developer"
+          xcodebuild -version
+          xcrun swiftc -frontend -parse submodules/SettingsUI/Sources/MadgramSettingsController.swift
+          xcrun swiftc -frontend -parse submodules/TelegramCore/Sources/Settings/DeletedMessageArchiveSettings.swift
+          xcrun swiftc -frontend -parse submodules/TelegramPresentationData/Sources/LocalFeatureStrings.swift

@@ -100,3 +100,8 @@ xcode-files
 .bsp/**
 .sourcekit-lsp/**
 **/.vscode/launch.json
+# Personal build inputs and local artifacts.
+build-system/nikita-local-configuration.json
+build/nikita/
+tools/nikita/__pycache__/
+tools/nikita/tests/__pycache__/

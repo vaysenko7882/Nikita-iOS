@@ -674,7 +674,7 @@ plist_fragment(
     template =
     """
     <key>CFBundleDisplayName</key>
-    <string>MadGram</string>
+    <string>Никита</string>
     """
 )
 
@@ -1073,7 +1073,7 @@ plist_fragment(
     <key>CFBundleIdentifier</key>
     <string>{telegram_bundle_id}.Share</string>
     <key>CFBundleName</key>
-    <string>MadGram</string>
+    <string>Никита</string>
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
     <key>NSExtension</key>
@@ -1729,11 +1729,11 @@ plist_fragment(
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>MadGram</string>
+    <string>Никита</string>
     <key>CFBundleIdentifier</key>
     <string>{telegram_bundle_id}</string>
     <key>CFBundleName</key>
-    <string>MadGram</string>
+    <string>Никита</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
