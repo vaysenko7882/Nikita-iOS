@@ -12,7 +12,7 @@ public struct DeletedMessageArchiveSettings: Codable, Equatable {
         saveEditedVersions: true,
         saveMessagesFromArchivedChats: true,
         deletedMessageMarker: DeletedMessageArchiveSettings.defaultDeletedMessageMarker,
-        keepAcrossLaunches: false,
+        keepAcrossLaunches: true,
         mediaLimitGigabytes: 5,
         disappearingMediaLimitGigabytes: 1,
         sessionId: 0

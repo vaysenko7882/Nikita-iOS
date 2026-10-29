@@ -86,6 +86,8 @@ private final class MadgramControllerArguments {
     let openMessageFilters: () -> Void
     let openLocalMessageArchive: () -> Void
     let openInterfaceTuning: () -> Void
+    let setGhostMode: (Bool) -> Void
+    let setPersistentArchive: (Bool) -> Void
     let updateInterfaceTuning: (@escaping (InterfaceTuningSettings) -> InterfaceTuningSettings) -> Void
     let setLocalPremium: (Bool) -> Void
     let setPowerSaving: (Bool) -> Void
@@ -96,6 +98,8 @@ private final class MadgramControllerArguments {
         openMessageFilters: @escaping () -> Void,
         openLocalMessageArchive: @escaping () -> Void,
         openInterfaceTuning: @escaping () -> Void,
+        setGhostMode: @escaping (Bool) -> Void,
+        setPersistentArchive: @escaping (Bool) -> Void,
         updateInterfaceTuning: @escaping (@escaping (InterfaceTuningSettings) -> InterfaceTuningSettings) -> Void,
         setLocalPremium: @escaping (Bool) -> Void,
         setPowerSaving: @escaping (Bool) -> Void,
@@ -105,6 +109,8 @@ private final class MadgramControllerArguments {
         self.openMessageFilters = openMessageFilters
         self.openLocalMessageArchive = openLocalMessageArchive
         self.openInterfaceTuning = openInterfaceTuning
+        self.setGhostMode = setGhostMode
+        self.setPersistentArchive = setPersistentArchive
         self.updateInterfaceTuning = updateInterfaceTuning
         self.setLocalPremium = setLocalPremium
         self.setPowerSaving = setPowerSaving
@@ -113,6 +119,7 @@ private final class MadgramControllerArguments {
 }
 
 private enum MadgramSection: Int32 {
+    case nikita
     case privacy
     case messages
     case interface
@@ -120,6 +127,10 @@ private enum MadgramSection: Int32 {
 }
 
 private enum MadgramEntry: ItemListNodeEntry {
+    case nikitaHeader(String)
+    case ghostQuick(String, Bool)
+    case archiveQuick(String, Bool)
+    case nikitaInfo(String)
     case privacyHeader(String)
     case ghostMode(String, String)
     case hidePhoneInSettings(String, String, Bool)
@@ -139,6 +150,8 @@ private enum MadgramEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
+        case .nikitaHeader, .ghostQuick, .archiveQuick, .nikitaInfo:
+            return MadgramSection.nikita.rawValue
         case .privacyHeader, .ghostMode, .hidePhoneInSettings, .privacyInfo:
             return MadgramSection.privacy.rawValue
         case .messagesHeader, .localMessageArchive, .messageFilters, .messagesInfo:
@@ -152,6 +165,10 @@ private enum MadgramEntry: ItemListNodeEntry {
 
     var stableId: Int32 {
         switch self {
+        case .nikitaHeader: return -4
+        case .ghostQuick: return -3
+        case .archiveQuick: return -2
+        case .nikitaInfo: return -1
         case .privacyHeader: return 0
         case .ghostMode: return 1
         case .hidePhoneInSettings: return 2
@@ -173,6 +190,12 @@ private enum MadgramEntry: ItemListNodeEntry {
 
     static func ==(lhs: MadgramEntry, rhs: MadgramEntry) -> Bool {
         switch (lhs, rhs) {
+        case let (.nikitaHeader(lhsText), .nikitaHeader(rhsText)),
+             let (.nikitaInfo(lhsText), .nikitaInfo(rhsText)):
+            return lhsText == rhsText
+        case let (.ghostQuick(lhsText, lhsValue), .ghostQuick(rhsText, rhsValue)),
+             let (.archiveQuick(lhsText, lhsValue), .archiveQuick(rhsText, rhsValue)):
+            return lhsText == rhsText && lhsValue == rhsValue
         case let (.privacyHeader(lhsText), .privacyHeader(rhsText)),
              let (.privacyInfo(lhsText), .privacyInfo(rhsText)),
              let (.messagesHeader(lhsText), .messagesHeader(rhsText)),
@@ -226,6 +249,14 @@ private enum MadgramEntry: ItemListNodeEntry {
             )
         }
         switch self {
+        case let .nikitaHeader(text):
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
+        case let .nikitaInfo(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        case let .ghostQuick(text, value):
+            return switchItem(text, nil, value, arguments.setGhostMode)
+        case let .archiveQuick(text, value):
+            return switchItem(text, nil, value, arguments.setPersistentArchive)
         case let .privacyHeader(text), let .messagesHeader(text), let .interfaceHeader(text), let .otherHeader(text):
             return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
         case let .privacyInfo(text), let .messagesInfo(text), let .interfaceInfo(text):
@@ -290,6 +321,24 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
         openInterfaceTuning: {
             pushControllerImpl?(interfaceTuningSettingsController(context: context))
         },
+        setGhostMode: { value in
+            let _ = context.engine.messages.updateGhostModeSettingsInteractively { current in
+                var current = current
+                current.isEnabled = value
+                return current
+            }.start()
+        },
+        setPersistentArchive: { value in
+            let _ = context.engine.messages.updateDeletedMessageArchiveSettingsInteractively { current in
+                var current = current
+                current.keepAcrossLaunches = value
+                if value {
+                    current.saveDeletedMessages = true
+                    current.saveEditedVersions = true
+                }
+                return current
+            }.start()
+        },
         updateInterfaceTuning: { f in
             InterfaceTuningSettingsStore.shared.update { current in
                 return f(current)
@@ -328,9 +377,9 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
 
     let ghostModeSettings = context.engine.messages.ghostModeSettings()
 
-    let isLocalMessageArchiveEnabled = context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.ApplicationSpecificPreference(key: PreferencesKeys.deletedMessageArchiveSettings))
-    |> map { entry -> Bool in
-        return (entry?.get(DeletedMessageArchiveSettings.self) ?? .defaultSettings).isEnabled
+    let localArchiveSettings = context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.ApplicationSpecificPreference(key: PreferencesKeys.deletedMessageArchiveSettings))
+    |> map { entry -> DeletedMessageArchiveSettings in
+        return entry?.get(DeletedMessageArchiveSettings.self) ?? .defaultSettings
     }
     |> distinctUntilChanged
 
@@ -362,20 +411,24 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
         ghostModeSettings,
         localPremiumPromise.get(),
         sharedData,
-        isLocalMessageArchiveEnabled,
+        localArchiveSettings,
         hiddenSenderCount,
         interfaceTuningSettingsSignal()
     )
-    |> map { presentationData, ghostModeSettings, localPremiumSettings, isPowerSavingEnabled, isLocalMessageArchiveEnabled, hiddenSenderCount, interfaceTuningSettings -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, ghostModeSettings, localPremiumSettings, isPowerSavingEnabled, localArchiveSettings, hiddenSenderCount, interfaceTuningSettings -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let strings = presentationData.strings.localFeatures
         let entries: [MadgramEntry] = [
+            .nikitaHeader(strings.madgram.quickSection),
+            .ghostQuick(strings.madgram.quickGhost, ghostModeSettings.isEnabled),
+            .archiveQuick(strings.madgram.quickArchive, localArchiveSettings.keepAcrossLaunches && localArchiveSettings.saveDeletedMessages && localArchiveSettings.saveEditedVersions),
+            .nikitaInfo(strings.madgram.quickInfo),
             .privacyHeader(strings.madgram.privacySection),
             .ghostMode(strings.ghostMode.title, ghostModeSettings.isEnabled ? strings.ghostMode.on : strings.ghostMode.off),
             .hidePhoneInSettings(strings.interfaceTuning.hidePhoneInSettings, strings.interfaceTuning.hidePhoneInSettingsInfo, interfaceTuningSettings.hidePhoneInSettings),
             .privacyInfo(strings.madgram.privacyInfo),
 
             .messagesHeader(strings.madgram.messagesSection),
-            .localMessageArchive(strings.localMessageArchive.title, isLocalMessageArchiveEnabled ? strings.ghostMode.on : strings.ghostMode.off),
+            .localMessageArchive(strings.localMessageArchive.title, localArchiveSettings.isEnabled ? strings.ghostMode.on : strings.ghostMode.off),
             .messageFilters(strings.messageFilter.title, hiddenSenderCount > 0 ? "\(hiddenSenderCount)" : ""),
             .messagesInfo(strings.madgram.messagesInfo),
 
