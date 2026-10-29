@@ -1,6 +1,8 @@
 name: Check Nikita source and Mac toolchain
 on:
   push:
+    branches: [master, nikita/main]
+  pull_request:
     branches: [master]
   workflow_dispatch:
 permissions:
