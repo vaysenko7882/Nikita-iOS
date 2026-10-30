@@ -1016,6 +1016,7 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                     }
                     
                     strongSelf.appliedForwardInfo = ChatMessageAppliedForwardInfo(messageId: item.message.id, source: forwardSource, authorSignature: forwardAuthorSignature)
+                    strongSelf.contextSourceNode.contentNode.alpha = item.message.isArchivedDeletedMessage ? 0.48 : 1.0
                     strongSelf.updateAccessibilityData(accessibilityData)
                     
                     strongSelf.updateAttachedDateHeader(hasDate: dateHeaderAtBottom.hasDate, hasPeer: dateHeaderAtBottom.hasTopic)

@@ -20,6 +20,8 @@ jobs:
           python-version: '3.11'
       - run: python3 -m unittest discover -s tools/nikita/tests -v
       - run: bash -n tools/nikita/build.sh
+      - run: python3 -m unittest discover -s server/tests -v
+      - run: bash -n server/install.sh
   swift-syntax:
     runs-on: xcode-27
     timeout-minutes: 15
@@ -32,6 +34,8 @@ jobs:
           NIKITA_XCODE=$(python3 -c 'import json; print(json.load(open("versions.json"))["xcode"])')
           sudo xcode-select -s "/Applications/Xcode_${NIKITA_XCODE}.app/Contents/Developer"
           xcodebuild -version
-          xcrun swiftc -frontend -parse submodules/SettingsUI/Sources/MadgramSettingsController.swift
+          python3 tools/nikita/check_swift.py
+          xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift tools/nikita/tests/VoiceProcessorCheck.swift -o "$RUNNER_TEMP/nikita-voice-check"
+          "$RUNNER_TEMP/nikita-voice-check"
           xcrun swiftc -frontend -parse submodules/TelegramCore/Sources/Settings/DeletedMessageArchiveSettings.swift
           xcrun swiftc -frontend -parse submodules/TelegramPresentationData/Sources/LocalFeatureStrings.swift

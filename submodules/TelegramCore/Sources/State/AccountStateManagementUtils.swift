@@ -4435,6 +4435,14 @@ func replayFinalState(
                     }
                 }
             
+                // Reconnect/history batches can refresh an existing cloud message without
+                // emitting EditMessage. Capture its old contents before replacing the row.
+                messages = messages.map { message in
+                    guard case let .Id(id) = message.id, id.namespace == Namespaces.Message.Cloud else {
+                        return message
+                    }
+                    return archivePreviousMessageVersionIfNeeded(transaction: transaction, id: id, updatedMessage: message, mediaBox: mediaBox)
+                }
                 let _ = transaction.addMessages(messages, location: location)
                 if case .UpperHistoryBlock = location {
                     for message in messages {

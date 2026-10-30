@@ -163,6 +163,7 @@ final class ManagedAudioRecorderContext {
     private var oggWriter: TGOggOpusWriter
     private var dataItem: TGDataItem
     private var audioBuffer = Data()
+    private let voiceProcessor: NikitaVoiceProcessor
     
     private let audioUnit = Atomic<AudioUnit?>(value: nil)
     
@@ -216,6 +217,9 @@ final class ManagedAudioRecorderContext {
         self.queue = queue
         self.mediaManager = mediaManager
         self.oggWriter = TGOggOpusWriter()
+        let savedEffect = resumeData.flatMap { try? JSONSerialization.jsonObject(with: $0.resumeData) as? [String: Any] }
+            .flatMap { $0["nikitaVoiceEffect"] as? String }.flatMap(NikitaVoiceEffect.init(rawValue:))
+        self.voiceProcessor = NikitaVoiceProcessor(effect: savedEffect ?? NikitaSettingsStore.shared.voiceEffect)
         
         if let resumeData {
             self.dataItem = TGDataItem(data: resumeData.compressedData)
@@ -524,6 +528,13 @@ final class ManagedAudioRecorderContext {
     private var resumeData: Data?
     func stop() {
         assert(self.queue.isCurrent())
+
+        if !self.paused && self.processSamples && self.voiceProcessor.effect != .off && self.voiceProcessor.effect != .robot {
+            // Drain the pitch shifter's short delay before closing the Opus stream,
+            // so the last syllable survives Stop and Pause/Resume.
+            let tail = AudioBuffer(mNumberChannels: 1, mDataByteSize: 2880 * 2, mData: calloc(2880, 2))
+            self.processAndDisposeAudioBuffer(tail)
+        }
         
         let state = self.oggWriter.pause()
         
@@ -557,7 +568,8 @@ final class ManagedAudioRecorderContext {
         self.audioSessionDisposable = nil
         audioSessionDisposable?.dispose()
         
-        if let stateDict = state as? [String: Any] {
+        if var stateDict = state as? [String: Any] {
+            stateDict["nikitaVoiceEffect"] = self.voiceProcessor.effect.rawValue
             do {
                 let jsonData = try JSONSerialization.data(withJSONObject: stateDict, options: [])
                 self.resumeData = jsonData
@@ -578,8 +590,12 @@ final class ManagedAudioRecorderContext {
             free(buffer.mData)
         }
         
-        if !self.processSamples {
+        if !self.processSamples || self.paused {
             return
+        }
+
+        if let samples = buffer.mData?.assumingMemoryBound(to: Int16.self) {
+            self.voiceProcessor.process(samples, count: Int(buffer.mDataByteSize) / MemoryLayout<Int16>.size)
         }
         
         let millisecondsPerPacket = 60

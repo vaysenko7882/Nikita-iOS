@@ -3,10 +3,10 @@ import TelegramCore
 import XCTest
 
 final class DeletedMessageArchiveTests: XCTestCase {
-    func testDefaultSettingsAreTemporaryAndUseFiveGigabyteQuota() {
+    func testDefaultSettingsArePersistentAndUseFiveGigabyteQuota() {
         let settings = DeletedMessageArchiveSettings.defaultSettings
         XCTAssertTrue(settings.isEnabled)
-        XCTAssertFalse(settings.keepAcrossLaunches)
+        XCTAssertTrue(settings.keepAcrossLaunches)
         XCTAssertEqual(settings.mediaLimitGigabytes, 5)
     }
 

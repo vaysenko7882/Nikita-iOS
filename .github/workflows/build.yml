@@ -1,6 +1,8 @@
 name: Build Nikita IPA
 on:
   workflow_dispatch:
+  push:
+    branches: [nikita/v2]
 permissions:
   contents: read
 concurrency:
@@ -30,6 +32,14 @@ jobs:
           sudo xcode-select -s "/Applications/Xcode_${NIKITA_XCODE}.app/Contents/Developer"
           xcodebuild -version
           df -h .
+      - name: Check source, server journal and voice effects
+        run: |
+          python3 -m unittest discover -s tools/nikita/tests -v
+          python3 -m unittest discover -s server/tests -v
+          bash -n server/install.sh
+          python3 tools/nikita/check_swift.py
+          xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift tools/nikita/tests/VoiceProcessorCheck.swift -o "$RUNNER_TEMP/nikita-voice-check"
+          "$RUNNER_TEMP/nikita-voice-check"
       - name: Fetch pinned dependencies
         run: python3 tools/nikita/configure.py --submodules
       - name: Compile Nikita for iPhone

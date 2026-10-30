@@ -3956,6 +3956,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         }
         
         strongSelf.currentInputParams = inputParams
+        // Assign both states: these nodes are reused for ordinary messages too.
+        strongSelf.mainContainerNode.alpha = item.message.isArchivedDeletedMessage ? 0.48 : 1.0
         strongSelf.currentApplyParams = applyInfo
         strongSelf.contentLayoutInsets = layoutInsets
         

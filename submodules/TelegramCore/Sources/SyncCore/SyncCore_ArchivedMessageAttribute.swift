@@ -1,6 +1,25 @@
 import Foundation
 import Postbox
 
+// Consumed by the seed merge before encoding; explicit clearing must remain possible.
+final class NikitaArchiveMetadataResetAttribute: MessageAttribute {
+    init() {}
+    required init(decoder: PostboxDecoder) {}
+    func encode(_ encoder: PostboxEncoder) {}
+}
+
+func mergeNikitaArchiveMetadata(previous: [MessageAttribute], updated: inout [MessageAttribute]) {
+    if updated.contains(where: { $0 is NikitaArchiveMetadataResetAttribute }) {
+        updated.removeAll(where: { $0 is NikitaArchiveMetadataResetAttribute || $0 is ArchivedMessageAttribute })
+        return
+    }
+    guard !updated.contains(where: { $0 is ArchivedMessageAttribute }),
+        let archive = previous.first(where: { $0 is ArchivedMessageAttribute }) else {
+        return
+    }
+    updated.append(archive)
+}
+
 public final class ArchivedMessageAttribute: MessageAttribute {
     public let originalMessageId: MessageId
     public let versionIds: [MessageId]

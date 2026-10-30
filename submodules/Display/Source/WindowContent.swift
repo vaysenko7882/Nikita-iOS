@@ -3,6 +3,30 @@ import UIKit
 import AsyncDisplayKit
 import SwiftSignalKit
 
+private func nikitaStatusBadge() -> UIImage {
+    let size = CGSize(width: 93.0, height: 22.0)
+    return UIGraphicsImageRenderer(size: size).image { renderer in
+        let bounds = CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)
+        let capsule = UIBezierPath(roundedRect: bounds, cornerRadius: 11.0)
+        UIColor(white: 0.10, alpha: 0.96).setFill()
+        capsule.fill()
+        UIColor(white: 1.0, alpha: 0.16).setStroke()
+        capsule.lineWidth = 0.5
+        capsule.stroke()
+        let mark = CGRect(x: 10.0, y: 4.0, width: 14.0, height: 14.0)
+        UIColor(red: 0.12, green: 0.62, blue: 0.94, alpha: 1.0).setFill()
+        UIBezierPath(roundedRect: mark, cornerRadius: 4.0).fill()
+        ("N" as NSString).draw(at: CGPoint(x: 12.6, y: 4.4), withAttributes: [
+            .font: UIFont.systemFont(ofSize: 10.5, weight: .bold), .foregroundColor: UIColor.white
+        ])
+        ("НИКИТА" as NSString).draw(at: CGPoint(x: 29.0, y: 5.0), withAttributes: [
+            .font: UIFont.systemFont(ofSize: 10.0, weight: .bold), .foregroundColor: UIColor.white,
+            .kern: 0.4
+        ])
+        _ = renderer
+    }
+}
+
 private struct WindowReservedArea: Equatable {
     var safeInsets: UIEdgeInsets
     var reservedCorners: ContainerViewLayoutCorners
@@ -473,7 +497,7 @@ public class Window1 {
     public init(hostView: WindowHostView, statusBarHost: StatusBarHost?) {
         self.hostView = hostView
         self.badgeView = UIImageView()
-        self.badgeView.image = UIImage(bundleImageName: "Components/AppBadge")
+        self.badgeView.image = nikitaStatusBadge()
         self.badgeView.isHidden = true
         
         self.systemUserInterfaceStyle = hostView.systemUserInterfaceStyle

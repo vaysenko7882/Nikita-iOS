@@ -37,7 +37,7 @@ private func removeDeletedMessageArchiveMetadata(transaction: Transaction, ids: 
                 forwardInfo: currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init),
                 authorId: currentMessage.author?.id,
                 text: currentMessage.text,
-                attributes: attributes,
+                attributes: attributes + [NikitaArchiveMetadataResetAttribute()],
                 media: currentMessage.media
             ))
         })
@@ -400,11 +400,12 @@ func archivePreviousMessageVersionIfNeeded(
     guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox), settings.saveEditedVersions else {
         return updatedMessage
     }
+    let updatedMessage = attachNikitaPendingVersions(transaction: transaction, id: id, updated: updatedMessage)
     guard let previous = transaction.getMessage(id), !isArchiveIneligible(previous) else {
         return updatedMessage
     }
 
-    let previousArchiveAttribute = archiveAttribute(previous.attributes)
+    let previousArchiveAttribute = archiveAttribute(updatedMessage.attributes) ?? archiveAttribute(previous.attributes)
     if !canArchiveMessageFromChat(transaction: transaction, peerId: id.peerId, settings: settings) {
         guard let previousArchiveAttribute else {
             return updatedMessage
@@ -582,7 +583,9 @@ func _internal_archivedMessageVersions(transaction: Transaction, id: MessageId) 
     guard let message = transaction.getMessage(id), let attribute = message.archivedMessageAttribute else {
         return []
     }
-    var result = attribute.versionIds.compactMap(transaction.getMessage)
+    var result = attribute.versionIds.compactMap(transaction.getMessage).sorted {
+        return ($0.archivedVersionCapturedAt ?? $0.timestamp) < ($1.archivedVersionCapturedAt ?? $1.timestamp)
+    }
     result.append(message)
     return result
 }
@@ -592,6 +595,143 @@ func _internal_clearDeletedMessageArchive(transaction: Transaction) {
     transaction.deleteMessages(index.messageIds.map(\.messageId), forEachMedia: nil)
     removeDeletedMessageArchiveMetadata(transaction: transaction, ids: index.liveMessageIds.map(\.messageId))
     updateDeletedMessageArchiveIndex(transaction: transaction, { _ in .empty })
+    transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { entry in
+        guard var state = entry?.get(NikitaRemoteArchiveState.self) else { return entry }
+        state.pendingVersions.removeAll()
+        return PreferencesEntry(state)
+    })
+}
+
+private func nikitaArchiveMessageKey(_ id: MessageId) -> String {
+    return "\(id.peerId.toInt64()):\(id.id)"
+}
+
+private func attachNikitaPendingVersions(transaction: Transaction, id: MessageId, updated: StoreMessage) -> StoreMessage {
+    guard var state = transaction.getPreferencesEntry(key: PreferencesKeys.nikitaServerArchive)?.get(NikitaRemoteArchiveState.self),
+        let pending = state.pendingVersions.removeValue(forKey: nikitaArchiveMessageKey(id)) else {
+        return updated
+    }
+    var ids = archiveAttribute(updated.attributes)?.versionIds ?? transaction.getMessage(id)?.archivedMessageAttribute?.versionIds ?? []
+    for entry in pending where transaction.getMessage(entry.messageId) != nil && !ids.contains(entry.messageId) {
+        ids.append(entry.messageId)
+    }
+    transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(state) })
+    guard !ids.isEmpty else { return updated }
+    updateDeletedMessageArchiveIndex(transaction: transaction, { index in
+        var index = index
+        let entry = DeletedMessageArchiveIndexEntry(id)
+        if !index.liveMessageIds.contains(entry) { index.liveMessageIds.append(entry) }
+        return index
+    })
+    var attributes = attributesWithoutArchiveMetadata(updated.attributes)
+    attributes.append(ArchivedMessageAttribute(originalMessageId: id, versionIds: ids, deletedAt: nil, sessionId: deletedMessageArchiveSessionId))
+    return updated.withUpdatedAttributes(attributes)
+}
+
+private func nikitaArchiveStoredUpdate(_ message: Message, attribute: ArchivedMessageAttribute) -> StoreMessage {
+    var attributes = attributesWithoutArchiveMetadata(message.attributes)
+    attributes.append(attribute)
+    return StoreMessage(id: message.id, customStableId: nil, globallyUniqueId: message.globallyUniqueId,
+        groupingKey: message.groupingKey, threadId: message.threadId, timestamp: message.timestamp,
+        flags: StoreMessageFlags(message.flags), tags: message.tags, globalTags: message.globalTags,
+        localTags: message.localTags, forwardInfo: message.forwardInfo.flatMap(StoreMessageForwardInfo.init),
+        authorId: message.author?.id, text: message.text, attributes: attributes, media: message.media)
+}
+
+private func nikitaArchiveContentMatches(_ message: Message, event: NikitaRemoteArchiveEvent) -> Bool {
+    if message.media.isEmpty && message.text == event.displayText { return true }
+    guard message.text == event.text else { return false }
+    guard let mediaId = event.mediaId else { return message.media.isEmpty }
+    return message.media.contains { media in
+        if let file = media as? TelegramMediaFile { return file.fileId.id == mediaId }
+        if let image = media as? TelegramMediaImage { return image.imageId.id == mediaId }
+        return false
+    }
+}
+
+func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
+    events: [NikitaRemoteArchiveEvent], state: inout NikitaRemoteArchiveState) -> Int {
+    guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox) else { return 0 }
+    var index = transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty
+    var archivedByOriginal: [MessageId: MessageId] = [:]
+    for entry in index.messageIds where entry.namespace == Namespaces.Message.Archived {
+        if let message = transaction.getMessage(entry.messageId), let attribute = message.archivedMessageAttribute {
+            archivedByOriginal[attribute.originalMessageId] = message.id
+        }
+    }
+    var count = 0
+    for event in events {
+        guard let originalId = event.originalId,
+            canArchiveMessageFromChat(transaction: transaction, peerId: originalId.peerId, settings: settings),
+            (event.kind == "edit" && settings.saveEditedVersions) || (event.kind == "delete" && settings.saveDeletedMessages) else { continue }
+        let key = nikitaArchiveMessageKey(originalId)
+        let current = transaction.getMessage(originalId)
+        let archived = archivedByOriginal[originalId].flatMap(transaction.getMessage)
+        let target = archived ?? current
+        var versionIds = target?.archivedMessageAttribute?.versionIds ?? []
+        for entry in state.pendingVersions[key] ?? [] where !versionIds.contains(entry.messageId) {
+            versionIds.append(entry.messageId)
+        }
+        versionIds = versionIds.filter { transaction.getMessage($0) != nil }
+
+        func makeCopy(namespace: Int32, attributes: [MessageAttribute]) -> MessageId? {
+            if let current, nikitaArchiveContentMatches(current, event: event) {
+                return addStoredCopy(transaction: transaction, message: current, namespace: namespace,
+                    attributes: attributesWithoutArchiveMetadata(current.attributes) + attributes)
+            }
+            let uniqueId = Int64.random(in: Int64.min ... Int64.max)
+            let copy = StoreMessage(peerId: originalId.peerId, namespace: namespace, customStableId: nil,
+                globallyUniqueId: uniqueId, groupingKey: nil, threadId: event.threadId, timestamp: event.date,
+                flags: event.outgoing ? [] : [.Incoming], tags: [], globalTags: [], localTags: [], forwardInfo: nil,
+                authorId: event.resolvedAuthorId, text: event.displayText, attributes: attributes, media: [])
+            return transaction.addMessages([copy], location: .Random)[uniqueId]
+        }
+
+        if event.kind == "edit" {
+            let alreadySaved = versionIds.contains { id in
+                guard let version = transaction.getMessage(id) else { return false }
+                return version.archivedVersionCapturedAt == event.capturedAt && nikitaArchiveContentMatches(version, event: event)
+            }
+            if !alreadySaved, let id = makeCopy(namespace: Namespaces.Message.ArchivedVersion,
+                attributes: [ArchivedMessageVersionAttribute(capturedAt: event.capturedAt)]) {
+                versionIds.append(id)
+                index.messageIds.append(DeletedMessageArchiveIndexEntry(id))
+                count += 1
+            }
+            if let target {
+                let attribute = ArchivedMessageAttribute(originalMessageId: originalId, versionIds: versionIds,
+                    deletedAt: target.archivedMessageAttribute?.deletedAt, sessionId: deletedMessageArchiveSessionId)
+                transaction.updateMessage(target.id, update: { message in .update(nikitaArchiveStoredUpdate(message, attribute: attribute)) })
+                if target.id.namespace == Namespaces.Message.Cloud {
+                    let entry = DeletedMessageArchiveIndexEntry(target.id)
+                    if !index.liveMessageIds.contains(entry) { index.liveMessageIds.append(entry) }
+                }
+                state.pendingVersions.removeValue(forKey: key)
+            } else {
+                // The app may not have fetched this chat yet. Attach its references
+                // when the ordinary Telegram history later supplies the message.
+                state.pendingVersions[key] = versionIds.map(DeletedMessageArchiveIndexEntry.init)
+            }
+        } else {
+            let attribute = ArchivedMessageAttribute(originalMessageId: originalId, versionIds: versionIds,
+                deletedAt: event.capturedAt, sessionId: deletedMessageArchiveSessionId)
+            if let archived {
+                transaction.updateMessage(archived.id, update: { message in .update(nikitaArchiveStoredUpdate(message, attribute: attribute)) })
+            } else if let id = makeCopy(namespace: Namespaces.Message.Archived, attributes: [attribute]) {
+                archivedByOriginal[originalId] = id
+                index.messageIds.append(DeletedMessageArchiveIndexEntry(id))
+                count += 1
+            }
+            if archivedByOriginal[originalId] != nil {
+                transaction.deleteMessages([originalId], forEachMedia: nil)
+                index.liveMessageIds.removeAll(where: { $0.messageId == originalId })
+                state.pendingVersions.removeValue(forKey: key)
+            }
+        }
+    }
+    updateDeletedMessageArchiveIndex(transaction: transaction, { _ in index })
+    if count != 0 { updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox) }
+    return count
 }
 
 func _internal_clearDeletedMessageArchiveMedia(transaction: Transaction, mediaBox: MediaBox) {

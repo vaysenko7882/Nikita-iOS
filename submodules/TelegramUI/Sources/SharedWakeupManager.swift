@@ -890,7 +890,7 @@ public final class SharedWakeupManager {
         }
     }
     
-    func allowBackgroundTimeExtension(timeout: Double, extendNow: Bool = false) {
+    func allowBackgroundTimeExtension(timeout: Double, extendNow: Bool = false, duration: Double = 20.0) {
         let shouldCheckTasks = self.allowBackgroundTimeExtensionDeadline == nil
         self.allowBackgroundTimeExtensionDeadline = CFAbsoluteTimeGetCurrent() + timeout
         
@@ -907,7 +907,7 @@ public final class SharedWakeupManager {
         
         if extendNow {
             if self.activeExplicitExtensionTimer == nil {
-                let activeExplicitExtensionTimer = SwiftSignalKit.Timer(timeout: 20.0, repeat: false, completion: { [weak self] in
+                let activeExplicitExtensionTimer = SwiftSignalKit.Timer(timeout: min(300.0, max(1.0, duration)), repeat: false, completion: { [weak self] in
                     guard let strongSelf = self else {
                         return
                     }

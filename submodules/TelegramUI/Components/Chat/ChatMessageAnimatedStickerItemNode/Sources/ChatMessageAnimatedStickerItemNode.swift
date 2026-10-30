@@ -1533,6 +1533,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     strongSelf.containerNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.contextSourceNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.contextSourceNode.contentNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
+                    strongSelf.contextSourceNode.contentNode.alpha = item.message.isArchivedDeletedMessage ? 0.48 : 1.0
                     
                     var transition: ContainedViewLayoutTransition = .immediate
                     if case let .System(duration, _) = animation {

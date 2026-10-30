@@ -121,6 +121,7 @@ public let telegramPostboxSeedConfiguration: SeedConfiguration = {
             return GlobalNotificationSettings.defaultSettings.defaultIncludePeer(peer: peer)
         }),
         mergeMessageAttributes: { previous, updated in
+            mergeNikitaArchiveMetadata(previous: previous, updated: &updated)
             if previous.isEmpty {
                 return
             }

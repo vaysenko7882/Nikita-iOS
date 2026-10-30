@@ -1,0 +1,24 @@
+[Unit]
+Description=Nikita private Telegram archive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nikita-archive
+Group=nikita-archive
+WorkingDirectory=/var/lib/nikita-archive
+ExecStart=/opt/nikita-archive/venv/bin/nikita-archive --config /var/lib/nikita-archive/config.json run
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/nikita-archive
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
