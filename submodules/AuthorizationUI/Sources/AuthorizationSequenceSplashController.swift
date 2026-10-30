@@ -73,7 +73,7 @@ public final class AuthorizationSequenceSplashController: ViewController {
         
         self.controller = RMIntroViewController(backgroundColor: theme.list.plainBackgroundColor, primaryColor: theme.list.itemPrimaryTextColor, buttonColor: theme.intro.startButtonColor, accentColor: theme.list.itemAccentColor, regularDotColor: theme.intro.dotColor, highlightedDotColor: theme.list.itemAccentColor, suggestedLocalizationSignal: localizationSignal)
         
-        self.startButton = SolidRoundedButtonNode(title: "Start MadGram", theme: SolidRoundedButtonTheme(theme: theme), glass: false, height: 50.0, cornerRadius: 50.0 * 0.5, isShimmering: true)
+        self.startButton = SolidRoundedButtonNode(title: "Start Никита", theme: SolidRoundedButtonTheme(theme: theme), glass: false, height: 50.0, cornerRadius: 50.0 * 0.5, isShimmering: true)
         self.startButton.accessibilityIdentifier = "Auth.Welcome.StartButton"
 
         super.init(navigationBarPresentationData: nil)
@@ -270,7 +270,7 @@ public final class AuthorizationSequenceSplashController: ViewController {
     private func applySplashLocalization(_ code: String) {
         if code == "ru" {
             self.controller.updateHeadlines([
-                "MadGram",
+                "Никита",
                 "Режим призрака",
                 "Архив сообщений",
                 "Снимок сообщений",
@@ -282,11 +282,11 @@ public final class AuthorizationSequenceSplashController: ViewController {
                 "Создавайте аккуратные снимки переписок\nв нужном вам стиле.",
                 "Скрывайте сообщения выбранных людей,\nне удаляя их из чата."
             ])
-            self.startButton.title = "Начать в MadGram"
+            self.startButton.title = "Начать общение"
             self.controller.setAlternativeLanguageButtonTitle("Continue in English", languageCode: "en")
         } else if code == "uk" {
             self.controller.updateHeadlines([
-                "MadGram",
+                "Никита",
                 "Режим привида",
                 "Архів повідомлень",
                 "Знімок повідомлень",
@@ -298,11 +298,11 @@ public final class AuthorizationSequenceSplashController: ViewController {
                 "Створюйте охайні налаштовувані знімки\nланцюжків повідомлень.",
                 "Приховуйте повідомлення вибраних користувачів,\nне видаляючи їх."
             ])
-            self.startButton.title = "Почати в MadGram"
+            self.startButton.title = "Почати спілкування"
             self.controller.setAlternativeLanguageButtonTitle("Continue in English", languageCode: "en")
         } else if code == "en" {
             self.controller.updateHeadlines([
-                "MadGram",
+                "Никита",
                 "Ghost Mode",
                 "Message Archive",
                 "Message Shot",
@@ -314,7 +314,7 @@ public final class AuthorizationSequenceSplashController: ViewController {
                 "Create clean, customizable screenshots\nof message chains.",
                 "Hide messages from selected accounts\nwithout deleting them."
             ])
-            self.startButton.title = "Start MadGram"
+            self.startButton.title = "Start Никита"
             self.controller.setAlternativeLanguageButtonTitle("Продолжить на русском", languageCode: "ru")
         }
     }
