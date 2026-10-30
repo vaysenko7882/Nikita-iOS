@@ -1,0 +1,42 @@
+name: Audit Nikita UI branding
+on:
+  push:
+    branches: [nikita/brand-audit]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Report inherited brand literals after build preparation
+        run: |
+          python3 tools/nikita/rebrand.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, re
+          hits = []
+          for root in [Path('Telegram/Telegram-iOS'), Path('submodules')]:
+              for path in root.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.swift', '.m', '.h', '.strings', '.plist', '.xcconfig', '.json'}:
+                      continue
+                  if any(part in {'Tests', '.git', '.build'} or part.endswith('Tests') for part in path.parts):
+                      continue
+                  raw = path.read_bytes()
+                  try:
+                      text = raw.decode('utf-16' if raw.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8')
+                  except UnicodeError:
+                      continue
+                  for number, line in enumerate(text.splitlines(), 1):
+                      if not re.search(r'\b(?:MadGram|MedGram)\b', line, re.I):
+                          continue
+                      if path.suffix in {'.swift', '.m', '.h', '.json'} and not re.search(r'"[^"\n]*\b(?:MadGram|MedGram)\b[^"\n]*"', line, re.I):
+                          continue
+                      hits.append({'path': str(path), 'line': number, 'text': line.strip()[:400]})
+          print('BRANDING_LITERAL_CANDIDATES=' + str(len(hits)))
+          for hit in hits:
+              print(json.dumps(hit, ensure_ascii=False))
+          PY
