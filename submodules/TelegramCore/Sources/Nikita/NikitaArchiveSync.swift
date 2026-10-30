@@ -19,6 +19,7 @@ struct NikitaRemoteArchiveEvent: Decodable {
     let outgoing: Bool
     let date: Int32
     let capturedAt: Int32
+    let versionDate: Int32?
     let threadId: Int64?
     let text: String
     let mediaTitle: String
@@ -29,6 +30,7 @@ struct NikitaRemoteArchiveEvent: Decodable {
         case seq, outgoing, date, text, kind
         case peerType = "peer_type", peerId = "peer_id", messageId = "message_id"
         case authorType = "author_type", authorId = "author_id", capturedAt = "captured_at"
+        case versionDate = "version_date"
         case threadId = "thread_id", mediaTitle = "media_title"
         case mediaId = "media_id"
     }
@@ -207,8 +209,11 @@ public extension TelegramEngine.Messages {
                             // Another sync may already have committed the same page.
                             return NikitaArchiveSyncResult(success: true, importedCount: 0, hasMore: false, connected: page.connected, message: "Архив уже синхронизирован.")
                         }
-                        let count = importNikitaArchiveEvents(transaction: transaction, mediaBox: account.postbox.mediaBox,
-                            events: page.events.filter { $0.seq > current.cursor }, state: &current)
+                        guard let count = importNikitaArchiveEvents(transaction: transaction, mediaBox: account.postbox.mediaBox,
+                            events: page.events.filter { $0.seq > current.cursor }, state: &current) else {
+                            transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(current) })
+                            return .failure("Не удалось записать весь архив. Позиция журнала сохранена для повторной попытки.")
+                        }
                         current.serverId = page.serverId
                         current.cursor = page.nextCursor
                         transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(current) })
