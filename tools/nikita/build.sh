@@ -14,7 +14,7 @@ nikita_cache="${RUNNER_TEMP:-$nikita_root/build}/nikita-bazel-cache"
 # disable_legacy_signing is supported by the pinned rules_apple implementation.
 python3 build-system/Make/Make.py \
   --cacheDir="$nikita_cache" \
-  --bazelArguments="--//Telegram:disableProvisioningProfiles --//Telegram:disableExtensions --//Telegram:disableAppGroups --features=disable_legacy_signing --jobs=2 --local_ram_resources=4096" \
+  --bazelArguments="--//Telegram:disableProvisioningProfiles --//Telegram:disableExtensions --//Telegram:disableAppGroups --features=disable_legacy_signing --jobs=2 --local_resources=memory=4096" \
   build \
   --configurationPath=build-system/nikita-local-configuration.json \
   --xcodeManagedCodesigning \
