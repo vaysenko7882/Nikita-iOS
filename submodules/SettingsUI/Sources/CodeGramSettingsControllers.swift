@@ -95,7 +95,6 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
     }
     func reloadContent() { self.sections = self.makeSections(); self.tableView.reloadData() }
     func makeSections() -> [CodeGramSettingsSection] { [] }
-    func push(_ controller: ViewController) { (self.navigationController as? NavigationController)?.pushViewController(controller) }
     func notice(_ message: String, title: String = "CodeGram") {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "ОК", style: .default))

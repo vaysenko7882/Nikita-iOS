@@ -66,7 +66,16 @@ private final class CodeGramPeerEditorController: CodeGramTableController, PHPic
                 cell.selectionStyle = .none; return cell
             })]),
             CodeGramSettingsSection(title: "Аватар", footer: "Картинка обрезается по центру до квадрата и остаётся только на устройстве.", rows: [
-                CodeGramSettingsRow(cell: { let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil); cell.textLabel?.text = data == nil ? "Оригинал Telegram" : "Свой аватар"; cell.imageView?.image = data.flatMap { UIImage(data: $0) } ?? UIImage(systemName: "person.crop.circle"); cell.selectionStyle = .none; return cell }),
+                CodeGramSettingsRow(cell: {
+                    let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
+                    cell.textLabel?.text = data == nil ? "Оригинал Telegram" : "Свой аватар"
+                    if let data, let image = UIImage(data: data) {
+                        cell.imageView?.image = UIGraphicsImageRenderer(size: CGSize(width: 44, height: 44)).image { _ in image.draw(in: CGRect(x: 0, y: 0, width: 44, height: 44)) }
+                        cell.imageView?.layer.cornerRadius = 22; cell.imageView?.clipsToBounds = true
+                    } else { cell.imageView?.image = UIImage(systemName: "person.crop.circle") }
+                    cell.selectionStyle = .none
+                    return cell
+                }),
                 self.textRow("Выбрать фото", icon: "photo", action: { [weak self] in self?.choosePhoto() }),
                 self.textRow("Вернуть оригинальный аватар", action: { [weak self] in self?.jpeg = nil; self?.removeAvatar = true; self?.reloadContent() })]),
             CodeGramSettingsSection(title: nil, footer: "Изменения появятся в списке чатов и заголовках после сохранения. Аватар и название у остальных участников не меняются.", rows: [self.textRow("Сбросить локальный вид", action: { [weak self] in self?.reset() })])
