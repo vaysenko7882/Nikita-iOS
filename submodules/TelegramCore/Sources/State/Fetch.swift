@@ -89,6 +89,8 @@ func fetchResource(
     if let _ = resource as? EmptyMediaResource {
         return .single(.reset)
         |> then(.never())
+    } else if let archiveResource = resource as? NikitaArchiveMediaResource {
+        return fetchNikitaArchiveMedia(accountId: accountPeerId.id._internalGetInt64Value(), resource: archiveResource, intervals: intervals)
     } else if let secretFileResource = resource as? SecretFileMediaResource {
         return .single(.dataPart(resourceOffset: 0, data: Data(), range: 0 ..< 0, complete: false))
         |> then(fetchSecretFileResource(
@@ -174,3 +176,4 @@ func fetchResource(
     }
     return nil
 }
+

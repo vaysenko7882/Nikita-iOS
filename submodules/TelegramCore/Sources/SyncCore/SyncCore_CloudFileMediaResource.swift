@@ -1052,6 +1052,11 @@ public func TelegramMediaResource_parse(flatBuffersObject: TelegramCore_Telegram
             size: value.size == Int64.min ? nil : value.size,
             isSecretRelated: value.isSecretRelated
         )
+    case .telegrammediaresourceNikitaarchivemediaresource:
+        guard let value = flatBuffersObject.value(type: TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.self) else {
+            throw FlatBuffersError.missingRequiredField()
+        }
+        return NikitaArchiveMediaResource(accountId: value.accountId, serverId: value.serverId, blobId: value.blobId, size: value.size, sha256: value.sha256 ?? "")
     case .none_:
         throw FlatBuffersError.missingRequiredField()
     }
@@ -1166,6 +1171,18 @@ public func TelegramMediaResource_serialize(resource: TelegramMediaResource, fla
         
         let offset = TelegramCore_TelegramMediaResource_LocalFileMediaResource.endTelegramMediaResource_LocalFileMediaResource(&builder, start: start)
         return TelegramCore_TelegramMediaResource.createTelegramMediaResource(&builder, valueType: .telegrammediaresourceLocalfilemediaresource, valueOffset: offset)
+    case let resource as NikitaArchiveMediaResource:
+        let server = builder.create(string: resource.serverId)
+        let blob = builder.create(string: resource.blobId)
+        let hash = builder.create(string: resource.sha256)
+        let start = TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.startTelegramMediaResource_NikitaArchiveMediaResource(&builder)
+        TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.add(accountId: resource.accountId, &builder)
+        TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.add(serverId: server, &builder)
+        TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.add(blobId: blob, &builder)
+        TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.add(size: resource.size ?? 0, &builder)
+        TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.add(sha256: hash, &builder)
+        let offset = TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.endTelegramMediaResource_NikitaArchiveMediaResource(&builder, start: start)
+        return TelegramCore_TelegramMediaResource.createTelegramMediaResource(&builder, valueType: .telegrammediaresourceNikitaarchivemediaresource, valueOffset: offset)
     default:
         assertionFailure()
         return nil
@@ -1217,6 +1234,11 @@ public extension TelegramCore_TelegramMediaResource {
                 return MediaResourceId("")
             }
             return MediaResourceId(LocalFileMediaResourceId(fileId: value.fileId).uniqueId)
+        case .telegrammediaresourceNikitaarchivemediaresource:
+            guard let value = self.value(type: TelegramCore_TelegramMediaResource_NikitaArchiveMediaResource.self) else {
+                return MediaResourceId("")
+            }
+            return NikitaArchiveMediaResource(accountId: value.accountId, serverId: value.serverId, blobId: value.blobId, size: value.size, sha256: value.sha256 ?? "").id
         case .none_:
             return MediaResourceId("")
         }

@@ -33,7 +33,8 @@ def configure(path, data_path):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     config = {"api_id": int(api_id), "api_hash": api_hash, "token": secrets.token_urlsafe(36),
         "session_path": str(directory / "telegram"), "database_path": str(directory / "archive.sqlite3"),
-        "port": 8765, "seed_dialogs": 100, "seed_messages": 100}
+        "port": 8765, "seed_dialogs": 100, "seed_messages": 100,
+        "media_enabled": True, "media_workers": 3, "media_min_free_bytes": 1024**3}
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as output:
@@ -105,7 +106,9 @@ async def use_session(config_path, session_path):
 
 async def run(config):
     from .collector import collect
+    from .media_store import MediaStore
     archive = Archive(config["database_path"])
+    archive.media = MediaStore(archive,config)
     archive.set_connected(False)
     server = make_server(archive, config["token"], int(config.get("port", 8765)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)

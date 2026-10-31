@@ -12,6 +12,7 @@ import uuid
 class Archive:
     def __init__(self, path: str | Path):
         self.path = str(path)
+        self.media = None
         Path(self.path).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self.connect() as db:
             db.executescript("""
@@ -42,6 +43,11 @@ class Archive:
         row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return row[0] if row else default
 
+    @property
+    def server_id(self):
+        with self.connect() as db:
+            return self._meta(db, "server_id")
+
     def set_account(self, account_id: int):
         with self.connect() as db:
             previous = self._meta(db, "account_id")
@@ -70,6 +76,11 @@ class Archive:
                 if row[2] or snapshot["version_date"] < previous["version_date"]:
                     return
                 if snapshot["fingerprint"] == row[1]:
+                    # Add attachment descriptors to pre-upgrade snapshots without
+                    # inventing a user edit or dropping their previous content.
+                    if snapshot.get("media") and not previous.get("media"):
+                        db.execute("UPDATE messages SET payload=? WHERE peer_type=? AND peer_id=? AND message_id=?",
+                            (payload, *key))
                     return
                 # Do not let an initial history page race a newer live update.
                 if seed and snapshot["version_date"] <= previous["version_date"]:
@@ -95,6 +106,15 @@ class Archive:
                     if already_deleted:
                         continue
                     event = {**json.loads(payload), "kind": "delete", "captured_at": captured_at}
+                    if self.media is not None:
+                        def urgent(value):
+                            if isinstance(value,dict):
+                                if "blob_id" in value:
+                                    db.execute("UPDATE media_assets SET priority=MAX(priority,1000),retry_at=0 WHERE id=? AND state='pending'",(value["blob_id"],))
+                                for child in value.values(): urgent(child)
+                            elif isinstance(value,list):
+                                for child in value: urgent(child)
+                        urgent(event.get("media"))
                     event.pop("fingerprint", None)
                     db.execute("INSERT INTO events(payload) VALUES(?)", (json.dumps(event, ensure_ascii=False),))
                     db.execute("UPDATE messages SET deleted=1 WHERE peer_type=? AND peer_id=? AND message_id=?", (peer_type, peer_id, message_id))
@@ -119,8 +139,36 @@ class Archive:
                 selected.append(row)
                 response_bytes += size
             last_check = int(self._meta(db, "last_connection_check", "0"))
+            events = [{**json.loads(payload), "seq": seq} for seq, payload in selected]
+            if self.media is not None:
+                for event in events:
+                    if not event.get("media") and event.get("media_id") is not None:
+                        known = db.execute("SELECT descriptor FROM media_catalog WHERE original_id=? LIMIT 2", (event["media_id"],)).fetchall()
+                        if len(known) == 1:
+                            event["media"] = json.loads(known[0][0])
+                    def enrich(value):
+                        if isinstance(value, dict):
+                            if "blob_id" in value:
+                                row = db.execute("SELECT state,sha256 FROM media_assets WHERE id=?", (value["blob_id"],)).fetchone()
+                                if row:
+                                    value.update(state=row[0], sha256=row[1])
+                            for child in list(value.values()):
+                                enrich(child)
+                        elif isinstance(value, list):
+                            for child in value:
+                                enrich(child)
+                    enrich(event.get("media"))
+                response_bytes = 0
+                for index, event in enumerate(events):
+                    size = len(json.dumps(event,ensure_ascii=False).encode())
+                    if index and response_bytes + size > 2 * 1024 * 1024:
+                        events = events[:index]
+                        selected = selected[:index]
+                        break
+                    response_bytes += size
             return {"protocol": 1, "server_id": identity, "account_id": int(self._meta(db, "account_id", "0")),
                 "reset_required": reset, "next_cursor": 0 if reset else selected[-1][0] if selected else after,
-                "has_more": len(rows) > len(selected), "events": [{**json.loads(payload), "seq": seq} for seq, payload in selected],
+                "has_more": len(rows) > len(selected), "events": events,
+                "media_stats": self.media.stats() if self.media is not None else None,
                 "connected": self._meta(db, "connected") == "1" and time.time() - last_check < 90,
                 "unknown_deletions": int(self._meta(db, "unknown_deletions", "0"))}

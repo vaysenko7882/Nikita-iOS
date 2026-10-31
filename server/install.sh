@@ -10,8 +10,10 @@ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
 nikita_source="$(cd "$(dirname "$0")" && pwd)"
 nikita_domain=""
 nikita_session=""
+nikita_reuse_session=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --reuse-session) nikita_reuse_session=1; shift ;;
     --domain|--session)
       if [ "$#" -lt 2 ] || [ -z "$2" ]; then
         echo "Для $1 нужно значение." >&2
@@ -20,9 +22,15 @@ while [ "$#" -gt 0 ]; do
       if [ "$1" = --domain ]; then nikita_domain="$2"; else nikita_session="$2"; fi
       shift 2
       ;;
-    *) echo 'Параметры: --domain домен --session /полный/путь/my_account.session' >&2; exit 2 ;;
+    *) echo 'Параметры: --domain домен [--session /путь/my_account.session | --reuse-session]' >&2; exit 2 ;;
   esac
 done
+if [ "$nikita_reuse_session" = 1 ]; then
+  if [ -n "$nikita_session" ] || [ ! -f /var/lib/nikita-archive/config.json ]; then
+    echo '--reuse-session требует уже установленный архив и не совмещается с --session.' >&2
+    exit 2
+  fi
+fi
 if [ -n "$nikita_session" ] && { [ ! -f "$nikita_session" ] || [ ! -r "$nikita_session" ]; }; then
   echo 'Файл сессии не найден или недоступен. Укажи его полный путь на VPS.' >&2
   exit 1
@@ -92,6 +100,9 @@ fi
 if [ -n "$nikita_session" ]; then
   nikita_import_kept=1
   runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive use-session "$nikita_import_dir/telegram.session"
+elif [ "$nikita_reuse_session" = 1 ]; then
+  nikita_existing_session="$(/opt/nikita-archive/venv/bin/python -c 'import json; from pathlib import Path; p=Path(json.load(open("/var/lib/nikita-archive/config.json"))["session_path"]); print(p if p.suffix == ".session" else Path(str(p)+".session"))')"
+  runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive use-session "$nikita_existing_session"
 else
   runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive login
 fi
@@ -134,3 +145,4 @@ echo 'Ключ доступа (не публикуй):'
 runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive show-token
 echo 'Затем нажми «Проверить и синхронизировать».'
 echo 'Порты 80/443 должны быть доступны для HTTPS; API 8765 доступен только на самом VPS.'
+

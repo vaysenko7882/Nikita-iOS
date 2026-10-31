@@ -6,6 +6,7 @@ struct NikitaRemoteArchiveState: Codable {
     var endpoint: String = ""
     var serverId: String = ""
     var cursor: Int64 = 0
+    var mediaRevision: Int32 = 0
     var pendingVersions: [String: [DeletedMessageArchiveIndexEntry]] = [:]
 
     // Postbox's keyed decoder intentionally has no allKeys implementation.
@@ -17,7 +18,7 @@ struct NikitaRemoteArchiveState: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case endpoint, serverId, cursor, pendingVersionEntries
+        case endpoint, serverId, cursor, mediaRevision, pendingVersionEntries
         case pendingVersions // Legacy map: detect its presence, never decode it.
     }
 
@@ -29,6 +30,7 @@ struct NikitaRemoteArchiveState: Codable {
         self.endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint) ?? ""
         self.serverId = try container.decodeIfPresent(String.self, forKey: .serverId) ?? ""
         self.cursor = max(0, try container.decodeIfPresent(Int64.self, forKey: .cursor) ?? 0)
+        self.mediaRevision = try container.decodeIfPresent(Int32.self, forKey: .mediaRevision) ?? 0
         self.pendingVersions = [:]
         if let entries = try container.decodeIfPresent([PendingVersionEntry].self, forKey: .pendingVersionEntries) {
             for entry in entries {
@@ -48,6 +50,7 @@ struct NikitaRemoteArchiveState: Codable {
         try container.encode(self.endpoint, forKey: .endpoint)
         try container.encode(self.serverId, forKey: .serverId)
         try container.encode(self.cursor, forKey: .cursor)
+        try container.encode(self.mediaRevision, forKey: .mediaRevision)
         let entries = self.pendingVersions.keys.sorted().map {
             PendingVersionEntry(key: $0, versions: self.pendingVersions[$0] ?? [])
         }
@@ -71,9 +74,13 @@ struct NikitaRemoteArchiveEvent: Decodable {
     let mediaTitle: String
     let mediaId: Int64?
     let kind: String
+    let media: NikitaArchiveMedia?
+    let groupedId: Int64?
+    let spoiler: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case seq, outgoing, date, text, kind
+        case seq, outgoing, date, text, kind, media, spoiler
+        case groupedId = "grouped_id"
         case peerType = "peer_type", peerId = "peer_id", messageId = "message_id"
         case authorType = "author_type", authorId = "author_id", capturedAt = "captured_at"
         case versionDate = "version_date"
@@ -106,8 +113,7 @@ struct NikitaRemoteArchiveEvent: Decodable {
     }
 
     var displayText: String {
-        if self.mediaTitle.isEmpty { return self.text }
-        // Binary media is intentionally not exposed by this read-only API.
+        if self.media != nil || self.mediaTitle.isEmpty { return self.text }
         return self.text.isEmpty ? "[\(self.mediaTitle)]" : "\(self.text)\n[\(self.mediaTitle)]"
     }
 }
@@ -121,11 +127,32 @@ struct NikitaRemoteArchivePage: Decodable {
     let hasMore: Bool
     let events: [NikitaRemoteArchiveEvent]
     let connected: Bool
+    let mediaStats: NikitaArchiveMediaStats?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol", serverId = "server_id", accountId = "account_id"
         case resetRequired = "reset_required", nextCursor = "next_cursor", hasMore = "has_more"
         case events, connected
+        case mediaStats = "media_stats"
+    }
+}
+
+struct NikitaArchiveMediaStats: Decodable {
+    let ready: Int
+    let pending: Int
+    let failed: Int
+    let waitingForDisk: Int
+
+    enum CodingKeys: String, CodingKey {
+        case ready, pending, failed
+        case waitingForDisk = "waiting_for_disk"
+    }
+
+    var description: String {
+        var result = " Медиа: сохранено \(self.ready), в очереди \(self.pending)."
+        if self.waitingForDisk > 0 { result += " На VPS заканчивается место." }
+        if self.failed > 0 { result += " Недоступных файлов: \(self.failed)." }
+        return result
     }
 }
 
@@ -216,10 +243,11 @@ public extension TelegramEngine.Messages {
         }
         return account.postbox.transaction { transaction -> NikitaRemoteArchiveState in
             var state = transaction.getPreferencesEntry(key: PreferencesKeys.nikitaServerArchive)?.get(NikitaRemoteArchiveState.self) ?? NikitaRemoteArchiveState()
-            if state.endpoint != endpoint {
+            if state.endpoint != endpoint || state.mediaRevision < 1 {
                 state.endpoint = endpoint
                 state.serverId = ""
                 state.cursor = 0
+                state.mediaRevision = 1
                 transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(state) })
             }
             return state
@@ -256,7 +284,7 @@ public extension TelegramEngine.Messages {
                             return NikitaArchiveSyncResult(success: true, importedCount: 0, hasMore: false, connected: page.connected, message: "Архив уже синхронизирован.")
                         }
                         guard let count = importNikitaArchiveEvents(transaction: transaction, mediaBox: account.postbox.mediaBox,
-                            events: page.events.filter { $0.seq > current.cursor }, state: &current) else {
+                            events: page.events.filter { $0.seq > current.cursor }, accountId: page.accountId, serverId: page.serverId, state: &current) else {
                             transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(current) })
                             return .failure("Не удалось записать весь архив. Позиция журнала сохранена для повторной попытки.")
                         }
@@ -264,7 +292,7 @@ public extension TelegramEngine.Messages {
                         current.cursor = page.nextCursor
                         transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(current) })
                         return NikitaArchiveSyncResult(success: true, importedCount: count, hasMore: page.hasMore, connected: page.connected,
-                            message: page.connected ? "Архив синхронизирован. Сервер подключён к Telegram." : "Архив получен, но сессия Telegram на VPS сейчас отключена.")
+                            message: (page.connected ? "Архив синхронизирован. Сервер подключён к Telegram." : "Архив получен, но сессия Telegram на VPS сейчас отключена.") + (page.mediaStats?.description ?? " Обнови сервер для сохранения вложений."))
                     }
                 }
             }

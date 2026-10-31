@@ -47,6 +47,7 @@ jobs:
       - name: Check source, server journal and voice effects
         run: |
           python3 -m unittest discover -s tools/nikita/tests -v
+          python3 -m pip install --disable-pip-version-check ./server
           python3 -m unittest discover -s server/tests -v
           bash -n server/install.sh
           python3 tools/nikita/check_swift.py

@@ -7,6 +7,8 @@ from telethon import TelegramClient, events, types
 from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeFilename, DocumentAttributeVideo
 
 from .archive import Archive
+from .media_capture import MediaCapture
+from .media_store import MediaStore
 
 
 def peer(value):
@@ -39,7 +41,7 @@ def snapshot(message):
             elif isinstance(attribute, DocumentAttributeFilename):
                 media_title = attribute.file_name
     # Only hash media identifiers and entities; neither access_hash nor file_reference
-    # is exposed through the archive API. Binary media is not downloaded by this service.
+    # is exposed through the archive API. Private references are queued separately.
     content = {"text": message.message or "", "media_id": getattr(document, "id", None) or getattr(getattr(media, "photo", None), "id", None),
         "media_type": type(media).__name__, "entities": [item.to_dict() for item in message.entities or []]}
     fingerprint = hashlib.sha256(json.dumps(content, sort_keys=True, default=str).encode()).hexdigest()
@@ -51,23 +53,39 @@ def snapshot(message):
         "author_type": author_type, "author_id": author_id, "outgoing": bool(message.out),
         "date": int(message.date.timestamp()), "version_date": int((message.edit_date or message.date).timestamp()),
         "thread_id": thread_id, "text": message.message or "", "media_title": media_title,
-        "media_id": content["media_id"], "fingerprint": fingerprint}
+        "media_id": content["media_id"], "fingerprint": fingerprint,
+        "grouped_id": getattr(message,"grouped_id",None),
+        "spoiler": bool(getattr(media,"spoiler",False))}
 
 
 def client_for(config):
     return TelegramClient(str(config["session_path"]), int(config["api_id"]), config["api_hash"],
-        device_model="Nikita Archive VPS", app_version="2.0", system_version="Linux",
+        device_model="Nikita Archive VPS", app_version="3.0", system_version="Linux",
         sequential_updates=True, auto_reconnect=True, catch_up=True)
 
 
 async def collect(config):
     archive = Archive(config["database_path"])
     client = client_for(config)
+    media = MediaStore(archive,config)
+    archive.media = media
+    capture = MediaCapture(media)
+
+    def retain(message, seed=False):
+        item = snapshot(message)
+        if item:
+            try:
+                item["media"] = capture.capture(message,seed=seed)
+            except Exception:
+                # Attachment trouble must never stop recording text or later
+                # updates. No private location/session data enters logs.
+                with archive.connect() as db:
+                    value = int(archive._meta(db,"media_capture_errors","0")) + 1
+                    db.execute("INSERT OR REPLACE INTO meta VALUES('media_capture_errors',?)",(str(value),))
+            archive.observe(item,seed=seed)
 
     async def observe(event):
-        item = snapshot(event.message)
-        if item:
-            archive.observe(item)
+        retain(event.message)
 
     client.add_event_handler(observe, events.NewMessage())
     client.add_event_handler(observe, events.MessageEdited())
@@ -94,6 +112,8 @@ async def collect(config):
         raise RuntimeError("First run: nikita-archive --config <path> login")
     me = await client.get_me()
     archive.set_account(me.id)
+    media.recover()
+    downloads = [asyncio.create_task(media.worker(client,small_only=(index==0))) for index in range(media.workers)]
     monitor = asyncio.create_task(connection_monitor())
     try:
         # Register handlers BEFORE catch-up. The baseline is only what still
@@ -101,12 +121,12 @@ async def collect(config):
         await client.catch_up()
         async for dialog in client.iter_dialogs(limit=int(config.get("seed_dialogs", 100))):
             async for message in client.iter_messages(dialog.entity, limit=int(config.get("seed_messages", 100))):
-                item = snapshot(message)
-                if item:
-                    archive.observe(item, seed=True)
+                retain(message,seed=True)
         await client.run_until_disconnected()
     finally:
         monitor.cancel()
-        await asyncio.gather(monitor, return_exceptions=True)
+        for task in downloads:
+            task.cancel()
+        await asyncio.gather(monitor,*downloads, return_exceptions=True)
         archive.set_connected(False)
         await client.disconnect()

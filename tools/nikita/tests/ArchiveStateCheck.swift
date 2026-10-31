@@ -40,6 +40,7 @@ enum ArchiveStateCheck {
         populated.endpoint = "https://archive.example.invalid/"
         populated.serverId = "stable-epoch"
         populated.cursor = 9876543210
+        populated.mediaRevision = 1
         populated.pendingVersions = ["8123456789:42": [first, second], "other:7": []]
         let restored = roundTrip(populated)
         require(restored.endpoint == populated.endpoint && restored.serverId == populated.serverId,
@@ -47,6 +48,7 @@ enum ArchiveStateCheck {
         require(restored.cursor == populated.cursor && restored.pendingVersions == populated.pendingVersions,
             "Cursor or pending revision references changed")
         require(roundTrip(restored).pendingVersions == populated.pendingVersions, "Second startup failed")
+        require(restored.mediaRevision == 1, "Media replay migration marker changed")
 
         for pending in [[String: [DeletedMessageArchiveIndexEntry]](), ["8123456789:42": [first]]] {
             let old = LegacyArchiveState(endpoint: populated.endpoint, serverId: "legacy-epoch", cursor: 57,
@@ -67,6 +69,22 @@ enum ArchiveStateCheck {
         let object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
         require(object["pendingVersions"] == nil && object["pendingVersionEntries"] is [Any],
             "The legacy String-key dictionary must never be written again")
+        declareEncodable(NikitaArchiveMediaResource.self, f: { NikitaArchiveMediaResource(decoder: $0) })
+        let resource = NikitaArchiveMediaResource(accountId: 42, serverId: "stable-epoch", blobId: String(repeating: "a", count: 64),
+            size: 5 * 1024 * 1024 * 1024, sha256: String(repeating: "b", count: 64))
+        let resourceEncoder = PostboxEncoder()
+        resourceEncoder.encodeRootObject(resource)
+        let resourceData = resourceEncoder.makeData()
+        let decoded = PostboxDecoder(buffer: MemoryBuffer(data: resourceData)).decodeRootObject() as? NikitaArchiveMediaResource
+        require(decoded?.id == resource.id && decoded?.size == resource.size && decoded?.sha256 == resource.sha256,
+            "VPS media identity/64-bit size/hash failed actual Postbox round-trip")
+        require(decoded?.isValid == true && decoded?.streamable == true, "Valid media resource became unusable")
+        let other = NikitaArchiveMediaResource(accountId: 43, serverId: resource.serverId, blobId: resource.blobId, size: 12, sha256: "")
+        require(other.id != resource.id, "Resources from separate accounts must not share cached bytes")
+        let invalid = NikitaArchiveMediaResource(accountId: 42, serverId: "../../config", blobId: resource.blobId, size: 12, sha256: "")
+        require(!invalid.isValid, "Path-shaped epochs must not enter MediaBox filenames")
         print("Archive state: empty/populated/repeated-startup round-trips and legacy migration passed.")
+        print("VPS media resource: actual Postbox round-trip, large size, account isolation and invalid identity checks passed.")
     }
 }
+

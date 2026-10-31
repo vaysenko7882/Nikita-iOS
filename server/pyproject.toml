@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nikita-archive"
-version = "2.0.0"
+version = "3.0.0"
 description = "Private Telegram revision archive for the Nikita iPhone client"
 requires-python = ">=3.10"
 dependencies = ["Telethon==1.45.0"]
@@ -15,3 +15,4 @@ nikita-archive = "nikita_archive.__main__:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["nikita_archive*"]
+

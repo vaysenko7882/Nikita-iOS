@@ -32,14 +32,16 @@ def main():
         index = declaration("submodules/TelegramCore/Sources/Settings/DeletedMessageArchiveSettings.swift",
             "struct DeletedMessageArchiveIndexEntry:", "\nstruct DeletedMessageArchiveIndex:")
         declarations = temporary / "ProductionArchiveState.swift"
-        declarations.write_text("import Foundation\n" + state + "\n" + index)
+        resource = (ROOT / "submodules/TelegramCore/Sources/Nikita/NikitaArchiveMediaResource.swift").read_text().replace("import Postbox\n", "")
+        resource_protocol = (ROOT / "submodules/TelegramCore/Sources/SyncCore/SyncCore_TelegramMediaResource.swift").read_text().replace("import Postbox\n", "")
+        declarations.write_text("import Foundation\n" + state + "\n" + index + "\n" + resource_protocol + "\n" + resource)
 
         # These unrelated Postbox dependency types are not exercised by this
         # persistence test. The encoder, decoder, buffers, PreferencesEntry,
         # state declaration and index-entry declaration are production sources.
         support = temporary / "CodecSupport.swift"
         support.write_text('''import Foundation
-public struct MediaResourceId: Hashable {}
+public enum CachedMediaRepresentationKeepDuration {}
 public struct PeerId {
     let rawValue: Int64
     init(_ value: Int64) { self.rawValue = value }
@@ -59,6 +61,7 @@ func mdb_cmp_memn(_ left: UnsafeRawPointer, _ leftCount: Int,
 }
 ''')
         sources = [ROOT / "submodules/Postbox/Sources/Coding.swift",
+            ROOT / "submodules/Postbox/Sources/MediaResource.swift",
             ROOT / "submodules/Postbox/Sources/PreferencesEntry.swift"]
         for part in ("Encoder", "Decoder"):
             sources.extend(sorted((ROOT / "submodules/Postbox/Sources/Utils" / part).glob("*.swift")))
@@ -85,3 +88,4 @@ func mdb_cmp_memn(_ left: UnsafeRawPointer, _ leftCount: Int,
 
 if __name__ == "__main__":
     main()
+

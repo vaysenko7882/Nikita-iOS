@@ -11,6 +11,12 @@ FILES = [
     "submodules/SettingsUI/Sources/NikitaToolsController.swift",
     "submodules/TelegramCore/Sources/Nikita/NikitaSettings.swift",
     "submodules/TelegramCore/Sources/Nikita/NikitaArchiveSync.swift",
+    "submodules/TelegramCore/Sources/Nikita/NikitaArchiveMediaResource.swift",
+    "submodules/TelegramCore/Sources/Nikita/NikitaArchiveMedia.swift",
+    "submodules/TelegramCore/Sources/Nikita/FetchNikitaArchiveMedia.swift",
+    "submodules/TelegramCore/Sources/SyncCore/SyncCore_CloudFileMediaResource.swift",
+    "submodules/TelegramCore/Sources/State/Fetch.swift",
+    "submodules/TelegramCore/Sources/Account/AccountManager.swift",
     "submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift",
     "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift",
     "submodules/TelegramCore/Sources/SyncCore/SyncCore_ArchivedMessageAttribute.swift",
@@ -32,3 +38,4 @@ FILES = [
 for relative in FILES:
     subprocess.run(["xcrun", "swiftc", "-frontend", "-parse", str(ROOT / relative)], check=True)
 print(f"Swift syntax parsed: {len(FILES)} files. Full typechecking is performed by the app build.")
+

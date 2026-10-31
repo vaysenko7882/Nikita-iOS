@@ -640,6 +640,10 @@ private func nikitaArchiveStoredUpdate(_ message: Message, attribute: ArchivedMe
 
 private func nikitaArchiveContentMatches(_ message: Message, event: NikitaRemoteArchiveEvent) -> Bool {
     if message.media.isEmpty && message.text == event.displayText { return true }
+    if message.media.isEmpty && event.media != nil && !event.mediaTitle.isEmpty {
+        let legacy = event.text.isEmpty ? "[\(event.mediaTitle)]" : "\(event.text)\n[\(event.mediaTitle)]"
+        if message.text == legacy { return true }
+    }
     guard message.text == event.text else { return false }
     guard let mediaId = event.mediaId else { return message.media.isEmpty }
     return message.media.contains { media in
@@ -650,7 +654,7 @@ private func nikitaArchiveContentMatches(_ message: Message, event: NikitaRemote
 }
 
 func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
-    events: [NikitaRemoteArchiveEvent], state: inout NikitaRemoteArchiveState) -> Int? {
+    events: [NikitaRemoteArchiveEvent], accountId: Int64, serverId: String, state: inout NikitaRemoteArchiveState) -> Int? {
     guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox) else { return nil }
     var index = transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty
     var archivedByOriginal: [MessageId: MessageId] = [:]
@@ -667,6 +671,7 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
             (event.kind == "edit" && settings.saveEditedVersions) || (event.kind == "delete" && settings.saveDeletedMessages) else { continue }
         let key = nikitaArchiveMessageKey(originalId)
         let current = transaction.getMessage(originalId)
+        let remoteMedia: [Media] = event.media.flatMap { $0.nativeMedia(accountId: accountId, serverId: serverId) }.map { [$0] } ?? []
         let archived = archivedByOriginal[originalId].flatMap(transaction.getMessage)
         let target = archived ?? current
         var versionIds = target?.archivedMessageAttribute?.versionIds ?? []
@@ -676,26 +681,40 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
         versionIds = versionIds.filter { transaction.getMessage($0) != nil }
 
         func makeCopy(namespace: Int32, attributes: [MessageAttribute]) -> MessageId? {
-            if let current, nikitaArchiveContentMatches(current, event: event) {
+            if remoteMedia.isEmpty, let current, nikitaArchiveContentMatches(current, event: event) {
                 return addStoredCopy(transaction: transaction, message: current, namespace: namespace,
                     attributes: attributesWithoutArchiveMetadata(current.attributes) + attributes)
             }
             let uniqueId = Int64.random(in: Int64.min ... Int64.max)
-            var attributes = attributes
-            if let versionDate = event.versionDate, versionDate > event.date {
+            let source = current.flatMap { nikitaArchiveContentMatches($0, event: event) ? $0 : nil }
+            var attributes = (source.map { attributesWithoutArchiveMetadata($0.attributes) } ?? []) + attributes
+            if source == nil, let versionDate = event.versionDate, versionDate > event.date {
                 attributes.append(EditedMessageAttribute(date: versionDate, isHidden: false))
             }
+            if event.spoiler == true, !attributes.contains(where: { $0 is MediaSpoilerMessageAttribute }) {
+                attributes.append(MediaSpoilerMessageAttribute())
+            }
             let copy = StoreMessage(peerId: originalId.peerId, namespace: namespace, customStableId: nil,
-                globallyUniqueId: uniqueId, groupingKey: nil, threadId: event.threadId, timestamp: event.date,
+                globallyUniqueId: uniqueId, groupingKey: event.groupedId, threadId: event.threadId, timestamp: event.date,
                 flags: event.outgoing ? [] : [.Incoming], tags: [], globalTags: [], localTags: [], forwardInfo: nil,
-                authorId: event.resolvedAuthorId, text: event.displayText, attributes: attributes, media: [])
+                authorId: event.resolvedAuthorId, text: event.displayText, attributes: attributesWithoutExpiry(attributes), media: remoteMedia)
             return transaction.addMessages([copy], location: .Random)[uniqueId]
         }
 
         if event.kind == "edit" {
             let alreadySaved = versionIds.contains { id in
                 guard let version = transaction.getMessage(id) else { return false }
-                return version.archivedVersionCapturedAt == event.capturedAt && nikitaArchiveContentMatches(version, event: event)
+                let matches = version.archivedVersionCapturedAt == event.capturedAt && nikitaArchiveContentMatches(version, event: event)
+                if matches && !remoteMedia.isEmpty {
+                    transaction.updateMessage(id, update: { message in
+                        return .update(StoreMessage(id: message.id, customStableId: nil, globallyUniqueId: message.globallyUniqueId,
+                            groupingKey: event.groupedId, threadId: event.threadId, timestamp: event.date,
+                            flags: StoreMessageFlags(message.flags), tags: message.tags, globalTags: message.globalTags, localTags: message.localTags,
+                            forwardInfo: message.forwardInfo.flatMap(StoreMessageForwardInfo.init), authorId: event.resolvedAuthorId,
+                            text: event.displayText, attributes: attributesWithoutExpiry(message.attributes), media: remoteMedia))
+                    })
+                }
+                return matches
             }
             if !alreadySaved {
                 if let id = makeCopy(namespace: Namespaces.Message.ArchivedVersion,
@@ -726,7 +745,7 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                 let localVersionDate = archived.attributes.compactMap { ($0 as? EditedMessageAttribute)?.date }.first ?? archived.timestamp
                 let remoteVersionDate = event.versionDate ?? event.date
                 let different = !nikitaArchiveContentMatches(archived, event: event)
-                let useRemote = different && remoteVersionDate >= localVersionDate
+                let useRemote = (different && remoteVersionDate >= localVersionDate) || (!different && !remoteMedia.isEmpty)
                 if different {
                     let hasOtherCopy = versionIds.contains { id in
                         guard let version = transaction.getMessage(id) else { return false }
@@ -758,11 +777,14 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                         attributes.append(EditedMessageAttribute(date: remoteVersionDate, isHidden: false))
                     }
                     attributes.append(attribute)
+                    if event.spoiler == true, !attributes.contains(where: { $0 is MediaSpoilerMessageAttribute }) {
+                        attributes.append(MediaSpoilerMessageAttribute())
+                    }
                     return .update(StoreMessage(id: message.id, customStableId: nil, globallyUniqueId: message.globallyUniqueId,
-                        groupingKey: source?.groupingKey, threadId: event.threadId, timestamp: event.date,
+                        groupingKey: event.groupedId ?? source?.groupingKey, threadId: event.threadId, timestamp: event.date,
                         flags: event.outgoing ? [] : [.Incoming], tags: source?.tags ?? [], globalTags: [], localTags: [],
                         forwardInfo: source?.forwardInfo.flatMap(StoreMessageForwardInfo.init), authorId: event.resolvedAuthorId,
-                        text: source?.text ?? event.displayText, attributes: attributesWithoutExpiry(attributes), media: source?.media ?? []))
+                        text: source?.text ?? event.displayText, attributes: attributesWithoutExpiry(attributes), media: remoteMedia.isEmpty ? source?.media ?? [] : remoteMedia))
                 })
             } else {
                 let attribute = ArchivedMessageAttribute(originalMessageId: originalId, versionIds: versionIds,

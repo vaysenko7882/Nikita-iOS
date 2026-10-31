@@ -98,6 +98,7 @@ private var declaredEncodables: Void = {
     declareEncodable(TelegramMediaMap.self, f: { TelegramMediaMap(decoder: $0) })
     declareEncodable(TelegramMediaFile.self, f: { TelegramMediaFile(decoder: $0) })
     declareEncodable(TelegramMediaFileAttribute.self, f: { TelegramMediaFileAttribute(decoder: $0) })
+    declareEncodable(NikitaArchiveMediaResource.self, f: { NikitaArchiveMediaResource(decoder: $0) })
     declareEncodable(CloudFileMediaResource.self, f: { CloudFileMediaResource(decoder: $0) })
     declareEncodable(ChannelState.self, f: { ChannelState(decoder: $0) })
     declareEncodable(RegularChatState.self, f: { RegularChatState(decoder: $0) })
@@ -531,3 +532,4 @@ private func cleanupAccount(networkArguments: NetworkInitializationArguments, ac
         }
     }
 }
+

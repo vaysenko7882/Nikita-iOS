@@ -61,6 +61,14 @@ table TelegramMediaResource_LocalFileMediaResource {
     isSecretRelated:bool (id: 2);
 }
 
+table TelegramMediaResource_NikitaArchiveMediaResource {
+    accountId:int64 (id: 0);
+    serverId:string (id: 1, required);
+    blobId:string (id: 2, required);
+    size:int64 (id: 3);
+    sha256:string (id: 4);
+}
+
 union TelegramMediaResource_Value {
     TelegramMediaResource_CloudFileMediaResource,
     TelegramMediaResource_CloudDocumentSizeMediaResource,
@@ -68,7 +76,8 @@ union TelegramMediaResource_Value {
     TelegramMediaResource_CloudPeerPhotoSizeMediaResource,
     TelegramMediaResource_CloudStickerPackThumbnailMediaResource,
     TelegramMediaResource_CloudDocumentMediaResource,
-    TelegramMediaResource_LocalFileMediaResource
+    TelegramMediaResource_LocalFileMediaResource,
+    TelegramMediaResource_NikitaArchiveMediaResource
 }
 
 table TelegramMediaResource {
@@ -76,3 +85,4 @@ table TelegramMediaResource {
 }
 
 root_type TelegramMediaResource;
+
