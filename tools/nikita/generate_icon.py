@@ -11,13 +11,13 @@ icon = original.resize((1024, 1024), Image.Resampling.LANCZOS)
 target = ROOT / 'Telegram/Telegram-iOS/Telegram.icon'
 icon.save(target / 'Assets/CodeGram.png', optimize=True)
 for path in (ROOT / 'Telegram/Telegram-iOS/DefaultAppIcon.xcassets').rglob('*.png'):
-    with Image.open(path) as original:
-        size = original.size
+    with Image.open(path) as slot:
+        size = slot.size
     icon.resize(size, Image.Resampling.LANCZOS).save(path, optimize=True)
 menu = ROOT / 'submodules/TelegramUI/Images.xcassets/Item List/Icons/Madgram.imageset'
 for path in menu.glob('*.png'):
-    with Image.open(path) as original:
-        size = original.size
+    with Image.open(path) as slot:
+        size = slot.size
     icon.resize(size, Image.Resampling.LANCZOS).save(path, optimize=True)
 for name in ('MadGram.png', 'Nikita.png'):
     (target / 'Assets' / name).unlink(missing_ok=True)
