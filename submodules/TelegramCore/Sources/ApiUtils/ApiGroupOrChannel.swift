@@ -460,7 +460,7 @@ func mergeChannel(lhs: TelegramChannel?, rhs: TelegramChannel) -> TelegramChanne
     let linkedMonoforumId = rhs.linkedMonoforumId ?? lhs.linkedMonoforumId
     let linkedCommunityId = rhs.linkedCommunityId ?? lhs.linkedCommunityId
     
-    return TelegramChannel(id: lhs.id, accessHash: accessHash, title: rhs.title, username: rhs.username, photo: rhs.photo, creationDate: rhs.creationDate, version: rhs.version, participationStatus: lhs.participationStatus, info: info, flags: channelFlags, restrictionInfo: rhs.restrictionInfo, adminRights: rhs.adminRights, bannedRights: rhs.bannedRights, defaultBannedRights: rhs.defaultBannedRights, usernames: rhs.usernames, storiesHidden: storiesHidden, nameColor: rhs.nameColor, backgroundEmojiId: rhs.backgroundEmojiId, profileColor: rhs.profileColor, profileBackgroundEmojiId: rhs.profileBackgroundEmojiId, emojiStatus: rhs.emojiStatus, approximateBoostLevel: rhs.approximateBoostLevel, subscriptionUntilDate: rhs.subscriptionUntilDate, verificationIconFileId: rhs.verificationIconFileId, sendPaidMessageStars: rhs.sendPaidMessageStars, linkedMonoforumId: linkedMonoforumId, linkedCommunityId: linkedCommunityId)
+    return TelegramChannel(id: lhs.id, accessHash: accessHash, title: rhs.codegramOriginalTitle, username: rhs.username, photo: rhs.photo, creationDate: rhs.creationDate, version: rhs.version, participationStatus: lhs.participationStatus, info: info, flags: channelFlags, restrictionInfo: rhs.restrictionInfo, adminRights: rhs.adminRights, bannedRights: rhs.bannedRights, defaultBannedRights: rhs.defaultBannedRights, usernames: rhs.usernames, storiesHidden: storiesHidden, nameColor: rhs.nameColor, backgroundEmojiId: rhs.backgroundEmojiId, profileColor: rhs.profileColor, profileBackgroundEmojiId: rhs.profileBackgroundEmojiId, emojiStatus: rhs.emojiStatus, approximateBoostLevel: rhs.approximateBoostLevel, subscriptionUntilDate: rhs.subscriptionUntilDate, verificationIconFileId: rhs.verificationIconFileId, sendPaidMessageStars: rhs.sendPaidMessageStars, linkedMonoforumId: linkedMonoforumId, linkedCommunityId: linkedCommunityId)
 }
 
 func mergeCommunity(lhs: TelegramCommunity?, rhs: TelegramCommunity) -> TelegramCommunity {
@@ -492,3 +492,4 @@ func mergeCommunity(lhs: TelegramCommunity?, rhs: TelegramCommunity) -> Telegram
         defaultBannedRights: rhs.defaultBannedRights ?? lhs.defaultBannedRights
     )
 }
+

@@ -146,8 +146,10 @@ public struct TelegramGroupToChannelMigrationReference: Equatable {
 }
 
 public final class TelegramGroup: Peer, Equatable {
+    private let codegramAppearanceRevision: Int64
     public let id: PeerId
-    public let title: String
+    private let codegramOriginalTitle: String
+    public var title: String { return CodeGramPeerAppearanceStore.shared.appearance(self.id).title ?? self.codegramOriginalTitle }
     public let photo: [TelegramMediaImageRepresentation]
     public let participantCount: Int
     public let role: TelegramGroupRole
@@ -171,7 +173,8 @@ public final class TelegramGroup: Peer, Equatable {
     
     public init(id: PeerId, title: String, photo: [TelegramMediaImageRepresentation], participantCount: Int, role: TelegramGroupRole, membership: TelegramGroupMembership, flags: TelegramGroupFlags, defaultBannedRights: TelegramChatBannedRights?, migrationReference: TelegramGroupToChannelMigrationReference?, creationDate: Int32, version: Int) {
         self.id = id
-        self.title = title
+        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramOriginalTitle = title
         self.photo = photo
         self.participantCount = participantCount
         self.role = role
@@ -185,7 +188,8 @@ public final class TelegramGroup: Peer, Equatable {
     
     public init(decoder: PostboxDecoder) {
         self.id = PeerId(decoder.decodeInt64ForKey("i", orElse: 0))
-        self.title = decoder.decodeStringForKey("t", orElse: "")
+        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramOriginalTitle = decoder.decodeStringForKey("t", orElse: "")
         self.photo = decoder.decodeObjectArrayForKey("ph")
         self.participantCount = Int(decoder.decodeInt32ForKey("pc", orElse: 0))
         if let role = decoder.decodeObjectForKey("rv", decoder: { TelegramGroupRole(decoder: $0) }) as? TelegramGroupRole {
@@ -222,7 +226,7 @@ public final class TelegramGroup: Peer, Equatable {
     
     public func encode(_ encoder: PostboxEncoder) {
         encoder.encodeInt64(self.id.toInt64(), forKey: "i")
-        encoder.encodeString(self.title, forKey: "t")
+        encoder.encodeString(self.codegramOriginalTitle, forKey: "t")
         encoder.encodeObjectArray(self.photo, forKey: "ph")
         encoder.encodeInt32(Int32(self.participantCount), forKey: "pc")
         encoder.encodeObject(self.role, forKey: "rv")
@@ -246,7 +250,8 @@ public final class TelegramGroup: Peer, Equatable {
 
     public init(flatBuffersObject: TelegramCore_TelegramGroup) throws {
         self.id = PeerId(flatBuffersObject.id)
-        self.title = flatBuffersObject.title
+        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramOriginalTitle = flatBuffersObject.title
         self.photo = try (0 ..< flatBuffersObject.photoCount).map { try TelegramMediaImageRepresentation(flatBuffersObject: flatBuffersObject.photo(at: $0)!) }
         self.participantCount = Int(flatBuffersObject.participantCount)
         
@@ -270,7 +275,7 @@ public final class TelegramGroup: Peer, Equatable {
     }
     
     public func encodeToFlatBuffers(builder: inout FlatBufferBuilder) -> Offset {
-        let titleOffset = builder.create(string: self.title)
+        let titleOffset = builder.create(string: self.codegramOriginalTitle)
         
         let photoOffsets = self.photo.map { $0.encodeToFlatBuffers(builder: &builder) }
         let photoOffset = builder.createVector(ofOffsets: photoOffsets, len: photoOffsets.count)
@@ -312,10 +317,11 @@ public final class TelegramGroup: Peer, Equatable {
     }
 
     public static func ==(lhs: TelegramGroup, rhs: TelegramGroup) -> Bool {
+        if lhs.codegramAppearanceRevision != rhs.codegramAppearanceRevision { return false }
         if lhs.id != rhs.id {
             return false
         }
-        if lhs.title != rhs.title {
+        if lhs.codegramOriginalTitle != rhs.codegramOriginalTitle {
             return false
         }
         if lhs.photo != rhs.photo {
@@ -349,14 +355,14 @@ public final class TelegramGroup: Peer, Equatable {
     }
 
     public func updateFlags(flags: TelegramGroupFlags, version: Int) -> TelegramGroup {
-        return TelegramGroup(id: self.id, title: self.title, photo: self.photo, participantCount: self.participantCount, role: self.role, membership: self.membership, flags: flags, defaultBannedRights: self.defaultBannedRights, migrationReference: self.migrationReference, creationDate: self.creationDate, version: version)
+        return TelegramGroup(id: self.id, title: self.codegramOriginalTitle, photo: self.photo, participantCount: self.participantCount, role: self.role, membership: self.membership, flags: flags, defaultBannedRights: self.defaultBannedRights, migrationReference: self.migrationReference, creationDate: self.creationDate, version: version)
     }
     
     public func updateDefaultBannedRights(_ defaultBannedRights: TelegramChatBannedRights?, version: Int) -> TelegramGroup {
-        return TelegramGroup(id: self.id, title: self.title, photo: self.photo, participantCount: self.participantCount, role: self.role, membership: self.membership, flags: self.flags, defaultBannedRights: defaultBannedRights, migrationReference: self.migrationReference, creationDate: self.creationDate, version: version)
+        return TelegramGroup(id: self.id, title: self.codegramOriginalTitle, photo: self.photo, participantCount: self.participantCount, role: self.role, membership: self.membership, flags: self.flags, defaultBannedRights: defaultBannedRights, migrationReference: self.migrationReference, creationDate: self.creationDate, version: version)
     }
     
     public func updateParticipantCount(_ participantCount: Int) -> TelegramGroup {
-        return TelegramGroup(id: self.id, title: self.title, photo: self.photo, participantCount: participantCount, role: self.role, membership: self.membership, flags: self.flags, defaultBannedRights: self.defaultBannedRights, migrationReference: self.migrationReference, creationDate: self.creationDate, version: version)
+        return TelegramGroup(id: self.id, title: self.codegramOriginalTitle, photo: self.photo, participantCount: participantCount, role: self.role, membership: self.membership, flags: self.flags, defaultBannedRights: self.defaultBannedRights, migrationReference: self.migrationReference, creationDate: self.creationDate, version: version)
     }
 }

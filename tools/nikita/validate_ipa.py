@@ -22,8 +22,8 @@ def validate(path, expected_version=None, expected_build=None):
             raise ValueError('Expected one iPhone application.')
         location = names[0]
         info = plistlib.loads(archive.read(location))
-        if info.get('CFBundleDisplayName') != 'Никита':
-            raise ValueError('Compiled app does not have the Nikita display name.')
+        if info.get('CFBundleDisplayName') != 'CodeGram':
+            raise ValueError('Compiled app does not have the CodeGram display name.')
         if info.get('CFBundleIdentifier') != 'personal.nikita.messenger':
             raise ValueError('Compiled app does not have the personal bundle identifier.')
         if expected_version is not None and info.get('CFBundleShortVersionString') != expected_version:
@@ -57,10 +57,10 @@ def main():
     result = validate(source, expected_version=version, expected_build=os.environ.get('GITHUB_RUN_NUMBER', '1'))
     output = ROOT / 'build' / 'nikita'
     output.mkdir(parents=True, exist_ok=True)
-    target = output / 'Nikita.ipa'
+    target = output / 'CodeGram.ipa'
     shutil.copyfile(source, target)
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
-    (output / 'Nikita.ipa.sha256').write_text(digest + '  Nikita.ipa\n')
+    (output / 'CodeGram.ipa.sha256').write_text(digest + '  CodeGram.ipa\n')
     result.update({
         'sha256': digest,
         'source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
@@ -69,7 +69,7 @@ def main():
         'signing': 'Sign with the owner certificate before installation',
     })
     (output / 'Build.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
-    print('Validated compiled Nikita IPA:', target)
+    print('Validated compiled CodeGram IPA:', target)
 
 if __name__ == '__main__':
     main()

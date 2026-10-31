@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nikita-archive"
-version = "3.0.0"
+version = "4.0.0"
 description = "Private Telegram revision archive for the Nikita iPhone client"
 requires-python = ">=3.10"
 dependencies = ["Telethon==1.45.0"]

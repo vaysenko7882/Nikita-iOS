@@ -243,6 +243,8 @@ class CollectorMediaTests(unittest.IsolatedAsyncioTestCase):
                 def is_connected(self): return True
                 async def catch_up(self): await handlers[0](SimpleNamespace(message=item))
                 async def iter_dialogs(self,**kwargs):
+                    yield SimpleNamespace(entity=types.User(id=42,first_name="Owner"),archived=False)
+                async def iter_messages(self,*args,**kwargs):
                     if False: yield None
                 async def run_until_disconnected(self): await asyncio.Event().wait()
                 async def iter_download(self,*args,**kwargs):

@@ -46,6 +46,7 @@ class MediaCapture:
         result = self.asset(f"{kind}:{owner.id}:{variant}", location, length,
             "video/mp4" if name == "VideoSize" else "image/jpeg", priority, owner.dc_id, inline)
         if result is not None:
+            self.store.set_category(result["blob_id"],"thumbnails")
             result.update(width=max(1, bounded(getattr(size,"w",1))), height=max(1,bounded(getattr(size,"h",1))))
             if name == "VideoSize":
                 result["start_timestamp"] = duration(getattr(size,"video_start_ts",0))
@@ -60,6 +61,7 @@ class MediaCapture:
         full = self.representation(photo, candidates[-1], False, priority)
         if full is None:
             return None
+        self.store.set_category(full["blob_id"],"photos")
         preview = self.representation(photo, candidates[0], False, priority+20) if len(candidates)>1 else None
         stripped = next((getattr(size,"bytes",b"") for size in sizes if type(size).__name__=="PhotoStrippedSize"), b"")
         result = dict(kind="photo", id=photo.id, asset=full, preview=preview,
@@ -117,6 +119,8 @@ class MediaCapture:
             video = self.representation(document,size,True,priority+10)
             if video:
                 result["video_thumbnails"].append(video)
+        category = "voice" if result.get("voice") else "round_video" if result.get("round_video") else "stickers" if result.get("sticker") or result.get("custom_emoji") else "animations" if result.get("animated") else "audio" if result.get("audio") else "videos" if result.get("video") else "files"
+        self.store.set_category(full["blob_id"],category)
         self.store.catalog(result)
         return result
 

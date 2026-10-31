@@ -83,7 +83,7 @@ public struct GhostModeSettings: Codable, Equatable {
     }
 
     public var keepsViewOnceMedia: Bool {
-        return self.isEnabled && self.keepViewOnceMedia
+        return (self.isEnabled && self.keepViewOnceMedia) || NikitaSettingsStore.shared.keepsEphemeralMedia
     }
 }
 
@@ -114,7 +114,7 @@ public func ghostModeAllowsViewOnceCapture(
         && isViewOnce
         && isIncoming
         && !isConsumed
-        && !hasExplicitCopyProtection
+        && (!hasExplicitCopyProtection || NikitaSettingsStore.shared.allowsProtectedExport)
         && !hasPaidContent
 }
 
@@ -384,3 +384,4 @@ func managedGhostModeReadStateRepair(accountPeerId: PeerId, postbox: Postbox, ne
         }
     }
 }
+

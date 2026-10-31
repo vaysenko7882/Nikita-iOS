@@ -347,8 +347,8 @@ public struct LocalFeatureStrings {
                 callbackDataTitle: "Callback data",
                 hideStoryStrip: "Скрывать ленту историй",
                 hideStoryStripInfo: "Убирает истории с верхней части списка чатов, не удаляя их и не меняя состояние на сервере.",
-                showAppBadge: "Плашка Никита в статус-баре",
-                showAppBadgeInfo: "Показывает капсулу НИКИТА у выреза экрана. Выключите, чтобы её скрыть.",
+                showAppBadge: "Плашка CodeGram в статус-баре",
+                showAppBadgeInfo: "Показывает капсулу CODEGRAM у выреза экрана. Выключите, чтобы её скрыть.",
                 disableStoryCameraSwipe: "Отключить свайп к камере",
                 disableStoryCameraSwipeInfo: "Не открывает камеру историй свайпом от списка чатов.",
                 confirmStoryOpen: "Спрашивать перед просмотром",
@@ -375,8 +375,8 @@ public struct LocalFeatureStrings {
                 storyConfirmationAction: "Просмотреть"
             )
             self.madgram = MadgramFeatureStrings(
-                title: "Никита",
-                quickSection: "НИКИТА · БЫСТРЫЕ НАСТРОЙКИ",
+                title: "CodeGram",
+                quickSection: "CODEGRAM · БЫСТРЫЕ НАСТРОЙКИ",
                 quickGhost: "Режим призрака",
                 quickArchive: "Сохранять архив после перезапуска",
                 quickInfo: "Ваш личный клиент. Архив остаётся на этом iPhone после перезапуска. Сохраняется только то, что клиент успел получить. Подробные параметры доступны ниже.",
@@ -564,8 +564,8 @@ public struct LocalFeatureStrings {
                 callbackDataTitle: "Callback data",
                 hideStoryStrip: "Приховувати стрічку історій",
                 hideStoryStripInfo: "Прибирає історії з верхньої частини списку чатів, не видаляючи їх і не змінюючи стан на сервері.",
-                showAppBadge: "Плашка Никита у статус-барі",
-                showAppBadgeInfo: "Показує капсулу НИКИТА біля вирізу екрана. Вимкніть, щоб її приховати.",
+                showAppBadge: "Плашка CodeGram у статус-барі",
+                showAppBadgeInfo: "Показує капсулу CODEGRAM біля вирізу екрана. Вимкніть, щоб її приховати.",
                 disableStoryCameraSwipe: "Вимкнути свайп до камери",
                 disableStoryCameraSwipeInfo: "Не відкриває камеру історій свайпом зі списку чатів.",
                 confirmStoryOpen: "Запитувати перед переглядом",
@@ -592,8 +592,8 @@ public struct LocalFeatureStrings {
                 storyConfirmationAction: "Переглянути"
             )
             self.madgram = MadgramFeatureStrings(
-                title: "Никита",
-                quickSection: "НІКІТА · ШВИДКІ НАЛАШТУВАННЯ",
+                title: "CodeGram",
+                quickSection: "CODEGRAM · ШВИДКІ НАЛАШТУВАННЯ",
                 quickGhost: "Режим привида",
                 quickArchive: "Зберігати архів після перезапуску",
                 quickInfo: "Ваш особистий клієнт. Архів залишається на цьому iPhone після перезапуску. Зберігається лише отримане клієнтом. Докладні параметри доступні нижче.",
@@ -771,8 +771,8 @@ public struct LocalFeatureStrings {
                 callbackDataTitle: "Callback data",
                 hideStoryStrip: "Hide Story Strip",
                 hideStoryStripInfo: "Removes stories from the top of the chat list without deleting them or changing server state.",
-                showAppBadge: "Никита Badge in Status Bar",
-                showAppBadgeInfo: "Shows the НИКИТА capsule next to the screen cutout. Turn off to hide it.",
+                showAppBadge: "CodeGram Badge in Status Bar",
+                showAppBadgeInfo: "Shows the CODEGRAM capsule next to the screen cutout. Turn off to hide it.",
                 disableStoryCameraSwipe: "Disable Camera Swipe",
                 disableStoryCameraSwipeInfo: "Prevents opening the story camera by swiping from the chat list.",
                 confirmStoryOpen: "Confirm Before Viewing",
@@ -799,8 +799,8 @@ public struct LocalFeatureStrings {
                 storyConfirmationAction: "View"
             )
             self.madgram = MadgramFeatureStrings(
-                title: "Никита",
-                quickSection: "NIKITA · QUICK CONTROLS",
+                title: "CodeGram",
+                quickSection: "CODEGRAM · QUICK CONTROLS",
                 quickGhost: "Ghost mode",
                 quickArchive: "Keep archive across launches",
                 quickInfo: "Your personal client. The archive stays on this iPhone across launches. Only content received by this client can be saved. Detailed controls are below.",
@@ -880,3 +880,4 @@ public extension PresentationStrings {
         return LocalFeatureStrings(strings: self)
     }
 }
+

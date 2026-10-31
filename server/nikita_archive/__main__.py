@@ -107,7 +107,9 @@ async def use_session(config_path, session_path):
 async def run(config):
     from .collector import collect
     from .media_store import MediaStore
+    from .policy import CapturePolicy
     archive = Archive(config["database_path"])
+    archive.policy = CapturePolicy(archive)
     archive.media = MediaStore(archive,config)
     archive.set_connected(False)
     server = make_server(archive, config["token"], int(config.get("port", 8765)))

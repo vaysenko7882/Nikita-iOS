@@ -13,6 +13,7 @@ class Archive:
     def __init__(self, path: str | Path):
         self.path = str(path)
         self.media = None
+        self.policy = None
         Path(self.path).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self.connect() as db:
             db.executescript("""
@@ -77,6 +78,8 @@ class Archive:
         if snapshot["peer_type"] not in ("user", "chat", "channel") or snapshot["message_id"] <= 0:
             raise ValueError("Invalid cloud message")
         key = (snapshot["peer_type"], snapshot["peer_id"], snapshot["message_id"])
+        if self.policy is not None and not self.policy.allows(key[0],key[1]):
+            return
         payload = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -115,6 +118,8 @@ class Archive:
                     db.execute("INSERT OR REPLACE INTO meta VALUES('unknown_deletions', ?)", (str(value),))
                 for peer_type, peer_id, payload, already_deleted in rows:
                     if already_deleted:
+                        continue
+                    if self.policy is not None and not self.policy.allows(peer_type,peer_id):
                         continue
                     event = {**json.loads(payload), "kind": "delete", "captured_at": captured_at}
                     self._urgent_media(db,event.get("media"))

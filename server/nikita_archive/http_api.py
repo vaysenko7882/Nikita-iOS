@@ -1,4 +1,4 @@
-"""Read-only authenticated API, bound to loopback behind Caddy HTTPS."""
+"""Authenticated journal/media reads and capture-policy updates behind HTTPS."""
 import hmac
 import hashlib
 import json
@@ -12,7 +12,7 @@ def make_server(archive, token: str, port: int = 8765):
         raise ValueError("Use a random API token of at least 32 characters")
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "NikitaArchive/3"
+        server_version = "CodeGramArchive/4"
 
         def log_message(self, *args):
             pass  # Never log request paths, account identifiers or credentials.
@@ -98,12 +98,55 @@ def make_server(archive, token: str, port: int = 8765):
         def do_HEAD(self):
             self.do_GET()
 
-        def do_GET(self):
+        def authorized(self):
             value = self.headers.get("Authorization", "")
-            if not hmac.compare_digest(value.encode(), ("Bearer " + token).encode()):
+            return hmac.compare_digest(value.encode(), ("Bearer " + token).encode())
+
+        def account_id(self):
+            with archive.connect() as db:
+                return int(archive._meta(db,"account_id","0"))
+
+        def do_PUT(self):
+            from .policy import PolicyConflict
+            if not self.authorized():
+                self.send_json(401,{"error":"unauthorized"}); return
+            if urlsplit(self.path).path!="/v1/policy" or archive.policy is None:
+                self.send_json(404,{"error":"not_found"}); return
+            if self.headers.get("X-CodeGram-Account-ID")!=str(self.account_id()):
+                self.send_json(403,{"error":"account_mismatch"}); return
+            try:
+                size = int(self.headers.get("Content-Length","0"))
+                if not 0<size<=256*1024 or self.headers.get("Transfer-Encoding") is not None:
+                    self.send_json(413,{"error":"invalid_size"}); return
+                raw = self.rfile.read(size)
+                if len(raw)!=size: raise ValueError("Incomplete policy")
+                result = archive.policy.update(json.loads(raw))
+                self.send_json(200,{**result,"account_id":self.account_id(),"server_version":4})
+            except PolicyConflict:
+                self.send_json(409,{"error":"policy_changed"})
+            except (ValueError,TypeError,UnicodeError):
+                self.send_json(400,{"error":"invalid_policy"})
+            except Exception:
+                self.send_json(503,{"error":"archive_unavailable"})
+
+        def do_GET(self):
+            if not self.authorized():
                 self.send_json(401, {"error": "unauthorized"})
                 return
             route = urlsplit(self.path)
+            if route.path in ("/v1/policy","/v1/storage"):
+                try:
+                    query = parse_qs(route.query,max_num_fields=8)
+                    if route.path=="/v1/policy" and archive.policy is not None:
+                        result = archive.policy.current(include_dialogs=True,query=query.get("q",[""])[0])
+                    elif route.path=="/v1/storage" and archive.media is not None:
+                        result = archive.media.storage()
+                    else:
+                        self.send_json(404,{"error":"not_found"}); return
+                    self.send_json(200,{**result,"account_id":self.account_id(),"server_id":archive.server_id,"server_version":4})
+                except Exception:
+                    self.send_json(503,{"error":"archive_unavailable"})
+                return
             if route.path.startswith("/v1/media/"):
                 try:
                     self.media(route.path)

@@ -35,7 +35,27 @@ FILES = [
     "submodules/TelegramUI/Components/Chat/ChatMessageInstantVideoItemNode/Sources/ChatMessageInstantVideoItemNode.swift",
     "submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/StringForMessageTimestampStatus.swift",
 ]
+FILES += [
+    "submodules/TelegramCore/Sources/ApiUtils/TelegramUser.swift",
+    "submodules/TelegramCore/Sources/ApiUtils/ApiGroupOrChannel.swift",
+    "submodules/TelegramPresentationData/Sources/LocalFeatureStrings.swift",
+    "submodules/Display/Source/CodeGramDeletedAppearance.swift",
+    "submodules/SettingsUI/Sources/CodeGramSettingsControllers.swift",
+    "submodules/SettingsUI/Sources/CodeGramArchiveSettings.swift",
+    "submodules/SettingsUI/Sources/CodeGramPeerAppearanceController.swift",
+    "submodules/TelegramCore/Sources/Nikita/CodeGramPeerAppearance.swift",
+    "submodules/AvatarNode/Sources/AvatarNode.swift",
+    "submodules/TelegramCore/Sources/SyncCore/SyncCore_TelegramUser.swift",
+    "submodules/TelegramCore/Sources/SyncCore/SyncCore_TelegramGroup.swift",
+    "submodules/TelegramCore/Sources/SyncCore/SyncCore_TelegramChannel.swift",
+    "submodules/TelegramCore/Sources/Settings/GhostModeSettings.swift",
+    "submodules/TelegramCore/Sources/Utils/MessageUtils.swift",
+    "submodules/TelegramCore/Sources/Utils/PeerUtils.swift",
+    "submodules/PlatformRestrictionMatching/Sources/PlatformRestrictionMatching.swift",
+    "submodules/TelegramUI/Components/Stories/StoryContainerScreen/Sources/StoryItemSetContainerComponent.swift",
+]
 for relative in FILES:
     subprocess.run(["xcrun", "swiftc", "-frontend", "-parse", str(ROOT / relative)], check=True)
 print(f"Swift syntax parsed: {len(FILES)} files. Full typechecking is performed by the app build.")
+
 

@@ -432,7 +432,7 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
             .nikitaHeader(strings.madgram.quickSection),
             .ghostQuick(strings.madgram.quickGhost, ghostModeSettings.isEnabled),
             .archiveQuick(strings.madgram.quickArchive, localArchiveSettings.keepAcrossLaunches && localArchiveSettings.saveDeletedMessages && localArchiveSettings.saveEditedVersions),
-            .nikitaTools("VPS и VoiceChanger"),
+            .nikitaTools("CodeGram · настройки"),
             .nikitaInfo(strings.madgram.quickInfo),
             .privacyHeader(strings.madgram.privacySection),
             .ghostMode(strings.ghostMode.title, ghostModeSettings.isEnabled ? strings.ghostMode.on : strings.ghostMode.off),

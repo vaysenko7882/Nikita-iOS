@@ -41,8 +41,51 @@ public final class NikitaSettingsStore {
         get { return NikitaVoiceEffect(rawValue: self.defaults.string(forKey: "nikita.voiceEffect") ?? "off") ?? .off }
         set {
             self.defaults.set(newValue.rawValue, forKey: "nikita.voiceEffect")
+            self.defaults.removeObject(forKey: "codegram.voice.configuration")
             NotificationCenter.default.post(name: Self.changed, object: nil)
         }
+    }
+
+    public var voiceConfiguration: NikitaVoiceConfiguration {
+        get {
+            if let data = self.defaults.data(forKey: "codegram.voice.configuration"),
+                let value = try? JSONDecoder().decode(NikitaVoiceConfiguration.self, from: data) { return value.normalized }
+            return .preset(self.voiceEffect)
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue.normalized) {
+                self.defaults.set(data, forKey: "codegram.voice.configuration")
+                NotificationCenter.default.post(name: Self.changed, object: nil)
+            }
+        }
+    }
+
+    public var voicePresets: [CodeGramVoicePreset] {
+        get {
+            return self.defaults.data(forKey: "codegram.voice.presets").flatMap {
+                try? JSONDecoder().decode([CodeGramVoicePreset].self, from: $0)
+            } ?? []
+        }
+        set {
+            if let data = try? JSONEncoder().encode(Array(newValue.prefix(24))) {
+                self.defaults.set(data, forKey: "codegram.voice.presets")
+            }
+        }
+    }
+
+    public var allowsProtectedExport: Bool {
+        get { return self.defaults.bool(forKey: "codegram.allowProtectedExport") }
+        set { self.defaults.set(newValue, forKey: "codegram.allowProtectedExport"); NotificationCenter.default.post(name: Self.changed, object: nil) }
+    }
+
+    public var allowsRestrictedContent: Bool {
+        get { return self.defaults.bool(forKey: "codegram.allowRestrictedContent") }
+        set { self.defaults.set(newValue, forKey: "codegram.allowRestrictedContent"); NotificationCenter.default.post(name: Self.changed, object: nil) }
+    }
+
+    public var keepsEphemeralMedia: Bool {
+        get { return self.defaults.bool(forKey: "codegram.keepsEphemeralMedia") }
+        set { self.defaults.set(newValue, forKey: "codegram.keepsEphemeralMedia"); NotificationCenter.default.post(name: Self.changed, object: nil) }
     }
 
     public var extendArchiveInBackground: Bool {

@@ -15,6 +15,10 @@ MAX_MEDIA_SIZE = 8 * 1024**3
 BLOB_ID = re.compile(r"^[a-f0-9]{64}$")
 
 
+class CapturePaused(Exception):
+    pass
+
+
 class MediaStore:
     def __init__(self, archive, config):
         self.archive = archive
@@ -37,7 +41,39 @@ class MediaStore:
                 CREATE TABLE IF NOT EXISTS media_catalog(
                     original_id INTEGER NOT NULL, kind TEXT NOT NULL, descriptor TEXT NOT NULL,
                     PRIMARY KEY(original_id,kind));
+                CREATE TABLE IF NOT EXISTS media_sources(
+                    id TEXT NOT NULL,peer_type TEXT NOT NULL,peer_id INTEGER NOT NULL,message_id INTEGER NOT NULL,
+                    PRIMARY KEY(id,peer_type,peer_id,message_id));
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(media_assets)")}
+            if "category" not in columns:
+                db.execute("ALTER TABLE media_assets ADD COLUMN category TEXT NOT NULL DEFAULT 'files'")
+            from .policy import source_peer
+            if db.execute("SELECT COUNT(*) FROM media_sources").fetchone()[0]==0:
+                for identifier,request in db.execute("SELECT id,request FROM media_assets").fetchall():
+                    source = source_peer(json.loads(request).get("source"))
+                    if source: db.execute("INSERT OR IGNORE INTO media_sources VALUES(?,?,?,?)",(identifier,*source))
+            if not archive._meta(db,"storage_categories_v4",""):
+                for descriptor, in db.execute("SELECT descriptor FROM media_catalog").fetchall():
+                    item = json.loads(descriptor)
+                    category = "photos" if item.get("kind")=="photo" else "voice" if item.get("voice") else "round_video" if item.get("round_video") else "stickers" if item.get("sticker") or item.get("custom_emoji") else "animations" if item.get("animated") else "audio" if item.get("audio") or item.get("mime_type","").startswith("audio/") else "videos" if item.get("video") or item.get("mime_type","").startswith("video/") else "files"
+                    asset = item.get("asset") or {}
+                    db.execute("UPDATE media_assets SET category=? WHERE id=?",(category,asset.get("blob_id","")))
+                    previews = [item.get("preview")] + item.get("videos",[]) + item.get("video_thumbnails",[])
+                    for preview in previews:
+                        if isinstance(preview,dict): db.execute("UPDATE media_assets SET category='thumbnails' WHERE id=?",(preview.get("blob_id",""),))
+                db.execute("INSERT OR REPLACE INTO meta VALUES('storage_categories_v4','1')")
+
+    def permitted(self, identifier):
+        if self.archive.policy is None: return True
+        with self.archive.connect() as db:
+            sources = db.execute("SELECT DISTINCT peer_type,peer_id FROM media_sources WHERE id=?",(identifier,)).fetchall()
+        return any(self.archive.policy.allows(kind,peer_id) for kind,peer_id in sources)
+
+    def set_category(self, identifier, category):
+        if category not in ("photos","videos","voice","round_video","stickers","animations","audio","files","thumbnails"): return
+        with self.archive.connect() as db:
+            db.execute("UPDATE media_assets SET category=? WHERE id=?",(category,identifier))
 
     def recover(self):
         with self.archive.connect() as db:
@@ -82,6 +118,9 @@ class MediaStore:
                 attempts=CASE WHEN media_assets.state='failed' THEN 0 ELSE media_assets.attempts END,
                 retry_at=CASE WHEN media_assets.state='failed' THEN 0 ELSE media_assets.retry_at END""",
                 (identifier, json.dumps(request), size, mime, priority))
+            from .policy import source_peer
+            source = source_peer(request.get("source"))
+            if source: db.execute("INSERT OR IGNORE INTO media_sources VALUES(?,?,?,?)",(identifier,*source))
         return {"blob_id": identifier, "size": size}
 
     def catalog(self, descriptor):
@@ -95,10 +134,13 @@ class MediaStore:
         with self.archive.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             maximum = 16*1024**2 if small_only else MAX_MEDIA_SIZE
-            candidates = db.execute("SELECT id,request,size,mime,attempts FROM media_assets WHERE state='pending' AND retry_at<=? AND size<=? ORDER BY priority DESC,size,rowid",
+            candidates = db.execute("SELECT id,request,size,mime,attempts FROM media_assets WHERE state IN ('pending','paused_policy') AND retry_at<=? AND size<=? ORDER BY priority DESC,size,rowid",
                 (time.time(), maximum))
             available = max(0, shutil.disk_usage(self.root).free - self.reserve - sum(self.reservations.values()))
             for identifier, request, size, mime, attempts in candidates:
+                if not self.permitted(identifier):
+                    db.execute("UPDATE media_assets SET state='paused_policy',error='paused_by_policy' WHERE id=? AND state!='paused_policy'",(identifier,))
+                    continue
                 partial = self.path(identifier, partial=True)
                 offset = partial.stat().st_size if partial.exists() else 0
                 remaining = max(0, size - offset)
@@ -138,6 +180,7 @@ class MediaStore:
     async def download(self, client, job):
         if await asyncio.to_thread(self.restore_published,job["id"],job["size"]):
             return
+        if not self.permitted(job["id"]): raise CapturePaused()
         from telethon.extensions import BinaryReader
         from telethon import types
         temporary = self.path(job["id"], partial=True)
@@ -168,6 +211,7 @@ class MediaStore:
                         file_size=job["size"], dc_id=request["dc_id"]):
                     if not data:
                         continue
+                    if not self.permitted(job["id"]): raise CapturePaused()
                     if offset + len(data) > job["size"]:
                         raise ValueError("Attachment exceeded its declared size")
                     if shutil.disk_usage(self.root).free < len(data) + self.reserve:
@@ -186,6 +230,7 @@ class MediaStore:
                     digest.update(data)
             return digest.hexdigest()
         digest = await asyncio.to_thread(checksum)
+        if not self.permitted(job["id"]): raise CapturePaused()
         self.complete(job, digest)
 
     async def worker(self, client, small_only=False):
@@ -200,6 +245,9 @@ class MediaStore:
                 with self.archive.connect() as db:
                     db.execute("UPDATE media_assets SET state='pending' WHERE id=? AND state='downloading'", (job["id"],))
                 raise
+            except CapturePaused:
+                with self.archive.connect() as db:
+                    db.execute("UPDATE media_assets SET state='paused_policy',error='paused_by_policy' WHERE id=?",(job["id"],))
             except Exception as error:
                 # A queued reference may expire while Telegram still has the
                 # message. Refresh that reference once; deletion is not treated
@@ -248,3 +296,22 @@ class MediaStore:
         return dict(enabled=self.enabled, ready=counts.get("ready",0),
             pending=counts.get("pending",0)+counts.get("downloading",0), failed=counts.get("failed",0),
             waiting_for_disk=waiting, stored_bytes=total, free_bytes=shutil.disk_usage(self.root).free)
+
+    def storage(self):
+        with self.archive.connect() as db:
+            categories = [dict(category=r[0],bytes=r[1],count=r[2]) for r in db.execute(
+                "SELECT category,SUM(size),COUNT(*) FROM media_assets WHERE state='ready' GROUP BY category ORDER BY SUM(size) DESC")]
+            deleted = db.execute("""SELECT COALESCE(SUM(a.size),0) FROM media_assets a WHERE a.state='ready' AND EXISTS(
+                SELECT 1 FROM media_sources s JOIN messages m ON m.peer_type=s.peer_type AND m.peer_id=s.peer_id AND m.message_id=s.message_id
+                WHERE s.id=a.id AND m.deleted=1)""").fetchone()[0]
+            paused = db.execute("SELECT COUNT(*) FROM media_assets WHERE state='paused_policy'").fetchone()[0]
+            deleted_count = db.execute("SELECT COUNT(*) FROM messages WHERE deleted=1").fetchone()[0]
+            revisions = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        database_bytes = sum(path.stat().st_size for path in (Path(self.archive.path),Path(self.archive.path+'-wal')) if path.exists())
+        partial_bytes = 0
+        for path in self.root.glob("*.part"):
+            try: partial_bytes += path.stat().st_size
+            except FileNotFoundError: pass  # A worker may atomically publish the file.
+        stats = self.stats()
+        return {**stats,"partial_bytes":partial_bytes,"total_bytes":stats["stored_bytes"]+partial_bytes+database_bytes,"categories":categories,"deleted_bytes":deleted,"database_bytes":database_bytes,
+            "paused_by_policy":paused,"deleted_messages":deleted_count,"revision_count":revisions,"reserved_bytes":self.reserve}

@@ -4,26 +4,25 @@ import AsyncDisplayKit
 import SwiftSignalKit
 
 private func nikitaStatusBadge() -> UIImage {
-    let size = CGSize(width: 93.0, height: 22.0)
+    let size = CGSize(width: 121.0, height: 24.0)
     return UIGraphicsImageRenderer(size: size).image { renderer in
         let bounds = CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)
-        let capsule = UIBezierPath(roundedRect: bounds, cornerRadius: 11.0)
-        UIColor(white: 0.10, alpha: 0.96).setFill()
-        capsule.fill()
-        UIColor(white: 1.0, alpha: 0.16).setStroke()
+        let capsule = UIBezierPath(roundedRect: bounds, cornerRadius: 12.0)
+        renderer.cgContext.saveGState()
+        capsule.addClip()
+        let colors = [UIColor(white: 0.20, alpha: 1.0).cgColor, UIColor(white: 0.055, alpha: 1.0).cgColor] as CFArray
+        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0.0, 1.0]) {
+            renderer.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0.0, y: 24.0), options: [])
+        }
+        renderer.cgContext.restoreGState()
+        UIColor(white: 1.0, alpha: 0.22).setStroke()
         capsule.lineWidth = 0.5
         capsule.stroke()
-        let mark = CGRect(x: 10.0, y: 4.0, width: 14.0, height: 14.0)
-        UIColor(red: 0.12, green: 0.62, blue: 0.94, alpha: 1.0).setFill()
-        UIBezierPath(roundedRect: mark, cornerRadius: 4.0).fill()
-        ("N" as NSString).draw(at: CGPoint(x: 12.6, y: 4.4), withAttributes: [
-            .font: UIFont.systemFont(ofSize: 10.5, weight: .bold), .foregroundColor: UIColor.white
+        codegramBrandMark()?.draw(in: CGRect(x: 10.0, y: 4.0, width: 16.0, height: 16.0))
+        ("CodeGram" as NSString).draw(at: CGPoint(x: 33.0, y: 5.0), withAttributes: [
+            .font: UIFont.systemFont(ofSize: 11.0, weight: .semibold), .foregroundColor: UIColor.white,
+            .kern: 0.25
         ])
-        ("НИКИТА" as NSString).draw(at: CGPoint(x: 29.0, y: 5.0), withAttributes: [
-            .font: UIFont.systemFont(ofSize: 10.0, weight: .bold), .foregroundColor: UIColor.white,
-            .kern: 0.4
-        ])
-        _ = renderer
     }
 }
 

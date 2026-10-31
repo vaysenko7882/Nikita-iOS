@@ -15,6 +15,17 @@ import ComponentFlow
 import AvatarStoryIndicatorComponent
 import DirectMediaImageCache
 
+private func codegramLocalAvatar(peer: EnginePeer?, postbox: Postbox) -> TelegramMediaImageRepresentation? {
+    guard let peer else { return nil }
+    let appearance = CodeGramPeerAppearanceStore.shared.appearance(peer.id)
+    guard let data = CodeGramPeerAppearanceStore.shared.imageData(appearance) else { return nil }
+    let resource = LocalFileMediaResource(fileId: appearance.resourceId, size: Int64(data.count))
+    if postbox.mediaBox.completedResourcePath(id: resource.id) == nil {
+        postbox.mediaBox.storeResourceData(resource.id, data: data, synchronous: true)
+    }
+    return TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: 512, height: 512), resource: resource, progressiveSizes: [], immediateThumbnailData: nil)
+}
+
 private let deletedIcon = UIImage(bundleImageName: "Avatar/DeletedIcon")?.precomposed()
 private let phoneIcon = generateTintedImage(image: UIImage(bundleImageName: "Avatar/PhoneIcon"), color: .white)
 public let savedMessagesIcon = generateTintedImage(image: UIImage(bundleImageName: "Avatar/SavedMessagesIcon"), color: .white)
@@ -643,6 +654,8 @@ public final class AvatarNode: ASDisplayNode {
                 representation = peer?.smallProfileImage
             }
             
+            if overrideImage == nil, let local = codegramLocalAvatar(peer: peer, postbox: postbox) { representation = local }
+
             let updatedState: AvatarNodeState = .peerAvatar(peer?.id ?? EnginePeer.Id(0), peer?.nameColor, peer?.displayLetters ?? [], representation, clipStyle, cutoutRect)
             if updatedState != self.state || overrideImage != self.overrideImage || theme !== self.theme {
                 self.state = updatedState
@@ -723,6 +736,10 @@ public final class AvatarNode: ASDisplayNode {
             displayDimensions: CGSize = CGSize(width: 60.0, height: 60.0),
             storeUnrounded: Bool = false
         ) {
+            if peer.map({ CodeGramPeerAppearanceStore.shared.appearance($0.id).revision != 0 }) ?? false {
+                self.setPeer(context: genericContext, account: account, theme: theme, peer: peer, authorOfMessage: authorOfMessage, overrideImage: overrideImage, emptyColor: emptyColor, clipStyle: clipStyle, synchronousLoad: synchronousLoad, displayDimensions: displayDimensions, storeUnrounded: storeUnrounded)
+                return
+            }
             let smallProfileImage = peer?.smallProfileImage
             let params = Params(
                 peerId: peer?.id,
@@ -850,6 +867,8 @@ public final class AvatarNode: ASDisplayNode {
                 representation = peer?.smallProfileImage
             }
             
+            if overrideImage == nil, let local = codegramLocalAvatar(peer: peer, postbox: (account ?? genericContext.account).postbox) { representation = local }
+
             let updatedState: AvatarNodeState = .peerAvatar(peer?.id ?? EnginePeer.Id(0), peer?.nameColor, peer?.displayLetters ?? [], representation, clipStyle, cutoutRect)
             if updatedState != self.state || overrideImage != self.overrideImage || theme !== self.theme {
                 self.state = updatedState

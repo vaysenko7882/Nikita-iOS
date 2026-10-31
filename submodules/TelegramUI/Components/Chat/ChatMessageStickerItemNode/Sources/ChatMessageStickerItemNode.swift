@@ -1016,12 +1016,13 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                     }
                     
                     strongSelf.appliedForwardInfo = ChatMessageAppliedForwardInfo(messageId: item.message.id, source: forwardSource, authorSignature: forwardAuthorSignature)
-                    strongSelf.contextSourceNode.contentNode.alpha = item.message.isArchivedDeletedMessage ? 0.48 : 1.0
+                    codegramApplyDeletedAppearance(root: strongSelf.contextSourceNode.contentNode.layer, rect: strongSelf.contextSourceNode.contentRect, isDeleted: item.message.isArchivedDeletedMessage)
                     strongSelf.updateAccessibilityData(accessibilityData)
                     
                     strongSelf.updateAttachedDateHeader(hasDate: dateHeaderAtBottom.hasDate, hasPeer: dateHeaderAtBottom.hasTopic)
                     
                     transition.updateFrame(node: strongSelf.imageNode, frame: updatedImageFrame)
+                    codegramApplyDeletedAppearance(root: strongSelf.contextSourceNode.contentNode.layer, rect: updatedImageFrame, isDeleted: item.message.isArchivedDeletedMessage)
                     strongSelf.enableSynchronousImageApply = true
                     imageApply()
                     strongSelf.enableSynchronousImageApply = false
@@ -2282,3 +2283,4 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
         return nil
     }
 }
+

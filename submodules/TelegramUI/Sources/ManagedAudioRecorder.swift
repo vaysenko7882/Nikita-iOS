@@ -219,7 +219,11 @@ final class ManagedAudioRecorderContext {
         self.oggWriter = TGOggOpusWriter()
         let savedEffect = resumeData.flatMap { try? JSONSerialization.jsonObject(with: $0.resumeData) as? [String: Any] }
             .flatMap { $0["nikitaVoiceEffect"] as? String }.flatMap(NikitaVoiceEffect.init(rawValue:))
-        self.voiceProcessor = NikitaVoiceProcessor(effect: savedEffect ?? NikitaSettingsStore.shared.voiceEffect)
+        let savedConfiguration = resumeData.flatMap { try? JSONSerialization.jsonObject(with: $0.resumeData) as? [String: Any] }
+            .flatMap { $0["codegramVoiceConfiguration"] as? String }
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode(NikitaVoiceConfiguration.self, from: $0) }
+        self.voiceProcessor = NikitaVoiceProcessor(configuration: savedConfiguration ?? savedEffect.map(NikitaVoiceConfiguration.preset) ?? NikitaSettingsStore.shared.voiceConfiguration)
         
         if let resumeData {
             self.dataItem = TGDataItem(data: resumeData.compressedData)
@@ -570,6 +574,9 @@ final class ManagedAudioRecorderContext {
         
         if var stateDict = state as? [String: Any] {
             stateDict["nikitaVoiceEffect"] = self.voiceProcessor.effect.rawValue
+            if let data = try? JSONEncoder().encode(self.voiceProcessor.configuration), let text = String(data: data, encoding: .utf8) {
+                stateDict["codegramVoiceConfiguration"] = text
+            }
             do {
                 let jsonData = try JSONSerialization.data(withJSONObject: stateDict, options: [])
                 self.resumeData = jsonData

@@ -3,12 +3,13 @@ import hashlib
 import json
 import time
 
-from telethon import TelegramClient, events, types
+from telethon import TelegramClient, events, types, functions
 from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeFilename, DocumentAttributeVideo
 
 from .archive import Archive
 from .media_capture import MediaCapture
 from .media_store import MediaStore
+from .policy import CapturePolicy
 
 
 def peer(value):
@@ -60,12 +61,14 @@ def snapshot(message):
 
 def client_for(config):
     return TelegramClient(str(config["session_path"]), int(config["api_id"]), config["api_hash"],
-        device_model="Nikita Archive VPS", app_version="3.0", system_version="Linux",
+        device_model="CodeGram Archive VPS", app_version="4.0", system_version="Linux",
         sequential_updates=True, auto_reconnect=True, catch_up=True)
 
 
 async def collect(config):
     archive = Archive(config["database_path"])
+    policy = CapturePolicy(archive)
+    archive.policy = policy
     client = client_for(config)
     media = MediaStore(archive,config)
     archive.media = media
@@ -73,7 +76,7 @@ async def collect(config):
 
     def retain(message, seed=False):
         item = snapshot(message)
-        if item:
+        if item and policy.allows(item["peer_type"],item["peer_id"]):
             try:
                 item["media"] = capture.capture(message,seed=seed)
             except Exception:
@@ -84,7 +87,42 @@ async def collect(config):
                     db.execute("INSERT OR REPLACE INTO meta VALUES('media_capture_errors',?)",(str(value),))
             archive.observe(item,seed=seed)
 
+    def remember(dialog):
+        entity = dialog.entity
+        identifier = int(entity.id)
+        if isinstance(entity,types.User):
+            kind,peer_type = "private","user"
+            title = " ".join(part for part in (entity.first_name,entity.last_name) if part)
+        elif isinstance(entity,types.Chat):
+            kind,peer_type,title = "groups","chat",entity.title
+        elif isinstance(entity,types.Channel):
+            kind,peer_type,title = ("groups" if entity.megagroup else "channels"),"channel",entity.title
+        else: return
+        archived = bool(getattr(dialog,"archived",False) or getattr(dialog,"folder_id",None)==1)
+        policy.register(peer_type,identifier,kind,title,archived)
+
+    async def refresh_dialogs():
+        async for dialog in client.iter_dialogs(limit=None):
+            remember(dialog)
+
+    async def ensure_peer(event):
+        kind,identifier = peer(event.message.peer_id)
+        if kind is None or policy.known(kind,identifier): return
+        # Folder membership is fetched before the first capture of a new peer.
+        # A failed lookup leaves it excluded instead of recording an archived chat.
+        try:
+            entity = await event.get_chat()
+            target = await client.get_input_entity(event.message.peer_id)
+            state = await client(functions.messages.GetPeerDialogsRequest([types.InputDialogPeer(target)]))
+            dialog = next((item for item in state.dialogs if peer(item.peer)==(kind,identifier)),None)
+            if dialog is not None:
+                from types import SimpleNamespace
+                remember(SimpleNamespace(entity=entity,folder_id=getattr(dialog,"folder_id",None)))
+        except Exception:
+            return
+
     async def observe(event):
+        await ensure_peer(event)
         retain(event.message)
 
     client.add_event_handler(observe, events.NewMessage())
@@ -101,6 +139,21 @@ async def collect(config):
 
     client.add_event_handler(deleted, events.MessageDeleted())
 
+    async def folders_changed(update):
+        for item in update.folder_peers:
+            kind,identifier = peer(item.peer)
+            if kind is not None: policy.set_folder(kind,identifier,item.folder_id==1)
+
+    client.add_event_handler(folders_changed,events.Raw(types.UpdateFolderPeers))
+
+    async def metadata_monitor():
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await refresh_dialogs()
+            except Exception:
+                pass
+
     async def connection_monitor():
         while True:
             archive.set_connected(client.is_connected())
@@ -115,9 +168,11 @@ async def collect(config):
     media.recover()
     downloads = [asyncio.create_task(media.worker(client,small_only=(index==0))) for index in range(media.workers)]
     monitor = asyncio.create_task(connection_monitor())
+    metadata = asyncio.create_task(metadata_monitor())
     try:
         # Register handlers BEFORE catch-up. The baseline is only what still
         # exists now; it cannot reconstruct versions already lost before setup.
+        await refresh_dialogs()
         await client.catch_up()
         async for dialog in client.iter_dialogs(limit=int(config.get("seed_dialogs", 100))):
             async for message in client.iter_messages(dialog.entity, limit=int(config.get("seed_messages", 100))):
@@ -125,8 +180,9 @@ async def collect(config):
         await client.run_until_disconnected()
     finally:
         monitor.cancel()
+        metadata.cancel()
         for task in downloads:
             task.cancel()
-        await asyncio.gather(monitor,*downloads, return_exceptions=True)
+        await asyncio.gather(monitor,metadata,*downloads, return_exceptions=True)
         archive.set_connected(False)
         await client.disconnect()

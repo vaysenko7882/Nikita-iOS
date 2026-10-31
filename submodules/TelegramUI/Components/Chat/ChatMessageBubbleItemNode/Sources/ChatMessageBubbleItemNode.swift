@@ -3957,7 +3957,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         
         strongSelf.currentInputParams = inputParams
         // Assign both states: these nodes are reused for ordinary messages too.
-        strongSelf.mainContainerNode.alpha = item.message.isArchivedDeletedMessage ? 0.48 : 1.0
+        // Deleted-message styling is applied after the final bubble geometry is known.
         strongSelf.currentApplyParams = applyInfo
         strongSelf.contentLayoutInsets = layoutInsets
         
@@ -5792,6 +5792,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                 strongSelf.updateAbsoluteRect(rect, within: size)
             }
         }
+
+        codegramApplyDeletedAppearance(root: strongSelf.mainContainerNode.layer, rect: backgroundFrame, isDeleted: item.message.isArchivedDeletedMessage)
 
         // Outside both branches on purpose: the animated one only touches the background when the
         // frame CHANGED, and a tear can move while the bubble does not.
@@ -8106,3 +8108,4 @@ public final class NameNavigateButton: HighlightableButton {
         }
     }
 }
+

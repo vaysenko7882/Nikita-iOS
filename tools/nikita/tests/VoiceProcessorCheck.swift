@@ -3,7 +3,11 @@ import Foundation
 @main
 struct VoiceProcessorCheck {
     static func render(_ input: [Int16], effect: NikitaVoiceEffect, chunks: [Int]) -> [Int16] {
-        let processor = NikitaVoiceProcessor(effect: effect)
+        return render(input, configuration: .preset(effect), chunks: chunks)
+    }
+
+    static func render(_ input: [Int16], configuration: NikitaVoiceConfiguration, chunks: [Int]) -> [Int16] {
+        let processor = NikitaVoiceProcessor(configuration: configuration)
         var result = input
         var offset = 0
         var index = 0
@@ -53,6 +57,22 @@ struct VoiceProcessorCheck {
                 print("\(effect.rawValue): 300 Hz → \(frequency) Hz; chunk invariance and duration passed")
             }
         }
-        print("VoiceChanger: all PCM checks passed")
+        var dry = NikitaVoiceConfiguration.naturalDeep
+        dry.mix = 0
+        precondition(render(input, configuration: dry, chunks: [137]) == input, "Dry mix must be bit-identical")
+        let presets: [NikitaVoiceConfiguration] = [.naturalDeep, .radio, .clearHigh, .spacious,
+            NikitaVoiceConfiguration(pitchSemitones: 12, tone: 1, robotAmount: 1, robotFrequency: 160, echoAmount: 0.6, echoDelayMilliseconds: 400, gainDecibels: 12, mix: 0.73, compression: 1, gate: 0.08)]
+        for configuration in presets {
+            let whole = render(input, configuration: configuration, chunks: [input.count])
+            precondition(whole == render(input, configuration: configuration, chunks: [1, 137, 960, 511]), "Advanced effect changed with callback boundaries")
+            precondition(whole.count == input.count && whole != input, "Advanced effect must retain duration and alter audio")
+            precondition(render([Int16](repeating: 0, count: 16000), configuration: configuration, chunks: [960]).allSatisfy { $0 == 0 }, "Silence produced nonzero PCM")
+            let encoded = try! JSONEncoder().encode(configuration)
+            precondition((try! JSONDecoder().decode(NikitaVoiceConfiguration.self, from: encoded)).normalized == configuration, "Preset persistence changed settings")
+        }
+        let bounded = NikitaVoiceConfiguration(pitchSemitones: .infinity, tone: -.infinity, robotAmount: .nan, robotFrequency: -500, echoAmount: 5, echoDelayMilliseconds: 10000, gainDecibels: .nan, mix: .nan, compression: 10, gate: 2)
+        precondition(bounded.pitchSemitones == 0 && bounded.tone == 0 && bounded.robotAmount == 0 && bounded.robotFrequency == 20 && bounded.echoAmount == 0.6 && bounded.echoDelayMilliseconds == 400 && bounded.gainDecibels == 0 && bounded.mix == 1 && bounded.compression == 1 && bounded.gate == 0.08, "Untrusted/nonfinite settings escaped normalization")
+        _ = render([Int16.min, Int16.max, 0], configuration: bounded, chunks: [1])
+        print("VoiceChanger: legacy pitch, advanced DSP, silence, bounds, persistence, dry mix and chunk invariance passed")
     }
 }

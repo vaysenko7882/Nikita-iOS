@@ -7448,7 +7448,7 @@ public final class StoryItemSetContainerComponent: Component {
                             }
                             self.beginPictureInPicture()
                         })))
-                    } else if !component.slice.item.storyItem.isForwardingDisabled {
+                    } else if !component.slice.item.storyItem.isForwardingDisabled || NikitaSettingsStore.shared.allowsProtectedExport {
                         let saveText: String = component.strings.Story_Context_SaveToGallery
                         items.append(.action(ContextMenuActionItem(text: saveText, icon: { theme in
                             return generateTintedImage(image: UIImage(bundleImageName: accountUser.isPremium ? "Chat/Context Menu/Download" : "Chat/Context Menu/DownloadLocked"), color: theme.contextMenu.primaryColor)
@@ -7459,7 +7459,7 @@ public final class StoryItemSetContainerComponent: Component {
                                 return
                             }
                             
-                            if accountUser.isPremium {
+                            if accountUser.isPremium || NikitaSettingsStore.shared.allowsProtectedExport {
                                 self.requestSave()
                             } else {
                                 self.presentSaveUpgradeScreen()
@@ -7985,3 +7985,4 @@ private func optionsRateImage(rate: String, isLarge: Bool, color: UIColor = .whi
         UIGraphicsPopContext()
     })
 }
+

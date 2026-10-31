@@ -57,7 +57,7 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotIn(test_hash, capture.getvalue())
 
 class ArtifactTests(unittest.TestCase):
-    def artifact(self, folder, *, platform=2, name='Никита', cryptid=0, version='13.1.4', build_number='11'):
+    def artifact(self, folder, *, platform=2, name='CodeGram', cryptid=0, version='13.1.4', build_number='11'):
         # Tiny format fixtures only, never a runnable application or deliverable.
         info = {'CFBundleDisplayName': name, 'CFBundleIdentifier': 'personal.nikita.messenger', 'CFBundleExecutable': 'Client', 'MinimumOSVersion': '15.0'}
         info.update(CFBundleShortVersionString=version, CFBundleVersion=build_number)

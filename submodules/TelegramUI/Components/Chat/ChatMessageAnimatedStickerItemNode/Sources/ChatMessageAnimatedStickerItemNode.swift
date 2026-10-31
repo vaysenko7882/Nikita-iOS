@@ -1533,7 +1533,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     strongSelf.containerNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.contextSourceNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.contextSourceNode.contentNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
-                    strongSelf.contextSourceNode.contentNode.alpha = item.message.isArchivedDeletedMessage ? 0.48 : 1.0
+                    codegramApplyDeletedAppearance(root: strongSelf.contextSourceNode.contentNode.layer, rect: strongSelf.contextSourceNode.contentRect, isDeleted: item.message.isArchivedDeletedMessage)
                     
                     var transition: ContainedViewLayoutTransition = .immediate
                     if case let .System(duration, _) = animation {
@@ -1622,6 +1622,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     animation.animator.updateFrame(layer: strongSelf.imageNode.layer, frame: updatedContentFrame, completion: nil)
                     
                     strongSelf.contextSourceNode.contentRect = contextContentFrame
+                    codegramApplyDeletedAppearance(root: strongSelf.contextSourceNode.contentNode.layer, rect: contextContentFrame, isDeleted: item.message.isArchivedDeletedMessage)
                     strongSelf.containerNode.targetNodeForActivationProgressContentRect = strongSelf.contextSourceNode.contentRect
                     
                     var animationNodeFrame = updatedContentFrame.insetBy(dx: imageInset, dy: imageInset)
@@ -3328,3 +3329,4 @@ private func fontSizeForEmojiString(_ string: String) -> CGFloat {
     }
     return floor(basicSize * multiplier)
 }
+

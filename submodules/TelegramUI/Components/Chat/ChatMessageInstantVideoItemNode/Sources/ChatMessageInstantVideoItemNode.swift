@@ -645,7 +645,7 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
                     strongSelf.contextSourceNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.containerNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     strongSelf.contextSourceNode.contentNode.frame = CGRect(origin: CGPoint(), size: layoutSize)
-                    strongSelf.contextSourceNode.contentNode.alpha = item.message.isArchivedDeletedMessage ? 0.48 : 1.0
+                    codegramApplyDeletedAppearance(root: strongSelf.contextSourceNode.contentNode.layer, rect: strongSelf.contextSourceNode.contentRect, isDeleted: item.message.isArchivedDeletedMessage, circular: true)
                     strongSelf.messageAccessibilityArea.frame = CGRect(origin: CGPoint(), size: layoutSize)
                     
                     strongSelf.appliedParams = params
@@ -686,6 +686,7 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
                     strongSelf.interactiveVideoNode.view.disablesInteractiveTransitionGestureRecognizer = isPlaying
                     
                     strongSelf.contextSourceNode.contentRect = videoFrame
+                    codegramApplyDeletedAppearance(root: strongSelf.contextSourceNode.contentNode.layer, rect: videoFrame, isDeleted: item.message.isArchivedDeletedMessage, circular: true)
                     strongSelf.containerNode.targetNodeForActivationProgressContentRect = strongSelf.contextSourceNode.contentRect
                     
                     if !animating {
@@ -1521,3 +1522,4 @@ public class ChatMessageInstantVideoItemNode: ChatMessageItemView, ASGestureReco
         return self.interactiveVideoNode.frame
     }
 }
+

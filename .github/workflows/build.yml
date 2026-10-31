@@ -1,4 +1,4 @@
-name: Build Nikita IPA
+name: Build CodeGram IPA
 on:
   workflow_dispatch:
   push:
@@ -47,7 +47,7 @@ jobs:
       - name: Check source, server journal and voice effects
         run: |
           python3 -m unittest discover -s tools/nikita/tests -v
-          python3 -m pip install --disable-pip-version-check ./server
+          python3 -m pip install --disable-pip-version-check ./server Pillow==11.3.0
           python3 -m unittest discover -s server/tests -v
           bash -n server/install.sh
           python3 tools/nikita/check_swift.py
@@ -56,16 +56,16 @@ jobs:
           "$RUNNER_TEMP/nikita-voice-check"
       - name: Fetch pinned dependencies
         run: python3 tools/nikita/configure.py --submodules
-      - name: Compile Nikita for iPhone
+      - name: Compile CodeGram for iPhone
         id: compile
         run: bash tools/nikita/build.sh
       - name: Retain compiled IPA
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: Nikita-iPhone-${{ github.run_number }}
+          name: CodeGram-iPhone-${{ github.run_number }}
           path: |
-            build/nikita/Nikita.ipa
-            build/nikita/Nikita.ipa.sha256
+            build/nikita/CodeGram.ipa
+            build/nikita/CodeGram.ipa.sha256
             build/nikita/Build.json
           if-no-files-found: error
           retention-days: 14
