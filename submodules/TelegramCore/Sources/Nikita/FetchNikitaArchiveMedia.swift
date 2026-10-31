@@ -36,7 +36,7 @@ private final class NikitaMediaDownload: NSObject, URLSessionDataDelegate, @unch
     }
 
     func start(_ intervals: Signal<[(Range<Int64>, MediaBoxFetchPriority)], NoError>) {
-        self.queue.async {
+        self.queue.async { [self] in
             guard !self.stopped else { return }
             let config = URLSessionConfiguration.ephemeral
             config.httpShouldSetCookies = false
