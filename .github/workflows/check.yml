@@ -35,6 +35,7 @@ jobs:
           sudo xcode-select -s "/Applications/Xcode_${NIKITA_XCODE}.app/Contents/Developer"
           xcodebuild -version
           python3 tools/nikita/check_swift.py
+          python3 tools/nikita/check_archive_state.py
           xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift tools/nikita/tests/VoiceProcessorCheck.swift -o "$RUNNER_TEMP/nikita-voice-check"
           "$RUNNER_TEMP/nikita-voice-check"
           xcrun swiftc -frontend -parse submodules/TelegramCore/Sources/Settings/DeletedMessageArchiveSettings.swift

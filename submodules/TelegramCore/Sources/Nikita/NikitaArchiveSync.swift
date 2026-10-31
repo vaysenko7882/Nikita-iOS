@@ -7,6 +7,52 @@ struct NikitaRemoteArchiveState: Codable {
     var serverId: String = ""
     var cursor: Int64 = 0
     var pendingVersions: [String: [DeletedMessageArchiveIndexEntry]] = [:]
+
+    // Postbox's keyed decoder intentionally has no allKeys implementation.
+    // Swift's String-keyed Dictionary decoder calls it even for an empty map,
+    // so persist these references as an array of records instead of a map.
+    private struct PendingVersionEntry: Codable {
+        let key: String
+        let versions: [DeletedMessageArchiveIndexEntry]
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case endpoint, serverId, cursor, pendingVersionEntries
+        case pendingVersions // Legacy map: detect its presence, never decode it.
+    }
+
+    init() {
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint) ?? ""
+        self.serverId = try container.decodeIfPresent(String.self, forKey: .serverId) ?? ""
+        self.cursor = max(0, try container.decodeIfPresent(Int64.self, forKey: .cursor) ?? 0)
+        self.pendingVersions = [:]
+        if let entries = try container.decodeIfPresent([PendingVersionEntry].self, forKey: .pendingVersionEntries) {
+            for entry in entries {
+                self.pendingVersions[entry.key] = entry.versions
+            }
+        } else if container.contains(.pendingVersions) {
+            // An old installation can crash before the first page is imported.
+            // Replay its journal to rebuild references while keeping the local
+            // archive. Reading the legacy Dictionary itself would trap again.
+            self.serverId = ""
+            self.cursor = 0
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(self.endpoint, forKey: .endpoint)
+        try container.encode(self.serverId, forKey: .serverId)
+        try container.encode(self.cursor, forKey: .cursor)
+        let entries = self.pendingVersions.keys.sorted().map {
+            PendingVersionEntry(key: $0, versions: self.pendingVersions[$0] ?? [])
+        }
+        try container.encode(entries, forKey: .pendingVersionEntries)
+    }
 }
 
 struct NikitaRemoteArchiveEvent: Decodable {

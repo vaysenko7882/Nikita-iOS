@@ -38,6 +38,7 @@ jobs:
           python3 -m unittest discover -s server/tests -v
           bash -n server/install.sh
           python3 tools/nikita/check_swift.py
+          python3 tools/nikita/check_archive_state.py
           xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift tools/nikita/tests/VoiceProcessorCheck.swift -o "$RUNNER_TEMP/nikita-voice-check"
           "$RUNNER_TEMP/nikita-voice-check"
       - name: Fetch pinned dependencies
