@@ -1,5 +1,17 @@
 # CodeGram 14.0.0
 
+## Compiled release — 2026-10-31
+
+- CodeGram **14.0.0 (21)**, arm64 iPhone, iOS 15.0 or later, unsigned for the owner's signer.
+- Source: `5bf622693653c90ce9799ff38b6dfb5f9eb1cd79`.
+- Successful full build: https://github.com/vaysenko7882/Nikita-iOS/actions/runs/41210799767
+- IPA SHA256: `3f4484e701572de90927b6e014d917f80104b2b7aa92486d8cc15934627e2883` (72,258,097 bytes).
+- ZIP SHA256: `923ff42c2d22312cb90fab96fee239e766cbbc8a6374a7675eb1f75fa99a7872` (72,001,169 bytes).
+- CI passed: 11 build/tool tests, 55 server tests, 47 Swift syntax checks, the Postbox architecture guard, the production Postbox persistence regression harness and advanced/legacy voice PCM checks.
+- Full compile: **2018.210 seconds**; **6698 disk-cache hits / 9529 actions**, 1650 internal, 501 local, 680 worker. New cache saved under the existing toolchain key and this source SHA.
+- Compiler output, artifact digest, IPA sidecar/digest and both ZIP CRCs checked. Bundle ID and Keychain service preserved.
+- **Not runtime-tested:** no iPhone/simulator launch or interactive UI/animation verification was performed. Device acceptance checks below remain pending.
+
 Personal iPhone client, based on the existing Nikita/MadGram fork. The bundle ID
 `personal.nikita.messenger`, Keychain service and archive protocol/resource IDs
 are deliberately preserved so an update can retain the existing account/data.
