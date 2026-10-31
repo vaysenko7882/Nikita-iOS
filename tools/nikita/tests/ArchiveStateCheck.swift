@@ -24,8 +24,11 @@ enum ArchiveStateCheck {
         if CommandLine.arguments.contains("--legacy-crash") {
             let old = LegacyArchiveState(endpoint: "https://example.invalid", serverId: "epoch", cursor: 0,
                 pendingVersions: [:])
-            _ = PreferencesEntry(old)!.get(LegacyArchiveState.self)
-            fatalError("Legacy decode unexpectedly returned")
+            let entry = PreferencesEntry(old)!
+            print("legacy-state-encoded; entering Dictionary decoding")
+            fflush(stdout)
+            let decoded = entry.get(LegacyArchiveState.self)
+            exit(decoded == nil ? 3 : 0)
         }
 
         let empty = roundTrip(NikitaRemoteArchiveState())

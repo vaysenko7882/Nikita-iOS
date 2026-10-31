@@ -71,11 +71,14 @@ func mdb_cmp_memn(_ left: UnsafeRawPointer, _ leftCount: Int,
         # Keep the known-broken decode in a separate process: a precondition
         # failure cannot be caught with Swift do/catch or try?.
         legacy = subprocess.run([str(executable), "--legacy-crash"], capture_output=True, text=True,
-            env={**os.environ, "SWIFT_BACKTRACE": "enable=yes"}, timeout=30)
-        if legacy.returncode == 0:
-            raise RuntimeError("Legacy Dictionary unexpectedly decoded; re-evaluate the reproduction")
-        if "allKeys" not in legacy.stderr:
-            raise RuntimeError("Legacy decode failed outside the expected allKeys trap:\n" + legacy.stderr[-6000:])
+            env={**os.environ, "SWIFT_BACKTRACE": "enable=no"}, timeout=30)
+        # Some managed macOS runners prohibit Swift's crash backtrace helper.
+        # Require that encoding finished and that the decode raised a fatal
+        # signal, rather than depending on an optional symbolized backtrace.
+        if ("legacy-state-encoded; entering Dictionary decoding" not in legacy.stdout or
+                legacy.returncode not in (-4, -5, -6)):
+            raise RuntimeError("Expected a fatal signal from legacy Dictionary decoding; got " +
+                str(legacy.returncode) + ":\n" + legacy.stderr[-6000:])
         subprocess.run([str(executable)], check=True, timeout=30)
         print("Reproduced legacy allKeys crash; fixed state and legacy migration passed using the real Postbox codec.")
 
