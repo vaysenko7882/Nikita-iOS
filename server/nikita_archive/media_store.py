@@ -1,6 +1,7 @@
 """Durable private attachment queue and immutable, authenticated blob storage."""
 import asyncio
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -41,6 +42,27 @@ class MediaStore:
     def recover(self):
         with self.archive.connect() as db:
             db.execute("UPDATE media_assets SET state='pending' WHERE state='downloading'")
+            candidates = db.execute("SELECT id,size,sha256 FROM media_assets WHERE state!='ready'").fetchall()
+        for identifier,size,expected_hash in candidates:
+            self.restore_published(identifier,size,expected_hash)
+
+    def restore_published(self,identifier,size,expected_hash=""):
+        # Publication is atomic and follows a complete, fsynced download. A
+        # process may stop between that rename and the SQLite ready commit.
+        path=self.path(identifier)
+        if not path.is_file() or path.stat().st_size!=size:
+            return False
+        digest=hashlib.sha256()
+        with path.open("rb") as source:
+            for data in iter(lambda:source.read(1024*1024),b""):
+                digest.update(data)
+        checksum=digest.hexdigest()
+        if expected_hash and checksum!=expected_hash:
+            return False
+        with self.archive.connect() as db:
+            db.execute("UPDATE media_assets SET state='ready',sha256=?,error='',mtime_ns=? WHERE id=?",
+                (checksum,path.stat().st_mtime_ns,identifier))
+        return True
 
     def path(self, identifier, partial=False):
         if not isinstance(identifier, str) or not BLOB_ID.fullmatch(identifier):
@@ -92,6 +114,14 @@ class MediaStore:
         destination = self.path(job["id"])
         os.replace(self.path(job["id"], partial=True), destination)
         os.chmod(destination, 0o600)
+        directory=os.open(self.root,os.O_RDONLY|getattr(os,"O_DIRECTORY",0))
+        try:
+            try:
+                os.fsync(directory)
+            except OSError as error:
+                if error.errno not in (errno.EINVAL,errno.ENOTSUP): raise
+        finally:
+            os.close(directory)
         info = destination.stat()
         with self.archive.connect() as db:
             db.execute("UPDATE media_assets SET state='ready',sha256=?,error='',mtime_ns=? WHERE id=?",
@@ -106,6 +136,8 @@ class MediaStore:
                  type(error).__name__[:64], job["id"]))
 
     async def download(self, client, job):
+        if await asyncio.to_thread(self.restore_published,job["id"],job["size"]):
+            return
         from telethon.extensions import BinaryReader
         from telethon import types
         temporary = self.path(job["id"], partial=True)

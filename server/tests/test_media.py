@@ -134,6 +134,22 @@ class MediaTests(unittest.TestCase):
         self.store.recover()
         self.assertEqual(self.store.stats()["pending"],1)
 
+    def test_completed_blob_survives_crash_before_database_ready_commit(self):
+        data=b"already downloaded before the sender removed it"
+        asset=self.store.register("publish-interrupted",{},len(data),"text/plain",100)
+        job=self.store.claim()
+        identifier=asset["blob_id"]
+        partial=self.store.path(identifier,partial=True)
+        partial.write_bytes(data)
+        partial.replace(self.store.path(identifier))
+        restarted=MediaStore(self.archive,{"media_min_free_bytes":0})
+        restarted.recover()
+        state,ready=restarted.ready(identifier)
+        self.assertEqual(state,"ready")
+        self.assertEqual(ready["sha256"],hashlib.sha256(data).hexdigest())
+        self.assertEqual(ready["path"].read_bytes(),data)
+        self.assertIsNone(restarted.claim())
+
     def complete_inline(self,data=b"the original bytes"):
         result=self.store.register("inline",{"inline":base64.b64encode(data).decode()},len(data),"text/plain",100)
         job=self.store.claim()
