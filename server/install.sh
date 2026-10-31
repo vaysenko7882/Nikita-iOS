@@ -6,6 +6,7 @@ if [ "$(id -u)" != 0 ]; then
   echo 'Запусти: sudo bash server/install.sh' >&2
   exit 1
 fi
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
 nikita_source="$(cd "$(dirname "$0")" && pwd)"
 read -r -p 'Домен архива (A/AAAA уже указывает на этот VPS): ' nikita_domain
 if [[ ! "$nikita_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || [[ "$nikita_domain" != *.* ]]; then
@@ -13,7 +14,23 @@ if [[ ! "$nikita_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || [[ "
   exit 1
 fi
 apt-get update
-apt-get install -y python3 python3-venv caddy ca-certificates
+apt-get install -y python3 python3-venv ca-certificates
+if ! apt-cache show caddy >/dev/null 2>&1; then
+  # Minimal Ubuntu images may omit Universe. Use Caddy's official signed
+  # repository without changing the server's Ubuntu repository selection.
+  # https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+  apt-get install -y curl gnupg debian-keyring debian-archive-keyring apt-transport-https
+  nikita_caddy_repo="$(mktemp -d)"
+  curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key -o "$nikita_caddy_repo/key.asc"
+  curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt -o "$nikita_caddy_repo/caddy-stable.list"
+  gpg --batch --yes --dearmor --output "$nikita_caddy_repo/key.gpg" "$nikita_caddy_repo/key.asc"
+  install -m 644 "$nikita_caddy_repo/key.gpg" /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  install -m 644 "$nikita_caddy_repo/caddy-stable.list" /etc/apt/sources.list.d/caddy-stable.list
+  rm -f "$nikita_caddy_repo/key.asc" "$nikita_caddy_repo/key.gpg" "$nikita_caddy_repo/caddy-stable.list"
+  rmdir "$nikita_caddy_repo"
+  apt-get update
+fi
+apt-get install -y caddy
 if ! id nikita-archive >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/nikita-archive --shell /usr/sbin/nologin nikita-archive
 fi

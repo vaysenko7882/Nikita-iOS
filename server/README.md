@@ -15,6 +15,10 @@ git -C nikita-install sparse-checkout set server
 sudo bash nikita-install/server/install.sh
 ```
 
+Установщик сам устанавливает зависимости. Если Caddy отсутствует в подключённых репозиториях Ubuntu/Debian,
+он добавляет официальный подписанный stable-репозиторий Caddy. Пакетные вопросы о перезапуске служб
+не прерывают установку; домен и вход в Telegram остаются интерактивными.
+
 Установщик спросит:
 
 1. Домен, например `archive.example.com`.
