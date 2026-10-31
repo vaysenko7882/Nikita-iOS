@@ -47,6 +47,8 @@ final class NikitaArchiveMedia: Decodable {
     let voice: Bool?
     let audio: Bool?
     let video: Bool?
+    let silent: Bool?
+    let videoThumbnails: [NikitaArchiveAsset]?
     let roundVideo: Bool?
     let streaming: Bool?
     let animated: Bool?
@@ -64,11 +66,12 @@ final class NikitaArchiveMedia: Decodable {
     let liveVideo: NikitaArchiveMedia?
 
     enum CodingKeys: String, CodingKey {
-        case kind, id, asset, preview, videos, width, height, duration, voice, audio, video, streaming
+        case kind, id, asset, preview, videos, width, height, duration, voice, audio, video, streaming, silent
         case animated, sticker, alt, premium, title, performer, waveform, cover, alternatives
         case immediateThumbnail = "immediate_thumbnail", mimeType = "mime_type", fileName = "file_name"
         case roundVideo = "round_video", customEmoji = "custom_emoji", singleColor = "single_color"
         case videoCodec = "video_codec"
+        case videoThumbnails = "video_thumbnails"
         case liveVideo = "live_video"
     }
 
@@ -111,14 +114,19 @@ final class NikitaArchiveMedia: Decodable {
             var flags: TelegramMediaVideoFlags = []
             if self.roundVideo == true { flags.insert(.instantRoundVideo) }
             if self.streaming == true { flags.insert(.supportsStreaming) }
+            if self.silent == true { flags.insert(.isSilent) }
             attributes.append(.Video(duration: duration, size: dimensions, flags: flags, preloadSize: nil, coverTime: nil, videoCodec: self.videoCodec))
         }
         let cover = self.cover?.nativeMedia(accountId: accountId, serverId: serverId, depth: depth + 1) as? TelegramMediaImage
         let alternatives: [TelegramMediaFile] = (self.alternatives ?? []).prefix(8).compactMap {
             $0.nativeMedia(accountId: accountId, serverId: serverId, depth: depth + 1) as? TelegramMediaFile
         }
+        let videoThumbnails: [TelegramMediaFile.VideoThumbnail] = (self.videoThumbnails ?? []).prefix(8).compactMap { asset in
+            guard let resource = asset.resource(accountId: accountId, serverId: serverId) else { return nil }
+            return TelegramMediaFile.VideoThumbnail(dimensions: asset.dimensions, resource: resource)
+        }
         return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: self.id), partialReference: nil,
-            resource: resource, previewRepresentations: previews, videoThumbnails: [], videoCover: cover,
+            resource: resource, previewRepresentations: previews, videoThumbnails: videoThumbnails, videoCover: cover,
             immediateThumbnailData: self.bytes(self.immediateThumbnail), mimeType: self.mimeType ?? "application/octet-stream",
             size: resource.size, attributes: attributes, alternativeRepresentations: alternatives)
     }

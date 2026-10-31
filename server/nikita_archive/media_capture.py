@@ -83,7 +83,7 @@ class MediaCapture:
         result = dict(kind="document",id=document.id,asset=full,mime_type=document.mime_type,
             file_name="file",width=0,height=0,duration=0,voice=False,round_video=False,streaming=False,
             animated=False,sticker=False,custom_emoji=False,alt="",premium=False,single_color=False,
-            title="",performer="",waveform="",video_codec="",preview=None,immediate_thumbnail="")
+            title="",performer="",waveform="",video_codec="",preview=None,immediate_thumbnail="",video_thumbnails=[],silent=False)
         for attribute in document.attributes:
             name = type(attribute).__name__
             if name == "DocumentAttributeFilename":
@@ -98,6 +98,7 @@ class MediaCapture:
             elif name == "DocumentAttributeVideo":
                 result.update(width=bounded(attribute.w),height=bounded(attribute.h),duration=duration(attribute.duration),
                     round_video=bool(attribute.round_message),streaming=bool(attribute.supports_streaming),video=True,
+                    silent=bool(attribute.nosound),
                     video_codec=(getattr(attribute,"video_codec","") or "")[:64])
             elif name == "DocumentAttributeAnimated":
                 result["animated"] = True
@@ -112,6 +113,10 @@ class MediaCapture:
             result["preview"] = self.representation(document,size,True,priority+20)
         stripped = next((size.bytes for size in document.thumbs or [] if type(size).__name__=="PhotoStrippedSize"),b"")
         result["immediate_thumbnail"] = encoded(stripped[:8192])
+        for size in (document.video_thumbs or [])[:8]:
+            video = self.representation(document,size,True,priority+10)
+            if video:
+                result["video_thumbnails"].append(video)
         self.store.catalog(result)
         return result
 

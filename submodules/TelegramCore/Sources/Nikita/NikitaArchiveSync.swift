@@ -243,11 +243,11 @@ public extension TelegramEngine.Messages {
         }
         return account.postbox.transaction { transaction -> NikitaRemoteArchiveState in
             var state = transaction.getPreferencesEntry(key: PreferencesKeys.nikitaServerArchive)?.get(NikitaRemoteArchiveState.self) ?? NikitaRemoteArchiveState()
-            if state.endpoint != endpoint || state.mediaRevision < 1 {
+            if state.endpoint != endpoint {
                 state.endpoint = endpoint
                 state.serverId = ""
                 state.cursor = 0
-                state.mediaRevision = 1
+                state.mediaRevision = 0
                 transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(state) })
             }
             return state
@@ -267,9 +267,11 @@ public extension TelegramEngine.Messages {
                         }
                         var current = transaction.getPreferencesEntry(key: PreferencesKeys.nikitaServerArchive)?.get(NikitaRemoteArchiveState.self) ?? NikitaRemoteArchiveState()
                         guard current.endpoint == endpoint else { return .failure("Адрес VPS изменился.") }
-                        if page.resetRequired || (!current.serverId.isEmpty && current.serverId != page.serverId) {
+                        if page.resetRequired || (!current.serverId.isEmpty && current.serverId != page.serverId)
+                            || (page.mediaStats != nil && current.mediaRevision < 1) {
                             current.serverId = page.serverId
                             current.cursor = 0
+                            if page.mediaStats != nil { current.mediaRevision = 1 }
                             transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(current) })
                             return NikitaArchiveSyncResult(success: true, importedCount: 0, hasMore: true, connected: page.connected, message: "Архив сервера изменился. Перечитываю журнал…")
                         }
