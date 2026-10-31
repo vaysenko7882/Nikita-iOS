@@ -57,9 +57,10 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotIn(test_hash, capture.getvalue())
 
 class ArtifactTests(unittest.TestCase):
-    def artifact(self, folder, *, platform=2, name='Никита', cryptid=0):
+    def artifact(self, folder, *, platform=2, name='Никита', cryptid=0, version='13.1.4', build_number='11'):
         # Tiny format fixtures only, never a runnable application or deliverable.
         info = {'CFBundleDisplayName': name, 'CFBundleIdentifier': 'personal.nikita.messenger', 'CFBundleExecutable': 'Client', 'MinimumOSVersion': '15.0'}
+        info.update(CFBundleShortVersionString=version, CFBundleVersion=build_number)
         header = struct.pack('<8I', 0xfeedfacf, 0x100000c, 0, 2, 2, 48, 0x200085, 0)
         build = struct.pack('<6I', 0x32, 24, platform, 15 << 16, 27 << 16, 0)
         encryption = struct.pack('<6I', 0x2c, 24, 0, 0, cryptid, 0)
@@ -84,5 +85,16 @@ class ArtifactTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Encrypted'):
                 validator.validate(self.artifact(folder, cryptid=1))
 
+    def test_rejects_stale_cached_app_version_or_build_number(self):
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as folder:
+            path=self.artifact(folder)
+            with self.assertRaisesRegex(ValueError,'version'):
+                validator.validate(path,expected_version='13.1.5',expected_build='11')
+            with self.assertRaisesRegex(ValueError,'build number'):
+                validator.validate(path,expected_version='13.1.4',expected_build='12')
+            result=validator.validate(path,expected_version='13.1.4',expected_build='11')
+            self.assertEqual((result['version'],result['build_number']),('13.1.4','11'))
+
 if __name__ == '__main__':
     unittest.main()
+

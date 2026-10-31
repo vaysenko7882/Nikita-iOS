@@ -2,6 +2,7 @@
 """Validate and identify an actual compiled iOS device artifact."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import plistlib
 import shutil
@@ -12,7 +13,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 
-def validate(path):
+def validate(path, expected_version=None, expected_build=None):
     with zipfile.ZipFile(path) as archive:
         if archive.testzip() is not None:
             raise ValueError('IPA integrity check failed.')
@@ -25,6 +26,10 @@ def validate(path):
             raise ValueError('Compiled app does not have the Nikita display name.')
         if info.get('CFBundleIdentifier') != 'personal.nikita.messenger':
             raise ValueError('Compiled app does not have the personal bundle identifier.')
+        if expected_version is not None and info.get('CFBundleShortVersionString') != expected_version:
+            raise ValueError('Compiled app version differs from the current source; refusing a stale artifact.')
+        if expected_build is not None and info.get('CFBundleVersion') != str(expected_build):
+            raise ValueError('Compiled build number differs from this run; refusing a stale artifact.')
         executable = location.rsplit('/', 1)[0] + '/' + info['CFBundleExecutable']
         data = archive.read(executable)
         magic, cpu = struct.unpack_from('<II', data)
@@ -43,11 +48,13 @@ def validate(path):
             offset += size
         if not device:
             raise ValueError('Simulator binaries cannot be installed on an iPhone.')
-        return {'name': info['CFBundleDisplayName'], 'bundle_id': info['CFBundleIdentifier'], 'minimum_os': info['MinimumOSVersion']}
+        return {'name': info['CFBundleDisplayName'], 'bundle_id': info['CFBundleIdentifier'], 'minimum_os': info['MinimumOSVersion'],
+            'version': info.get('CFBundleShortVersionString'), 'build_number': info.get('CFBundleVersion')}
 
 def main():
     source = Path(sys.argv[1])
-    result = validate(source)
+    version = json.loads((ROOT / 'versions.json').read_text())['app']
+    result = validate(source, expected_version=version, expected_build=os.environ.get('GITHUB_RUN_NUMBER', '1'))
     output = ROOT / 'build' / 'nikita'
     output.mkdir(parents=True, exist_ok=True)
     target = output / 'Nikita.ipa'
@@ -66,3 +73,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
