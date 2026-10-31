@@ -125,6 +125,13 @@ class MediaTests(unittest.TestCase):
             self.assertIsNone(self.store.claim())
             self.assertEqual(self.store.stats()["waiting_for_disk"],1)
 
+    def test_large_blocked_backlog_does_not_starve_a_later_file_that_fits(self):
+        for index in range(150):
+            self.store.register("blocked-"+str(index),{},2*1024**3,"video/mp4",1000)
+        fits=self.store.register("later-smaller-file",{},32*1024**2,"application/pdf",0)
+        with patch("nikita_archive.media_store.shutil.disk_usage",return_value=shutil._ntuple_diskusage(4*1024**3,3*1024**3,1024**3)):
+            self.assertEqual(self.store.claim()["id"],fits["blob_id"])
+
     def test_api_construction_does_not_reset_in_progress_downloads(self):
         asset = self.store.register("active",{},8,"text/plain",100)
         self.store.claim()

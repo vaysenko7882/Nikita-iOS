@@ -95,15 +95,15 @@ class MediaStore:
         with self.archive.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             maximum = 16*1024**2 if small_only else MAX_MEDIA_SIZE
-            candidates = db.execute("SELECT id,request,size,mime,attempts FROM media_assets WHERE state='pending' AND retry_at<=? AND size<=? ORDER BY priority DESC,size,rowid LIMIT 128",
-                (time.time(), maximum)).fetchall()
+            candidates = db.execute("SELECT id,request,size,mime,attempts FROM media_assets WHERE state='pending' AND retry_at<=? AND size<=? ORDER BY priority DESC,size,rowid",
+                (time.time(), maximum))
             available = max(0, shutil.disk_usage(self.root).free - self.reserve - sum(self.reservations.values()))
             for identifier, request, size, mime, attempts in candidates:
                 partial = self.path(identifier, partial=True)
                 offset = partial.stat().st_size if partial.exists() else 0
                 remaining = max(0, size - offset)
                 if remaining > available:
-                    db.execute("UPDATE media_assets SET error='waiting_for_disk' WHERE id=?", (identifier,))
+                    db.execute("UPDATE media_assets SET error='waiting_for_disk' WHERE id=? AND error!='waiting_for_disk'", (identifier,))
                     continue
                 db.execute("UPDATE media_assets SET state='downloading',error='' WHERE id=?", (identifier,))
                 self.reservations[identifier] = remaining
