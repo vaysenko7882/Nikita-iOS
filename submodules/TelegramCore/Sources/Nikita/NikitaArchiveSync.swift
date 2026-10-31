@@ -267,6 +267,11 @@ public extension TelegramEngine.Messages {
                         }
                         var current = transaction.getPreferencesEntry(key: PreferencesKeys.nikitaServerArchive)?.get(NikitaRemoteArchiveState.self) ?? NikitaRemoteArchiveState()
                         guard current.endpoint == endpoint else { return .failure("Адрес VPS изменился.") }
+                        guard current.mediaRevision == state.mediaRevision else {
+                            // Another request just rewound the cursor for media
+                            // migration. Its older page must not jump over replay.
+                            return NikitaArchiveSyncResult(success: true, importedCount: 0, hasMore: true, connected: page.connected, message: "Перечитываю журнал с вложениями…")
+                        }
                         if page.resetRequired || (!current.serverId.isEmpty && current.serverId != page.serverId)
                             || (page.mediaStats != nil && current.mediaRevision < 1) {
                             current.serverId = page.serverId

@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from telethon import types
 from nikita_archive.archive import Archive
 from nikita_archive.collector import snapshot
+from nikita_archive.collector import collect
 from nikita_archive.http_api import make_server
 from nikita_archive.media_capture import MediaCapture
 from nikita_archive.media_store import CHUNK, MAX_MEDIA_SIZE, MediaStore
@@ -199,6 +201,82 @@ class MediaTests(unittest.TestCase):
                 with self.assertRaises(ValueError): asyncio.run(self.store.download(Client(),job))
                 self.assertFalse(self.store.path(result["asset"]["blob_id"]).exists())
                 self.store.reservations.pop(job["id"],None)
+
+
+class CollectorMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_collector_records_deletion_while_independent_download_is_busy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config={"database_path":str(Path(directory)/"archive.sqlite3"),"media_min_free_bytes":0}
+            started=asyncio.Event()
+            release=asyncio.Event()
+            handlers=[]
+            item=message(types.MessageMediaDocument(document=document([types.DocumentAttributeAudio(4,voice=True)])))
+            class Client:
+                def add_event_handler(self,callback,event): handlers.append(callback)
+                async def connect(self): pass
+                async def disconnect(self): pass
+                async def is_user_authorized(self): return True
+                async def get_me(self): return SimpleNamespace(id=42)
+                def is_connected(self): return True
+                async def catch_up(self): await handlers[0](SimpleNamespace(message=item))
+                async def iter_dialogs(self,**kwargs):
+                    if False: yield None
+                async def run_until_disconnected(self): await asyncio.Event().wait()
+                async def iter_download(self,*args,**kwargs):
+                    started.set()
+                    await release.wait()
+                    yield b"x"*17
+            with patch("nikita_archive.collector.client_for",return_value=Client()):
+                task=asyncio.create_task(collect(config))
+                try:
+                    await asyncio.wait_for(started.wait(),3)
+                    await handlers[2](SimpleNamespace(channel_id=None,chat_id=42,deleted_ids=[10]))
+                    archive=Archive(config["database_path"])
+                    archive.media=MediaStore(archive,config)
+                    event=archive.sync(0)["events"][0]
+                    self.assertEqual((event["kind"],event["media"]["voice"]),("delete",True))
+                    identifier=event["media"]["asset"]["blob_id"]
+                    self.assertEqual(archive.media.ready(identifier)[0],"downloading")
+                    release.set()
+                    for _ in range(100):
+                        if archive.media.ready(identifier)[0]=="ready": break
+                        await asyncio.sleep(0.02)
+                    self.assertEqual(archive.media.ready(identifier)[0],"ready")
+                    self.assertEqual(archive.media.path(identifier).read_bytes(),b"x"*17)
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task,return_exceptions=True)
+                self.assertFalse(archive.sync(0)["connected"])
+
+    async def test_worker_refreshes_an_expired_reference_without_new_authorization(self):
+        from telethon.errors import FileReferenceExpiredError
+        with tempfile.TemporaryDirectory() as directory:
+            archive=Archive(Path(directory)/"archive.sqlite3")
+            store=MediaStore(archive,{"media_min_free_bytes":0})
+            capture=MediaCapture(store)
+            item=message(types.MessageMediaDocument(document=document()))
+            identifier=capture.capture(item)["asset"]["blob_id"]
+            refreshed=document()
+            refreshed.file_reference=b"fresh-reference"
+            renewed=message(types.MessageMediaDocument(document=refreshed))
+            calls=[]
+            class Client:
+                async def get_messages(self,peer,ids):
+                    calls.append((peer.user_id,ids))
+                    return renewed
+                async def iter_download(self,location,**kwargs):
+                    if location.file_reference!=b"fresh-reference": raise FileReferenceExpiredError(None)
+                    yield b"x"*17
+            task=asyncio.create_task(store.worker(Client()))
+            try:
+                for _ in range(100):
+                    if store.ready(identifier)[0]=="ready": break
+                    await asyncio.sleep(0.02)
+                self.assertEqual(store.ready(identifier)[0],"ready")
+                self.assertEqual(calls,[(42,10)])
+            finally:
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
 
 
 if __name__=="__main__": unittest.main()

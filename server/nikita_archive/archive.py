@@ -60,6 +60,16 @@ class Archive:
             db.execute("INSERT OR REPLACE INTO meta VALUES('connected', ?)", ("1" if connected else "0",))
             db.execute("INSERT OR REPLACE INTO meta VALUES('last_connection_check', ?)", (str(int(time.time())),))
 
+    def _urgent_media(self, db, value):
+        if self.media is None:
+            return
+        if isinstance(value,dict):
+            if "blob_id" in value:
+                db.execute("UPDATE media_assets SET priority=MAX(priority,1000),retry_at=0 WHERE id=? AND state='pending'",(value["blob_id"],))
+            for child in value.values(): self._urgent_media(db,child)
+        elif isinstance(value,list):
+            for child in value: self._urgent_media(db,child)
+
     def observe(self, snapshot: dict, *, seed: bool = False):
         required = ("peer_type", "peer_id", "message_id", "text", "fingerprint", "version_date")
         if not all(key in snapshot for key in required):
@@ -86,6 +96,7 @@ class Archive:
                 if seed and snapshot["version_date"] <= previous["version_date"]:
                     return
                 event = {**previous, "kind": "edit", "captured_at": snapshot["version_date"]}
+                self._urgent_media(db,event.get("media"))
                 event.pop("fingerprint", None)
                 db.execute("INSERT INTO events(payload) VALUES(?)", (json.dumps(event, ensure_ascii=False),))
             db.execute("INSERT INTO messages(peer_type,peer_id,message_id,payload,fingerprint) VALUES(?,?,?,?,?) ON CONFLICT(peer_type,peer_id,message_id) DO UPDATE SET payload=excluded.payload, fingerprint=excluded.fingerprint", (*key, payload, snapshot["fingerprint"]))
@@ -106,15 +117,7 @@ class Archive:
                     if already_deleted:
                         continue
                     event = {**json.loads(payload), "kind": "delete", "captured_at": captured_at}
-                    if self.media is not None:
-                        def urgent(value):
-                            if isinstance(value,dict):
-                                if "blob_id" in value:
-                                    db.execute("UPDATE media_assets SET priority=MAX(priority,1000),retry_at=0 WHERE id=? AND state='pending'",(value["blob_id"],))
-                                for child in value.values(): urgent(child)
-                            elif isinstance(value,list):
-                                for child in value: urgent(child)
-                        urgent(event.get("media"))
+                    self._urgent_media(db,event.get("media"))
                     event.pop("fingerprint", None)
                     db.execute("INSERT INTO events(payload) VALUES(?)", (json.dumps(event, ensure_ascii=False),))
                     db.execute("UPDATE messages SET deleted=1 WHERE peer_type=? AND peer_id=? AND message_id=?", (peer_type, peer_id, message_id))

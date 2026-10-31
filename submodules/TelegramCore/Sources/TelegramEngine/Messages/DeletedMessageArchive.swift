@@ -653,6 +653,35 @@ private func nikitaArchiveContentMatches(_ message: Message, event: NikitaRemote
     }
 }
 
+private func reuseNikitaArchiveCachedMedia(_ original: [Media], remote: [Media], mediaBox: MediaBox) {
+    func copy(_ source: TelegramMediaResource, _ destination: TelegramMediaResource) {
+        guard let destination = destination as? NikitaArchiveMediaResource, source.id != destination.id,
+            mediaBox.completedResourcePath(id: destination.id) == nil,
+            let path = mediaBox.completedResourcePath(id: source.id),
+            let size = fileSize(path), size == destination.size else { return }
+        // Copy on MediaBox's queue, without loading a video into application RAM.
+        mediaBox.copyResourceData(from: source.id, to: destination.id)
+    }
+    for item in remote {
+        for existing in original {
+            if let file = item as? TelegramMediaFile, let previous = existing as? TelegramMediaFile, file.fileId == previous.fileId {
+                copy(previous.resource, file.resource)
+                for representation in file.previewRepresentations {
+                    for old in previous.previewRepresentations where old.dimensions == representation.dimensions {
+                        copy(old.resource, representation.resource)
+                    }
+                }
+            } else if let image = item as? TelegramMediaImage, let previous = existing as? TelegramMediaImage, image.imageId == previous.imageId {
+                for representation in image.representations {
+                    for old in previous.representations where old.dimensions == representation.dimensions {
+                        copy(old.resource, representation.resource)
+                    }
+                }
+            }
+        }
+    }
+}
+
 func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
     events: [NikitaRemoteArchiveEvent], accountId: Int64, serverId: String, state: inout NikitaRemoteArchiveState) -> Int? {
     guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox) else { return nil }
@@ -673,6 +702,7 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
         let current = transaction.getMessage(originalId)
         let remoteMedia: [Media] = event.media.flatMap { $0.nativeMedia(accountId: accountId, serverId: serverId) }.map { [$0] } ?? []
         let archived = archivedByOriginal[originalId].flatMap(transaction.getMessage)
+        reuseNikitaArchiveCachedMedia((current?.media ?? []) + (archived?.media ?? []), remote: remoteMedia, mediaBox: mediaBox)
         let target = archived ?? current
         var versionIds = target?.archivedMessageAttribute?.versionIds ?? []
         for entry in state.pendingVersions[key] ?? [] where !versionIds.contains(entry.messageId) {
@@ -706,6 +736,7 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                 guard let version = transaction.getMessage(id) else { return false }
                 let matches = version.archivedVersionCapturedAt == event.capturedAt && nikitaArchiveContentMatches(version, event: event)
                 if matches && !remoteMedia.isEmpty {
+                    reuseNikitaArchiveCachedMedia(version.media, remote: remoteMedia, mediaBox: mediaBox)
                     transaction.updateMessage(id, update: { message in
                         return .update(StoreMessage(id: message.id, customStableId: nil, globallyUniqueId: message.globallyUniqueId,
                             groupingKey: event.groupedId, threadId: event.threadId, timestamp: event.date,
