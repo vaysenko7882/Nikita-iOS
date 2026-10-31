@@ -36,10 +36,11 @@ elif part.count(new) != 1:
 NIKITA_UNSIGNED
 nikita_cache="${NIKITA_BUILD_CACHE:-$nikita_root/build/nikita-cache}"
 mkdir -p "$nikita_cache/actions" "$nikita_cache/repositories" "$nikita_root/build/nikita"
+NIKITA_BUILD_CACHE="$nikita_cache" python3 tools/nikita/cache_settings.py sanitize
 # disable_legacy_signing is supported by the pinned rules_apple implementation.
 python3 build-system/Make/Make.py \
   --cacheDir="$nikita_cache/actions" \
-  --bazelArguments="--//Telegram:disableProvisioningProfiles --//Telegram:disableExtensions --//Telegram:disableAppGroups --features=disable_legacy_signing --jobs=2 --local_resources=memory=4096 --repository_cache=\"$nikita_cache/repositories\" --experimental_disk_cache_gc_max_size=8G --experimental_disk_cache_gc_idle_delay=1s --build_event_json_file=\"$nikita_root/build/nikita/build-events.jsonl\"" \
+  --bazelArguments="--//Telegram:disableProvisioningProfiles --//Telegram:disableExtensions --//Telegram:disableAppGroups --features=disable_legacy_signing --jobs=2 --local_resources=memory=4096 --repository_cache=\"$nikita_cache/repositories\" --repo_contents_cache= --experimental_disk_cache_gc_max_size=8G --experimental_disk_cache_gc_idle_delay=1s --build_event_json_file=\"$nikita_root/build/nikita/build-events.jsonl\"" \
   build \
   --configurationPath=build-system/nikita-local-configuration.json \
   --xcodeManagedCodesigning \
@@ -48,3 +49,4 @@ python3 build-system/Make/Make.py \
   --buildNumber=1
 # Use the actual current Bazel output, never the possibly stale archive-root folder.
 python3 tools/nikita/validate_ipa.py bazel-bin/Telegram/Telegram.ipa
+

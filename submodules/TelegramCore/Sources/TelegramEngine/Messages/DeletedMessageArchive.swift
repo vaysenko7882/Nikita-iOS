@@ -682,6 +682,16 @@ private func reuseNikitaArchiveCachedMedia(_ original: [Media], remote: [Media],
     }
 }
 
+private func nikitaArchiveMediaTags(incoming: Bool, attributes: [MessageAttribute], media: [Media]) -> MessageTags {
+    let entities = attributes.compactMap { $0 as? TextEntitiesMessageAttribute }.first?.entities
+    var tags = tagsForStoreMessage(incoming: incoming, attributes: attributes, media: media, textEntities: entities, isPinned: false).0
+    tags.remove(.unseenPersonalMessage)
+    tags.remove(.unseenReaction)
+    tags.remove(.unseenPollVote)
+    tags.remove(.pinned)
+    return tags
+}
+
 func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
     events: [NikitaRemoteArchiveEvent], accountId: Int64, serverId: String, state: inout NikitaRemoteArchiveState) -> Int? {
     guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox) else { return nil }
@@ -724,10 +734,12 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
             if event.spoiler == true, !attributes.contains(where: { $0 is MediaSpoilerMessageAttribute }) {
                 attributes.append(MediaSpoilerMessageAttribute())
             }
+            attributes = attributesWithoutExpiry(attributes)
+            let tags = nikitaArchiveMediaTags(incoming: !event.outgoing, attributes: attributes, media: remoteMedia)
             let copy = StoreMessage(peerId: originalId.peerId, namespace: namespace, customStableId: nil,
                 globallyUniqueId: uniqueId, groupingKey: event.groupedId, threadId: event.threadId, timestamp: event.date,
-                flags: event.outgoing ? [] : [.Incoming], tags: [], globalTags: [], localTags: [], forwardInfo: nil,
-                authorId: event.resolvedAuthorId, text: event.displayText, attributes: attributesWithoutExpiry(attributes), media: remoteMedia)
+                flags: event.outgoing ? [] : [.Incoming], tags: tags, globalTags: [], localTags: [], forwardInfo: nil,
+                authorId: event.resolvedAuthorId, text: event.displayText, attributes: attributes, media: remoteMedia)
             return transaction.addMessages([copy], location: .Random)[uniqueId]
         }
 
@@ -738,11 +750,13 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                 if matches && !remoteMedia.isEmpty {
                     reuseNikitaArchiveCachedMedia(version.media, remote: remoteMedia, mediaBox: mediaBox)
                     transaction.updateMessage(id, update: { message in
+                        let attributes = attributesWithoutExpiry(message.attributes)
+                        let tags = nikitaArchiveMediaTags(incoming: !event.outgoing, attributes: attributes, media: remoteMedia)
                         return .update(StoreMessage(id: message.id, customStableId: nil, globallyUniqueId: message.globallyUniqueId,
                             groupingKey: event.groupedId, threadId: event.threadId, timestamp: event.date,
-                            flags: StoreMessageFlags(message.flags), tags: message.tags, globalTags: message.globalTags, localTags: message.localTags,
+                            flags: StoreMessageFlags(message.flags), tags: tags, globalTags: message.globalTags, localTags: message.localTags,
                             forwardInfo: message.forwardInfo.flatMap(StoreMessageForwardInfo.init), authorId: event.resolvedAuthorId,
-                            text: event.displayText, attributes: attributesWithoutExpiry(message.attributes), media: remoteMedia))
+                            text: event.displayText, attributes: attributes, media: remoteMedia))
                     })
                 }
                 return matches
@@ -811,11 +825,14 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                     if event.spoiler == true, !attributes.contains(where: { $0 is MediaSpoilerMessageAttribute }) {
                         attributes.append(MediaSpoilerMessageAttribute())
                     }
+                    attributes = attributesWithoutExpiry(attributes)
+                    let storedMedia = remoteMedia.isEmpty ? source?.media ?? [] : remoteMedia
+                    let tags = nikitaArchiveMediaTags(incoming: !event.outgoing, attributes: attributes, media: storedMedia)
                     return .update(StoreMessage(id: message.id, customStableId: nil, globallyUniqueId: message.globallyUniqueId,
                         groupingKey: event.groupedId ?? source?.groupingKey, threadId: event.threadId, timestamp: event.date,
-                        flags: event.outgoing ? [] : [.Incoming], tags: source?.tags ?? [], globalTags: [], localTags: [],
+                        flags: event.outgoing ? [] : [.Incoming], tags: tags, globalTags: [], localTags: [],
                         forwardInfo: source?.forwardInfo.flatMap(StoreMessageForwardInfo.init), authorId: event.resolvedAuthorId,
-                        text: source?.text ?? event.displayText, attributes: attributesWithoutExpiry(attributes), media: remoteMedia.isEmpty ? source?.media ?? [] : remoteMedia))
+                        text: source?.text ?? event.displayText, attributes: attributes, media: storedMedia))
                 })
             } else {
                 let attribute = ArchivedMessageAttribute(originalMessageId: originalId, versionIds: versionIds,
@@ -910,3 +927,4 @@ func initializeDeletedMessageArchiveSession(postbox: Postbox) -> Signal<Never, N
     }
     |> ignoreValues
 }
+

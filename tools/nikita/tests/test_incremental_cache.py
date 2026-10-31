@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,6 +14,26 @@ def load(name):
 
 
 class IncrementalCacheTests(unittest.TestCase):
+    def test_restoring_a_trimmed_repo_discards_its_entire_tree_but_keeps_compiled_actions(self):
+        cache = load("cache_settings")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            damaged = root/"repositories/contents/repo-hash/repo-uuid/cc/common"
+            damaged.mkdir(parents=True)
+            (damaged/"cc_info.bzl").write_text("# Its parent BUILD file was removed by an older cache trimmer.")
+            marker = root/"repositories/contents/repo-hash/repo-uuid.recorded_inputs"
+            marker.write_text("previously fetched")
+            action = root/"actions/cas/compiled-object"
+            action.parent.mkdir(parents=True)
+            action.write_bytes(b"compiled result")
+            archive = root/"repositories/content_addressable/sha256/archive/file"
+            archive.parent.mkdir(parents=True)
+            archive.write_bytes(b"verified archive")
+            cache.sanitize(root)
+            self.assertFalse((root/"repositories/contents").exists())
+            self.assertEqual(action.read_bytes(), b"compiled result")
+            self.assertEqual(archive.read_bytes(), b"verified archive")
+
     def test_app_version_does_not_cold_start_the_toolchain_cache(self):
         cache = load("cache_settings")
         original = dict(app="13.1.3", xcode="27.1", bazel="9.2.0:hash", macos="27")
@@ -41,3 +62,4 @@ unchanged_rule(name = "CompileUI")
 
 if __name__ == "__main__":
     unittest.main()
+
