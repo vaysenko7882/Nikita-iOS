@@ -253,6 +253,7 @@ public extension Peer {
     }
     
     var isCopyProtectionEnabled: Bool {
+        if NikitaSettingsStore.shared.allowsProtectedExport { return false }
         switch self {
         case let group as TelegramGroup:
             return group.flags.contains(.copyProtectionEnabled)

@@ -36,6 +36,7 @@ FILES = [
     "submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/StringForMessageTimestampStatus.swift",
 ]
 FILES += [
+    "submodules/ChatPresentationInterfaceState/Sources/ChatPresentationInterfaceState.swift",
     "submodules/TelegramCore/Sources/ApiUtils/TelegramUser.swift",
     "submodules/TelegramCore/Sources/ApiUtils/ApiGroupOrChannel.swift",
     "submodules/TelegramPresentationData/Sources/LocalFeatureStrings.swift",
