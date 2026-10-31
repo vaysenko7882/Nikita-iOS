@@ -5,6 +5,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = [
+    "submodules/SettingsUI/Sources/CodeGramDashboardController.swift",
     "submodules/AuthorizationUI/Sources/AuthorizationSequenceSplashController.swift",
     "submodules/Display/Source/WindowContent.swift",
     "submodules/SettingsUI/Sources/MadgramSettingsController.swift",

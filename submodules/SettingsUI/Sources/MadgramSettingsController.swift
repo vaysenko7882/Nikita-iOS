@@ -310,6 +310,26 @@ private enum MadgramEntry: ItemListNodeEntry {
 }
 
 public func madgramSettingsController(context: AccountContext) -> ViewController {
+    return CodeGramDashboardController(context: context)
+}
+
+enum CodeGramLegacySettingsSection: Int32 {
+    case privacy = 1
+    case messages = 2
+    case appearance = 3
+    case additional = 4
+
+    var title: String {
+        switch self {
+        case .privacy: return "Приватность"
+        case .messages: return "Сообщения"
+        case .appearance: return "Оформление"
+        case .additional: return "Локальные функции"
+        }
+    }
+}
+
+func codegramSectionSettingsController(context: AccountContext, section: CodeGramLegacySettingsSection) -> ViewController {
     var presentTooltip: ((String, UIView) -> Void)?
     var pushControllerImpl: ((ViewController) -> Void)?
 
@@ -457,7 +477,7 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
         return (
             ItemListControllerState(
                 presentationData: ItemListPresentationData(presentationData),
-                title: .text(strings.madgram.title),
+                title: .text(section.title),
                 leftNavigationButton: nil,
                 rightNavigationButton: nil,
                 backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back),
@@ -466,7 +486,7 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
             (
                 ItemListNodeState(
                     presentationData: ItemListPresentationData(presentationData),
-                    entries: entries,
+                    entries: entries.filter { $0.section == section.rawValue },
                     style: .blocks
                 ),
                 arguments

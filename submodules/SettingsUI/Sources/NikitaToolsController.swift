@@ -26,7 +26,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
         let configuration = NikitaSettingsStore.shared.server(account: String(context.account.peerId.id._internalGetInt64Value()))
         self.serverEnabled = configuration.enabled
         super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: context.sharedContext.currentPresentationData.with { $0 }))
-        self.title = "CodeGram"
+        self.title = "Хранилище и VPS"
         self.navigationItem.backBarButtonItem = UIBarButtonItem(title: "Назад", style: .plain, target: nil, action: nil)
         self.statusBar.statusBarStyle = context.sharedContext.currentPresentationData.with { $0 }.theme.rootController.statusBarStyle.style
         self.addressField.text = configuration.address
@@ -58,7 +58,6 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
         self.tableView.contentInsetAdjustmentBehavior = .never
         self.tableView.rowHeight = UITableView.automaticDimension
         self.tableView.estimatedRowHeight = 52.0
-        self.tableView.tableHeaderView = codegramSettingsHero()
         self.displayNode.view.addSubview(self.tableView)
         self.displayNodeDidLoad()
     }
@@ -76,7 +75,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
 
     public func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch section {
-        case 0: return 6
+        case 0: return 2
         case 1: return 1
         case 2: return 6
         default: return 1
@@ -85,7 +84,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
 
     public func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch section {
-        case 0: return "CODEGRAM · НАСТРОЙ ПОД СЕБЯ"
+        case 0: return "АРХИВ И ПАМЯТЬ"
         case 1: return "АРХИВ В ФОНЕ"
         case 2: return "ТВОЙ VPS · ЭТОТ АККАУНТ"
         default: return "CODEGRAM"
@@ -94,7 +93,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
 
     public func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch section {
-        case 0: return "Настройки голоса, оформления и доступа сохраняются на iPhone. Правила фонового сохранения — на твоём VPS."
+        case 0: return "Объём файлов на iPhone и VPS, правила фонового сохранения и исключения для отдельных диалогов."
         case 1: return "Клиент сохраняет обновления, пока iOS разрешает работу: запрос до 5 минут, фактическое время может быть значительно короче. После принудительного закрытия нужен VPS."
         case 2: return "VPS сохраняет полученные фото, видео, кружочки, голосовые, стикеры, GIF, музыку и файлы, даже когда iPhone закрыт. После синхронизации вложения открываются в чате и скачиваются частями. Файлы должны успеть загрузиться до потери доступа в Telegram. При нехватке места очередь приостанавливается; старые файлы не удаляются. Для новых правил и статистики обнови VPS до версии 4. Сохранение подчиняется настройкам в разделе «Правила VPS»."
         default: return "Ключ доступа хранится в Keychain. Сервер не подключается, пока ты не включишь интеграцию и не сохранишь настройки."
@@ -105,8 +104,8 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
         cell.textLabel?.numberOfLines = 0
         if indexPath.section == 0 {
-            let titles = ["VoiceChanger · студия голоса", "Правила сохранения VPS", "Оформление удалённых сообщений", "Память архива", "Сохранение и доступ", "Имена и аватары для себя"]
-            let icons = ["waveform", "line.3.horizontal.decrease.circle", "bubble.left.and.text.bubble.right", "internaldrive", "square.and.arrow.down", "person.crop.circle"]
+            let titles = ["Использование памяти", "Правила сохранения VPS"]
+            let icons = ["internaldrive", "line.3.horizontal.decrease.circle"]
             cell.textLabel?.text = titles[indexPath.row]
             cell.imageView?.image = UIImage(systemName: icons[indexPath.row])
             cell.imageView?.tintColor = .systemBlue
@@ -164,12 +163,8 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
         if indexPath.section == 0 {
             let controller: ViewController
             switch indexPath.row {
-            case 0: controller = CodeGramVoiceController(context: self.context)
-            case 1: controller = CodeGramCapturePolicyController(context: self.context)
-            case 2: controller = CodeGramDeletedStyleController(context: self.context)
-            case 3: controller = CodeGramStorageController(context: self.context)
-            case 4: controller = CodeGramContentController(context: self.context)
-            default: controller = CodeGramPeerAppearanceController(context: self.context)
+            case 0: controller = CodeGramStorageController(context: self.context)
+            default: controller = CodeGramCapturePolicyController(context: self.context)
             }
             (self.navigationController as? NavigationController)?.pushViewController(controller)
         } else if indexPath.section == 2 && indexPath.row == 3 {

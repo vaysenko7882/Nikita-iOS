@@ -18,7 +18,15 @@ menu = ROOT / 'submodules/TelegramUI/Images.xcassets/Item List/Icons/Madgram.ima
 for path in menu.glob('*.png'):
     with Image.open(path) as slot:
         size = slot.size
-    icon.resize(size, Image.Resampling.LANCZOS).save(path, optimize=True)
+    # Settings rows do not receive the Home Screen's system icon mask.
+    # Transparent, antialiased corners let the surrounding row show through.
+    rounded = icon.resize(size, Image.Resampling.LANCZOS).convert('RGBA')
+    factor = 4
+    mask = Image.new('L', (size[0] * factor, size[1] * factor))
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size[0] * factor - 1, size[1] * factor - 1),
+        radius=min(size) * factor * 0.23, fill=255)
+    rounded.putalpha(mask.resize(size, Image.Resampling.LANCZOS))
+    rounded.save(path, optimize=True)
 for name in ('MadGram.png', 'Nikita.png'):
     (target / 'Assets' / name).unlink(missing_ok=True)
 metadata = target / 'icon.json'
