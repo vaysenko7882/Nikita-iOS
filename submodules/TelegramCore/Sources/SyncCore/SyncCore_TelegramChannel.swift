@@ -189,11 +189,11 @@ public struct TelegramChannelFlags: OptionSet {
 }
 
 public final class TelegramChannel: Peer, Equatable {
-    private let codegramAppearanceRevision: Int64
+    private let codegramAppearance: CodeGramPeerAppearance
     public let id: PeerId
     public let accessHash: TelegramPeerAccessHash?
     let codegramOriginalTitle: String
-    public var title: String { return CodeGramPeerAppearanceStore.shared.appearance(self.id).title ?? self.codegramOriginalTitle }
+    public var title: String { return self.codegramAppearance.title ?? self.codegramOriginalTitle }
     public let username: String?
     public let photo: [TelegramMediaImageRepresentation]
     public let creationDate: Int32
@@ -312,7 +312,7 @@ public final class TelegramChannel: Peer, Equatable {
         linkedCommunityId: PeerId? = nil
     ) {
         self.id = id
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         self.accessHash = accessHash
         self.codegramOriginalTitle = title
         self.username = username
@@ -343,7 +343,7 @@ public final class TelegramChannel: Peer, Equatable {
     
     public init(decoder: PostboxDecoder) {
         self.id = PeerId(decoder.decodeInt64ForKey("i", orElse: 0))
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         let accessHash = decoder.decodeOptionalInt64ForKey("ah")
         let accessHashType: Int32 = decoder.decodeInt32ForKey("aht", orElse: 0)
         if let accessHash = accessHash {
@@ -512,7 +512,7 @@ public final class TelegramChannel: Peer, Equatable {
     }
 
     public static func ==(lhs: TelegramChannel, rhs: TelegramChannel) -> Bool {
-        if lhs.codegramAppearanceRevision != rhs.codegramAppearanceRevision { return false }
+        if lhs.codegramAppearance.revision != rhs.codegramAppearance.revision { return false }
         if lhs.id != rhs.id || lhs.accessHash != rhs.accessHash || lhs.codegramOriginalTitle != rhs.codegramOriginalTitle || lhs.username != rhs.username || lhs.photo != rhs.photo {
             return false
         }
@@ -644,7 +644,7 @@ public final class TelegramChannel: Peer, Equatable {
     
     public init(flatBuffersObject: TelegramCore_TelegramChannel) throws {
         self.id = PeerId(flatBuffersObject: flatBuffersObject.id)
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         self.accessHash = try flatBuffersObject.accessHash.flatMap(TelegramPeerAccessHash.init)
         self.codegramOriginalTitle = flatBuffersObject.title
         self.username = flatBuffersObject.username

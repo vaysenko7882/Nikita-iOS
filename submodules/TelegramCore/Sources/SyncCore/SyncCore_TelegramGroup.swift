@@ -146,10 +146,10 @@ public struct TelegramGroupToChannelMigrationReference: Equatable {
 }
 
 public final class TelegramGroup: Peer, Equatable {
-    private let codegramAppearanceRevision: Int64
+    private let codegramAppearance: CodeGramPeerAppearance
     public let id: PeerId
     private let codegramOriginalTitle: String
-    public var title: String { return CodeGramPeerAppearanceStore.shared.appearance(self.id).title ?? self.codegramOriginalTitle }
+    public var title: String { return self.codegramAppearance.title ?? self.codegramOriginalTitle }
     public let photo: [TelegramMediaImageRepresentation]
     public let participantCount: Int
     public let role: TelegramGroupRole
@@ -173,7 +173,7 @@ public final class TelegramGroup: Peer, Equatable {
     
     public init(id: PeerId, title: String, photo: [TelegramMediaImageRepresentation], participantCount: Int, role: TelegramGroupRole, membership: TelegramGroupMembership, flags: TelegramGroupFlags, defaultBannedRights: TelegramChatBannedRights?, migrationReference: TelegramGroupToChannelMigrationReference?, creationDate: Int32, version: Int) {
         self.id = id
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         self.codegramOriginalTitle = title
         self.photo = photo
         self.participantCount = participantCount
@@ -188,7 +188,7 @@ public final class TelegramGroup: Peer, Equatable {
     
     public init(decoder: PostboxDecoder) {
         self.id = PeerId(decoder.decodeInt64ForKey("i", orElse: 0))
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         self.codegramOriginalTitle = decoder.decodeStringForKey("t", orElse: "")
         self.photo = decoder.decodeObjectArrayForKey("ph")
         self.participantCount = Int(decoder.decodeInt32ForKey("pc", orElse: 0))
@@ -250,7 +250,7 @@ public final class TelegramGroup: Peer, Equatable {
 
     public init(flatBuffersObject: TelegramCore_TelegramGroup) throws {
         self.id = PeerId(flatBuffersObject.id)
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         self.codegramOriginalTitle = flatBuffersObject.title
         self.photo = try (0 ..< flatBuffersObject.photoCount).map { try TelegramMediaImageRepresentation(flatBuffersObject: flatBuffersObject.photo(at: $0)!) }
         self.participantCount = Int(flatBuffersObject.participantCount)
@@ -317,7 +317,7 @@ public final class TelegramGroup: Peer, Equatable {
     }
 
     public static func ==(lhs: TelegramGroup, rhs: TelegramGroup) -> Bool {
-        if lhs.codegramAppearanceRevision != rhs.codegramAppearanceRevision { return false }
+        if lhs.codegramAppearance.revision != rhs.codegramAppearance.revision { return false }
         if lhs.id != rhs.id {
             return false
         }

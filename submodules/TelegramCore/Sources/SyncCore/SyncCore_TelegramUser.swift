@@ -158,13 +158,13 @@ public struct PeerVerification: Codable, Equatable {
 }
 
 public final class TelegramUser: Peer, Equatable {
-    private let codegramAppearanceRevision: Int64
+    private let codegramAppearance: CodeGramPeerAppearance
     public let id: PeerId
     public let accessHash: TelegramPeerAccessHash?
     let codegramOriginalFirstName: String?
-    public var firstName: String? { return CodeGramPeerAppearanceStore.shared.appearance(self.id).title ?? self.codegramOriginalFirstName }
+    public var firstName: String? { return self.codegramAppearance.title ?? self.codegramOriginalFirstName }
     let codegramOriginalLastName: String?
-    public var lastName: String? { return CodeGramPeerAppearanceStore.shared.appearance(self.id).title == nil ? self.codegramOriginalLastName : nil }
+    public var lastName: String? { return self.codegramAppearance.title == nil ? self.codegramOriginalLastName : nil }
     public let username: String?
     public let phone: String?
     public let photo: [TelegramMediaImageRepresentation]
@@ -283,7 +283,7 @@ public final class TelegramUser: Peer, Equatable {
         linkedCommunityId: PeerId? = nil
     ) {
         self.id = id
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         self.accessHash = accessHash
         self.codegramOriginalFirstName = firstName
         self.codegramOriginalLastName = lastName
@@ -307,7 +307,7 @@ public final class TelegramUser: Peer, Equatable {
     
     public init(decoder: PostboxDecoder) {
         self.id = PeerId(decoder.decodeInt64ForKey("i", orElse: 0))
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         
         let accessHash: Int64 = decoder.decodeInt64ForKey("ah", orElse: 0)
         let accessHashType: Int32 = decoder.decodeInt32ForKey("aht", orElse: 0)
@@ -488,7 +488,7 @@ public final class TelegramUser: Peer, Equatable {
     }
 
     public static func ==(lhs: TelegramUser, rhs: TelegramUser) -> Bool {
-        if lhs.codegramAppearanceRevision != rhs.codegramAppearanceRevision { return false }
+        if lhs.codegramAppearance.revision != rhs.codegramAppearance.revision { return false }
         if lhs === rhs {
             return true
         }
@@ -607,7 +607,7 @@ public final class TelegramUser: Peer, Equatable {
     
     public init(flatBuffersObject: TelegramCore_TelegramUser) throws {
         self.id = PeerId(flatBuffersObject.id)
-        self.codegramAppearanceRevision = CodeGramPeerAppearanceStore.shared.appearance(self.id).revision
+        self.codegramAppearance = CodeGramPeerAppearanceStore.shared.appearance(self.id)
         self.accessHash = try flatBuffersObject.accessHash.flatMap(TelegramPeerAccessHash.init)
         self.codegramOriginalFirstName = flatBuffersObject.firstName
         self.codegramOriginalLastName = flatBuffersObject.lastName
