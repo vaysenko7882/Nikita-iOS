@@ -73,7 +73,7 @@ public final class CodeGramPeerAppearanceStore {
     }
 }
 
-public func codegramUpdatePeerAppearance(postbox: Postbox, peerId: PeerId, title: String?, jpeg: Data? = nil, removeAvatar: Bool = false, reset: Bool = false) -> Signal<Bool, NoError> {
+func codegramUpdatePeerAppearance(postbox: Postbox, peerId: PeerId, title: String?, jpeg: Data? = nil, removeAvatar: Bool = false, reset: Bool = false) -> Signal<Bool, NoError> {
     return postbox.transaction { transaction -> Bool in
         guard let peer = transaction.getPeer(peerId) else { return false }
         let encoder = PostboxEncoder()
@@ -82,5 +82,18 @@ public func codegramUpdatePeerAppearance(postbox: Postbox, peerId: PeerId, title
             let updated = PostboxDecoder(buffer: encoder.makeReadBuffer()).decodeRootObject() as? Peer else { return false }
         updatePeersCustom(transaction: transaction, peers: [updated], update: { _, next in next })
         return true
+    }
+}
+
+public extension TelegramEngine {
+    /// Feature-specific facade; callers never receive a Postbox/MediaBox handle.
+    func codegramLocalPeerAppearances() -> Signal<[EnginePeer], NoError> {
+        let ids = CodeGramPeerAppearanceStore.shared.peerIds
+        return self.account.postbox.transaction { transaction in
+            ids.compactMap { transaction.getPeer($0).map(EnginePeer.init) }
+        }
+    }
+    func updateCodeGramPeerAppearance(peerId: EnginePeer.Id, title: String?, jpeg: Data? = nil, removeAvatar: Bool = false, reset: Bool = false) -> Signal<Bool, NoError> {
+        return codegramUpdatePeerAppearance(postbox: self.account.postbox, peerId: peerId, title: title, jpeg: jpeg, removeAvatar: removeAvatar, reset: reset)
     }
 }

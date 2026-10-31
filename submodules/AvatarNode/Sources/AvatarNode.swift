@@ -15,14 +15,12 @@ import ComponentFlow
 import AvatarStoryIndicatorComponent
 import DirectMediaImageCache
 
-private func codegramLocalAvatar(peer: EnginePeer?, postbox: Postbox) -> TelegramMediaImageRepresentation? {
+private func codegramLocalAvatar(peer: EnginePeer?, prepare: (LocalFileMediaResource, Data) -> Void) -> TelegramMediaImageRepresentation? {
     guard let peer else { return nil }
     let appearance = CodeGramPeerAppearanceStore.shared.appearance(peer.id)
     guard let data = CodeGramPeerAppearanceStore.shared.imageData(appearance) else { return nil }
     let resource = LocalFileMediaResource(fileId: appearance.resourceId, size: Int64(data.count))
-    if postbox.mediaBox.completedResourcePath(id: resource.id) == nil {
-        postbox.mediaBox.storeResourceData(resource.id, data: data, synchronous: true)
-    }
+    prepare(resource, data)
     return TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: 512, height: 512), resource: resource, progressiveSizes: [], immediateThumbnailData: nil)
 }
 
@@ -654,7 +652,9 @@ public final class AvatarNode: ASDisplayNode {
                 representation = peer?.smallProfileImage
             }
             
-            if overrideImage == nil, let local = codegramLocalAvatar(peer: peer, postbox: postbox) { representation = local }
+            if overrideImage == nil, let local = codegramLocalAvatar(peer: peer, prepare: { resource, data in
+                if postbox.mediaBox.completedResourcePath(id: resource.id) == nil { postbox.mediaBox.storeResourceData(resource.id, data: data, synchronous: true) }
+            }) { representation = local }
 
             let updatedState: AvatarNodeState = .peerAvatar(peer?.id ?? EnginePeer.Id(0), peer?.nameColor, peer?.displayLetters ?? [], representation, clipStyle, cutoutRect)
             if updatedState != self.state || overrideImage != self.overrideImage || theme !== self.theme {
@@ -867,7 +867,11 @@ public final class AvatarNode: ASDisplayNode {
                 representation = peer?.smallProfileImage
             }
             
-            if overrideImage == nil, let local = codegramLocalAvatar(peer: peer, postbox: (account ?? genericContext.account).postbox) { representation = local }
+            if overrideImage == nil, let local = codegramLocalAvatar(peer: peer, prepare: { resource, data in
+                let engine = account.map { TelegramEngine(account: $0) } ?? genericContext.engine
+                let id = EngineMediaResource.Id(resource.id)
+                if engine.resources.completedResourcePath(id: id) == nil { engine.resources.storeResourceData(id: id, data: data, synchronous: true) }
+            }) { representation = local }
 
             let updatedState: AvatarNodeState = .peerAvatar(peer?.id ?? EnginePeer.Id(0), peer?.nameColor, peer?.displayLetters ?? [], representation, clipStyle, cutoutRect)
             if updatedState != self.state || overrideImage != self.overrideImage || theme !== self.theme {

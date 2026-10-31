@@ -2,21 +2,19 @@ import AccountContext
 import Display
 import Foundation
 import PhotosUI
-import Postbox
 import SwiftSignalKit
 import TelegramCore
 import UIKit
 
 final class CodeGramPeerAppearanceController: CodeGramTableController {
-    private var peers: [Peer] = []
+    private var peers: [EnginePeer] = []
     private let disposable = MetaDisposable()
     init(context: AccountContext) { super.init(context: context, title: "Имена и аватары для себя") }
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     deinit { self.disposable.dispose() }
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        let ids = CodeGramPeerAppearanceStore.shared.peerIds
-        self.disposable.set((self.context.account.postbox.transaction { transaction -> [Peer] in ids.compactMap { transaction.getPeer($0) } } |> deliverOnMainQueue).start(next: { [weak self] peers in self?.peers = peers; self?.reloadContent() }))
+        self.disposable.set((self.context.engine.codegramLocalPeerAppearances() |> deliverOnMainQueue).start(next: { [weak self] peers in self?.peers = peers; self?.reloadContent() }))
     }
     override func makeSections() -> [CodeGramSettingsSection] {
         return [
@@ -31,22 +29,22 @@ final class CodeGramPeerAppearanceController: CodeGramTableController {
         let selection = self.context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: self.context, filter: [.excludeSecretChats, .doNotSearchMessages], hasFilters: true, hasContactSelector: false, title: "Локальный вид"))
         selection.peerSelected = { [weak self] peer, _ in
             guard let self else { return }
-            if let user = peer._asPeer() as? TelegramUser, user.botInfo == nil {
+            if case let .user(user) = peer, user.botInfo == nil {
                 self.notice("Здесь можно настроить каналы, группы и ботов."); return
             }
-            self.push(CodeGramPeerEditorController(context: self.context, peer: peer._asPeer()))
+            self.push(CodeGramPeerEditorController(context: self.context, peer: peer))
         }
         self.push(selection)
     }
 }
 
 private final class CodeGramPeerEditorController: CodeGramTableController, PHPickerViewControllerDelegate {
-    private let peer: Peer
+    private let peer: EnginePeer
     private let field = UITextField()
     private let disposable = MetaDisposable()
     private var jpeg: Data?
     private var removeAvatar = false
-    init(context: AccountContext, peer: Peer) {
+    init(context: AccountContext, peer: EnginePeer) {
         self.peer = peer
         super.init(context: context, title: "Вид для себя")
         self.field.text = CodeGramPeerAppearanceStore.shared.appearance(peer.id).title
@@ -96,13 +94,13 @@ private final class CodeGramPeerEditorController: CodeGramTableController, PHPic
     }
     @objc private func save() {
         self.view.endEditing(true)
-        self.disposable.set((codegramUpdatePeerAppearance(postbox: self.context.account.postbox, peerId: self.peer.id, title: self.field.text, jpeg: self.jpeg, removeAvatar: self.removeAvatar) |> deliverOnMainQueue).start(next: { [weak self] success in
+        self.disposable.set((self.context.engine.updateCodeGramPeerAppearance( peerId: self.peer.id, title: self.field.text, jpeg: self.jpeg, removeAvatar: self.removeAvatar) |> deliverOnMainQueue).start(next: { [weak self] success in
             guard let self else { return }
             self.notice(success ? "Сохранено только для тебя на этом iPhone." : "Не удалось сохранить. Попробуй ещё раз.")
         }))
     }
     private func reset() {
-        self.disposable.set((codegramUpdatePeerAppearance(postbox: self.context.account.postbox, peerId: self.peer.id, title: nil, reset: true) |> deliverOnMainQueue).start(next: { [weak self] success in
+        self.disposable.set((self.context.engine.updateCodeGramPeerAppearance( peerId: self.peer.id, title: nil, reset: true) |> deliverOnMainQueue).start(next: { [weak self] success in
             guard let self else { return }
             if success { self.jpeg = nil; self.removeAvatar = false; self.field.text = nil; self.reloadContent() }
             self.notice(success ? "Восстановлен оригинальный вид Telegram." : "Не удалось сбросить настройки.")
