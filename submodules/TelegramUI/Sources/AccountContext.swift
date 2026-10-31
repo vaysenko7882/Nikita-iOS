@@ -316,6 +316,7 @@ public final class AccountContextImpl: AccountContext {
     private var blockedPeersMirrorSettingsDisposable: Disposable?
     private var blockedPeersMirrorForegroundDisposable: Disposable?
     private var blockedPeersMirrorRefreshTimer: SwiftSignalKit.Timer?
+    private var nikitaArchiveSyncManager: NikitaArchiveSyncManager?
     public private(set) var isFrozen: Bool
     
     public let imageCache: AnyObject?
@@ -706,6 +707,13 @@ public final class AccountContextImpl: AccountContext {
                 return try await requestPasscodeAuthentication(context: self, scope: .resource(namespace: request.namespace), lifetime: request.lifetime, biometricReason: self.sharedContext.currentPresentationData.with { $0 }.strings.Wallet_AuthenticationReason, authenticateBiometrics: authenticateBiometrics)
             }
         }
+        if !temp { self.startNikitaArchiveSync() }
+    }
+
+    private func startNikitaArchiveSync() {
+        guard self.sharedContext.applicationBindings.isMainApp else { return }
+        self.nikitaArchiveSyncManager = NikitaArchiveSyncManager(engine: self.engine,
+            inForeground: self.sharedContext.applicationBindings.applicationInForeground)
     }
 
     private func updateBlockedPeersMirror(isEnabled: Bool) {

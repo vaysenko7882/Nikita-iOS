@@ -10,6 +10,7 @@ if [ ! -f build-system/nikita-local-configuration.json ]; then
   echo "Run tools/nikita/configure.py with your own Telegram API credentials first." >&2
   exit 2
 fi
+python3 tools/nikita/rebrand.py
 # The pinned Apple rules skip signing with disable_legacy_signing, but still
 # unconditionally embed a device profile. Skip that partial for this unsigned build.
 python3 - <<'NIKITA_UNSIGNED'

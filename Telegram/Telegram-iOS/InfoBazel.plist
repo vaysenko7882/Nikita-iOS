@@ -63,7 +63,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>CFBundleURLName</key>
-			<string>$(PRODUCT_BUNDLE_IDENTIFIER).madgram</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).nikita-tools</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>mad</string>

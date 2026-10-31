@@ -362,6 +362,7 @@ private enum PreferencesKeyValues: Int32 {
     case ghostModeReadStateVersion = 54
     case ghostModeReadStateRepairVersion = 55
     case unreadCounterTagsState = 56
+    case nikitaServerArchive = 57
 }
 
 public func applicationSpecificPreferencesKey(_ value: Int32) -> ValueBoxKey {
@@ -377,6 +378,11 @@ public func applicationSpecificSharedDataKey(_ value: Int32) -> ValueBoxKey {
 }
 
 public struct PreferencesKeys {
+    static let nikitaServerArchive: ValueBoxKey = {
+        let key = ValueBoxKey(length: 4)
+        key.setInt32(0, value: PreferencesKeyValues.nikitaServerArchive.rawValue)
+        return key
+    }()
     public static let globalNotifications: ValueBoxKey = {
         let key = ValueBoxKey(length: 4)
         key.setInt32(0, value: PreferencesKeyValues.globalNotifications.rawValue)

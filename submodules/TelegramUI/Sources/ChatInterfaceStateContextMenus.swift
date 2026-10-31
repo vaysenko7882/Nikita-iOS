@@ -638,7 +638,14 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             f(.default)
             let _ = (context.engine.messages.archivedMessageVersions(id: message.id)
             |> deliverOnMainQueue).start(next: { versions in
-                guard !versions.isEmpty, let navigationController = controllerInteraction.navigationController() else {
+                guard versions.count > 1 else {
+                    controllerInteraction.presentController(textAlertController(context: context,
+                        title: archiveStrings.history,
+                        text: "Предыдущая версия не была получена клиентом. История сохраняется с момента получения сообщения; для сохранения при закрытом приложении подключи свой VPS в настройках Никита.",
+                        actions: [TextAlertAction(type: .defaultAction, title: chatPresentationInterfaceState.strings.Common_OK, action: {})]), nil)
+                    return
+                }
+                guard let navigationController = controllerInteraction.navigationController() else {
                     return
                 }
                 navigationController.pushViewController(makeMessageVersionsChatController(context: context, originalMessageId: message.id, versions: versions))
@@ -1248,7 +1255,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
 
         var actions: [ContextMenuItem] = []
 
-        if message.archivedMessageAttribute?.versionIds.isEmpty == false {
+        if message.archivedMessageAttribute?.versionIds.isEmpty == false || message.attributes.contains(where: { $0 is EditedMessageAttribute }) {
             actions.append(historyAction(for: message))
             actions.append(.separator)
         }

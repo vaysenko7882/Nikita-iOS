@@ -2076,6 +2076,13 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     }
 
     func handleWillResignActive() {
+        // Request the assertion while still foregrounded. iOS can expire it at
+        // any time; SharedWakeupManager ends it and releases the connection.
+        if NikitaSettingsStore.shared.extendArchiveInBackground {
+            let _ = (self.sharedContextPromise.get() |> take(1) |> deliverOnMainQueue).start(next: { context in
+                context.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: true, duration: 300.0)
+            })
+        }
         self.isActiveValue = false
         self.isActivePromise.set(false)
         self.clearNotificationsManager?.commitNow()
@@ -2117,7 +2124,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             if !sharedApplicationContext.sharedContext.energyUsageSettings.extendBackgroundWork {
                 extendNow = false
             }
-            sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: extendNow)
+            let archiveExtension = NikitaSettingsStore.shared.extendArchiveInBackground
+            sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: extendNow || archiveExtension, duration: archiveExtension ? 300.0 : 20.0)
             
             let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
              |> take(1)

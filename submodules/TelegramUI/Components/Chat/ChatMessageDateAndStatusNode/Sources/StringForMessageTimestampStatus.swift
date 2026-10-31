@@ -257,9 +257,6 @@ public func stringForMessageTimestampStatus(
         }
     }
 
-    if message._asMessage().isArchivedDeletedMessage {
-        dateText = "\(associatedData.deletedMessageMarker) • \(dateText)"
-    }
     
     return dateText
 }

@@ -21,7 +21,7 @@ public enum MadgramDeepLinkRoute: String, CaseIterable {
     case forwardWithoutAuthor = "forward-without-author"
 
     fileprivate static func parse(_ url: URL) -> MadgramDeepLinkRoute? {
-        guard url.scheme?.lowercased() == "mad" else {
+        guard ["nikita", "mad"].contains(url.scheme?.lowercased() ?? "") else {
             return nil
         }
 
@@ -39,7 +39,7 @@ public enum MadgramDeepLinkRoute: String, CaseIterable {
         }
 
         switch route {
-        case "settings", "madgram", "privacy":
+        case "settings", "nikita", "madgram", "privacy":
             return .settings
         case "ghost", "ghost-mode":
             return .ghost
@@ -86,6 +86,7 @@ private final class MadgramControllerArguments {
     let openMessageFilters: () -> Void
     let openLocalMessageArchive: () -> Void
     let openInterfaceTuning: () -> Void
+    let openNikitaTools: () -> Void
     let setGhostMode: (Bool) -> Void
     let setPersistentArchive: (Bool) -> Void
     let updateInterfaceTuning: (@escaping (InterfaceTuningSettings) -> InterfaceTuningSettings) -> Void
@@ -98,6 +99,7 @@ private final class MadgramControllerArguments {
         openMessageFilters: @escaping () -> Void,
         openLocalMessageArchive: @escaping () -> Void,
         openInterfaceTuning: @escaping () -> Void,
+        openNikitaTools: @escaping () -> Void,
         setGhostMode: @escaping (Bool) -> Void,
         setPersistentArchive: @escaping (Bool) -> Void,
         updateInterfaceTuning: @escaping (@escaping (InterfaceTuningSettings) -> InterfaceTuningSettings) -> Void,
@@ -109,6 +111,7 @@ private final class MadgramControllerArguments {
         self.openMessageFilters = openMessageFilters
         self.openLocalMessageArchive = openLocalMessageArchive
         self.openInterfaceTuning = openInterfaceTuning
+        self.openNikitaTools = openNikitaTools
         self.setGhostMode = setGhostMode
         self.setPersistentArchive = setPersistentArchive
         self.updateInterfaceTuning = updateInterfaceTuning
@@ -130,6 +133,7 @@ private enum MadgramEntry: ItemListNodeEntry {
     case nikitaHeader(String)
     case ghostQuick(String, Bool)
     case archiveQuick(String, Bool)
+    case nikitaTools(String)
     case nikitaInfo(String)
     case privacyHeader(String)
     case ghostMode(String, String)
@@ -150,7 +154,7 @@ private enum MadgramEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
-        case .nikitaHeader, .ghostQuick, .archiveQuick, .nikitaInfo:
+        case .nikitaHeader, .ghostQuick, .archiveQuick, .nikitaTools, .nikitaInfo:
             return MadgramSection.nikita.rawValue
         case .privacyHeader, .ghostMode, .hidePhoneInSettings, .privacyInfo:
             return MadgramSection.privacy.rawValue
@@ -165,9 +169,10 @@ private enum MadgramEntry: ItemListNodeEntry {
 
     var stableId: Int32 {
         switch self {
-        case .nikitaHeader: return -4
-        case .ghostQuick: return -3
-        case .archiveQuick: return -2
+        case .nikitaHeader: return -5
+        case .ghostQuick: return -4
+        case .archiveQuick: return -3
+        case .nikitaTools: return -2
         case .nikitaInfo: return -1
         case .privacyHeader: return 0
         case .ghostMode: return 1
@@ -191,6 +196,7 @@ private enum MadgramEntry: ItemListNodeEntry {
     static func ==(lhs: MadgramEntry, rhs: MadgramEntry) -> Bool {
         switch (lhs, rhs) {
         case let (.nikitaHeader(lhsText), .nikitaHeader(rhsText)),
+             let (.nikitaTools(lhsText), .nikitaTools(rhsText)),
              let (.nikitaInfo(lhsText), .nikitaInfo(rhsText)):
             return lhsText == rhsText
         case let (.ghostQuick(lhsText, lhsValue), .ghostQuick(rhsText, rhsValue)),
@@ -257,6 +263,8 @@ private enum MadgramEntry: ItemListNodeEntry {
             return switchItem(text, nil, value, arguments.setGhostMode)
         case let .archiveQuick(text, value):
             return switchItem(text, nil, value, arguments.setPersistentArchive)
+        case let .nikitaTools(text):
+            return ItemListDisclosureItem(presentationData: presentationData, title: text, label: "", sectionId: self.section, style: .blocks, action: arguments.openNikitaTools)
         case let .privacyHeader(text), let .messagesHeader(text), let .interfaceHeader(text), let .otherHeader(text):
             return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
         case let .privacyInfo(text), let .messagesInfo(text), let .interfaceInfo(text):
@@ -320,6 +328,9 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
         },
         openInterfaceTuning: {
             pushControllerImpl?(interfaceTuningSettingsController(context: context))
+        },
+        openNikitaTools: {
+            pushControllerImpl?(NikitaToolsController(context: context))
         },
         setGhostMode: { value in
             let _ = context.engine.messages.updateGhostModeSettingsInteractively { current in
@@ -421,6 +432,7 @@ public func madgramSettingsController(context: AccountContext) -> ViewController
             .nikitaHeader(strings.madgram.quickSection),
             .ghostQuick(strings.madgram.quickGhost, ghostModeSettings.isEnabled),
             .archiveQuick(strings.madgram.quickArchive, localArchiveSettings.keepAcrossLaunches && localArchiveSettings.saveDeletedMessages && localArchiveSettings.saveEditedVersions),
+            .nikitaTools("VPS и VoiceChanger"),
             .nikitaInfo(strings.madgram.quickInfo),
             .privacyHeader(strings.madgram.privacySection),
             .ghostMode(strings.ghostMode.title, ghostModeSettings.isEnabled ? strings.ghostMode.on : strings.ghostMode.off),
