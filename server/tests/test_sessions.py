@@ -114,7 +114,7 @@ class ActivateSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_existing_session_without_new_login_or_token_rotation(self):
         await self.activate()
         updated = json.loads(self.config_path.read_text())
-        self.assertEqual(updated["session_path"], str(self.snapshot))
+        self.assertEqual(updated["session_path"], str(self.snapshot.resolve()))
         self.assertEqual(updated["token"], self.config["token"])
         self.assertEqual(self.config_path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(Archive(self.config["database_path"]).sync(0)["account_id"], 12345)
