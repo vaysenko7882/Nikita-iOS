@@ -79,7 +79,7 @@ func codegramUpdatePeerAppearance(postbox: Postbox, peerId: PeerId, title: Strin
         let encoder = PostboxEncoder()
         encoder.encodeRootObject(peer)
         guard CodeGramPeerAppearanceStore.shared.set(peerId, title: title, jpeg: jpeg, removeAvatar: removeAvatar, reset: reset),
-            let updated = PostboxDecoder(buffer: encoder.makeReadBuffer()).decodeRootObject() as? Peer else { return false }
+            let updated = PostboxDecoder(buffer: MemoryBuffer(data: encoder.makeData())).decodeRootObject() as? Peer else { return false }
         updatePeersCustom(transaction: transaction, peers: [updated], update: { _, next in next })
         return true
     }

@@ -43,6 +43,7 @@ python3 build-system/Make/Make.py \
   --cacheDir="$nikita_cache/actions" \
   --bazelArguments="--//Telegram:disableProvisioningProfiles --//Telegram:disableExtensions --//Telegram:disableAppGroups --features=disable_legacy_signing --jobs=2 --local_resources=memory=4096 --repository_cache=\"$nikita_cache/repositories\" --repo_contents_cache= --experimental_disk_cache_gc_max_size=8G --experimental_disk_cache_gc_idle_delay=1s --build_event_json_file=\"$nikita_root/build/nikita/build-events.jsonl\"" \
   build \
+  --continueOnError \
   --configurationPath=build-system/nikita-local-configuration.json \
   --xcodeManagedCodesigning \
   --apsEnvironment=development \
