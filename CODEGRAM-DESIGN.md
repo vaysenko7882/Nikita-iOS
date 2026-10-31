@@ -1,5 +1,22 @@
 # CodeGram 14.1 — settings redesign
 
+## Compiled release — 2026-10-31
+
+- CodeGram **14.1.0 (22)**, unsigned arm64 iPhone, minimum iOS 15.0.
+- Source commit: `dc97de782bf07c34aa800ba301bdf8abdd774945`.
+- Successful full run: https://github.com/vaysenko7882/Nikita-iOS/actions/runs/41220315980
+- IPA: 72,284,668 bytes, SHA256 `72ec889f461c52944c5eaccae6bd2bf042f77543d7531fd8c7f4dec5dfea8120`.
+- ZIP: 72,026,939 bytes, SHA256 `7dddeac9b627ec5cecaec4dba296c52d6893b7ad3f9ac3d66ec9ead94880fe9b`.
+- CI: 11 build/tool tests, 55 server tests, 48 Swift syntax checks, architecture
+  guard, production Postbox persistence checks and advanced/legacy audio checks passed.
+- Full compiler elapsed **638.635 seconds** (10 min 39 s); complete CI job about
+  **14 min 45 s**. **7830 disk-cache hits / 9529 actions**, 1650 internal,
+  37 local and 12 worker. Updated source cache saved under the same toolchain key.
+- Artifact digest, IPA identity/version/build/platform/digest, ZIP CRCs and
+  antialiased transparent settings-icon corners verified. Source Home Screen icon is RGB.
+- **Runtime and visual acceptance remain unexecuted:** no device/simulator launch,
+  interactions or recorded-frame evaluation was performed. Acceptance criteria below apply.
+
 The existing Settings → CodeGram entry now opens the dashboard directly. The
 normal launch into Telegram chats is preserved. No extra nested feature hub.
 
