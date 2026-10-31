@@ -8,7 +8,28 @@ if [ "$(id -u)" != 0 ]; then
 fi
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
 nikita_source="$(cd "$(dirname "$0")" && pwd)"
-read -r -p 'Домен архива (A/AAAA уже указывает на этот VPS): ' nikita_domain
+nikita_domain=""
+nikita_session=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --domain|--session)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        echo "Для $1 нужно значение." >&2
+        exit 2
+      fi
+      if [ "$1" = --domain ]; then nikita_domain="$2"; else nikita_session="$2"; fi
+      shift 2
+      ;;
+    *) echo 'Параметры: --domain домен --session /полный/путь/my_account.session' >&2; exit 2 ;;
+  esac
+done
+if [ -n "$nikita_session" ] && { [ ! -f "$nikita_session" ] || [ ! -r "$nikita_session" ]; }; then
+  echo 'Файл сессии не найден или недоступен. Укажи его полный путь на VPS.' >&2
+  exit 1
+fi
+if [ -z "$nikita_domain" ]; then
+  read -r -p 'Домен архива (A/AAAA уже указывает на этот VPS): ' nikita_domain
+fi
 if [[ ! "$nikita_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || [[ "$nikita_domain" != *.* ]]; then
   echo 'Нужен домен, например archive.example.com, без https:// и пути.' >&2
   exit 1
@@ -43,7 +64,37 @@ chmod -R g+rX,o-rwx /opt/nikita-archive/venv
 if [ ! -f /var/lib/nikita-archive/config.json ]; then
   runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive configure
 fi
-runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive login
+nikita_resume_service=0
+nikita_import_dir=""
+nikita_import_kept=0
+nikita_cleanup() {
+  nikita_exit_status=$?
+  if [ -n "$nikita_import_dir" ] && [ "$nikita_import_kept" = 0 ]; then
+    rm -rf -- "$nikita_import_dir"
+  fi
+  if [ "$nikita_exit_status" -ne 0 ] && [ "$nikita_resume_service" = 1 ]; then
+    systemctl start nikita-archive || true
+  fi
+}
+trap nikita_cleanup EXIT
+
+if [ -n "$nikita_session" ]; then
+  # A consistent SQLite backup also includes committed WAL data. The source
+  # remains private/read-only; the non-root service receives its own copy.
+  nikita_import_dir="$(mktemp -d /var/lib/nikita-archive/session-import.XXXXXX)"
+  /opt/nikita-archive/venv/bin/python -m nikita_archive.session_files "$nikita_session" "$nikita_import_dir/telegram.session"
+  chown -R nikita-archive:nikita-archive "$nikita_import_dir"
+fi
+if systemctl is-active --quiet nikita-archive; then
+  systemctl stop nikita-archive
+  nikita_resume_service=1
+fi
+if [ -n "$nikita_session" ]; then
+  nikita_import_kept=1
+  runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive use-session "$nikita_import_dir/telegram.session"
+else
+  runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive login
+fi
 
 install -m 644 "$nikita_source/nikita-archive.service" /etc/systemd/system/nikita-archive.service
 install -d -m 755 /etc/caddy
@@ -71,7 +122,9 @@ if ! caddy validate --config /etc/caddy/Caddyfile; then
   exit 1
 fi
 systemctl daemon-reload
-systemctl enable --now nikita-archive
+systemctl enable nikita-archive
+systemctl restart nikita-archive
+nikita_resume_service=0
 systemctl enable caddy
 systemctl reload-or-restart caddy
 echo
