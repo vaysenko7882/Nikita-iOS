@@ -32,6 +32,18 @@ jobs:
           sudo xcode-select -s "/Applications/Xcode_${NIKITA_XCODE}.app/Contents/Developer"
           xcodebuild -version
           df -h .
+      - name: Prepare reusable toolchain cache
+        id: cache-config
+        run: python3 tools/nikita/cache_settings.py prepare
+      - name: Restore Bazel actions and downloaded repositories
+        id: cache
+        continue-on-error: true
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ steps.cache-config.outputs.path }}
+          key: nikita-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-${{ github.sha }}
+          restore-keys: |
+            nikita-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-
       - name: Check source, server journal and voice effects
         run: |
           python3 -m unittest discover -s tools/nikita/tests -v
@@ -44,6 +56,7 @@ jobs:
       - name: Fetch pinned dependencies
         run: python3 tools/nikita/configure.py --submodules
       - name: Compile Nikita for iPhone
+        id: compile
         run: bash tools/nikita/build.sh
       - name: Retain compiled IPA
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -55,6 +68,17 @@ jobs:
             build/nikita/Build.json
           if-no-files-found: error
           retention-days: 14
+      - name: Bound reusable cache
+        continue-on-error: true
+        if: ${{ always() && !cancelled() && steps.compile.outcome != 'skipped' && steps.compile.outcome != '' }}
+        run: python3 tools/nikita/cache_settings.py prune
+      - name: Save reusable build results
+        continue-on-error: true
+        if: ${{ always() && !cancelled() && steps.compile.outcome != 'skipped' && steps.compile.outcome != '' && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ steps.cache-config.outputs.path }}
+          key: nikita-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-${{ github.sha }}
       - name: Remove temporary API configuration
         if: always()
         run: rm -f build-system/nikita-local-configuration.json

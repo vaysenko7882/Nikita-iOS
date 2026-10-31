@@ -11,6 +11,7 @@ if [ ! -f build-system/nikita-local-configuration.json ]; then
   exit 2
 fi
 python3 tools/nikita/rebrand.py
+python3 tools/nikita/stamp_build_version.py "${GITHUB_RUN_NUMBER:-1}"
 # The pinned Apple rules skip signing with disable_legacy_signing, but still
 # unconditionally embed a device profile. Skip that partial for this unsigned build.
 python3 - <<'NIKITA_UNSIGNED'
@@ -33,16 +34,17 @@ if part.count(old) == 1:
 elif part.count(new) != 1:
     raise SystemExit('Pinned provisioning profile rule has changed; refusing an unchecked patch.')
 NIKITA_UNSIGNED
-nikita_cache="${RUNNER_TEMP:-$nikita_root/build}/nikita-bazel-cache"
+nikita_cache="${NIKITA_BUILD_CACHE:-$nikita_root/build/nikita-cache}"
+mkdir -p "$nikita_cache/actions" "$nikita_cache/repositories" "$nikita_root/build/nikita"
 # disable_legacy_signing is supported by the pinned rules_apple implementation.
 python3 build-system/Make/Make.py \
-  --cacheDir="$nikita_cache" \
-  --bazelArguments="--//Telegram:disableProvisioningProfiles --//Telegram:disableExtensions --//Telegram:disableAppGroups --features=disable_legacy_signing --jobs=2 --local_resources=memory=4096" \
+  --cacheDir="$nikita_cache/actions" \
+  --bazelArguments="--//Telegram:disableProvisioningProfiles --//Telegram:disableExtensions --//Telegram:disableAppGroups --features=disable_legacy_signing --jobs=2 --local_resources=memory=4096 --repository_cache=\"$nikita_cache/repositories\" --experimental_disk_cache_gc_max_size=8G --experimental_disk_cache_gc_idle_delay=1s --build_event_json_file=\"$nikita_root/build/nikita/build-events.jsonl\"" \
   build \
   --configurationPath=build-system/nikita-local-configuration.json \
   --xcodeManagedCodesigning \
   --apsEnvironment=development \
   --configuration=release_arm64 \
-  --buildNumber="${GITHUB_RUN_NUMBER:-1}"
+  --buildNumber=1
 # Use the actual current Bazel output, never the possibly stale archive-root folder.
 python3 tools/nikita/validate_ipa.py bazel-bin/Telegram/Telegram.ipa
