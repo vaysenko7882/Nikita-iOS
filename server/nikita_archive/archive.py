@@ -85,13 +85,15 @@ class Archive:
             db.execute("BEGIN IMMEDIATE")
             for message_id in message_ids:
                 if channel_id is None:
-                    rows = db.execute("SELECT peer_type,peer_id,payload FROM messages WHERE message_id=? AND peer_type IN ('user','chat') AND deleted=0", (message_id,)).fetchall()
+                    rows = db.execute("SELECT peer_type,peer_id,payload,deleted FROM messages WHERE message_id=? AND peer_type IN ('user','chat')", (message_id,)).fetchall()
                 else:
-                    rows = db.execute("SELECT peer_type,peer_id,payload FROM messages WHERE message_id=? AND peer_type='channel' AND peer_id=? AND deleted=0", (message_id, channel_id)).fetchall()
+                    rows = db.execute("SELECT peer_type,peer_id,payload,deleted FROM messages WHERE message_id=? AND peer_type='channel' AND peer_id=?", (message_id, channel_id)).fetchall()
                 if not rows:
                     value = int(self._meta(db, "unknown_deletions", "0")) + 1
                     db.execute("INSERT OR REPLACE INTO meta VALUES('unknown_deletions', ?)", (str(value),))
-                for peer_type, peer_id, payload in rows:
+                for peer_type, peer_id, payload, already_deleted in rows:
+                    if already_deleted:
+                        continue
                     event = {**json.loads(payload), "kind": "delete", "captured_at": captured_at}
                     event.pop("fingerprint", None)
                     db.execute("INSERT INTO events(payload) VALUES(?)", (json.dumps(event, ensure_ascii=False),))
@@ -105,12 +107,20 @@ class Archive:
             # One read transaction: account, epoch, cursor and events are consistent.
             db.execute("BEGIN")
             identity = self._meta(db, "server_id")
-            reset = bool(server_id and server_id != identity)
+            head = db.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
+            reset = bool(server_id and server_id != identity) or after > head
             rows = [] if reset else db.execute("SELECT seq,payload FROM events WHERE seq>? ORDER BY seq LIMIT ?", (after, limit + 1)).fetchall()
-            selected = rows[:limit]
+            selected = []
+            response_bytes = 0
+            for row in rows[:limit]:
+                size = len(row[1].encode("utf-8")) + 64
+                if selected and response_bytes + size > 2 * 1024 * 1024:
+                    break
+                selected.append(row)
+                response_bytes += size
             last_check = int(self._meta(db, "last_connection_check", "0"))
             return {"protocol": 1, "server_id": identity, "account_id": int(self._meta(db, "account_id", "0")),
                 "reset_required": reset, "next_cursor": 0 if reset else selected[-1][0] if selected else after,
-                "has_more": len(rows) > limit, "events": [{**json.loads(payload), "seq": seq} for seq, payload in selected],
+                "has_more": len(rows) > len(selected), "events": [{**json.loads(payload), "seq": seq} for seq, payload in selected],
                 "connected": self._meta(db, "connected") == "1" and time.time() - last_check < 90,
                 "unknown_deletions": int(self._meta(db, "unknown_deletions", "0"))}

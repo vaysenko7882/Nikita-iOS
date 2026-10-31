@@ -50,6 +50,7 @@ class ArchiveTests(unittest.TestCase):
         self.archive.delete([10])
         self.archive.delete([10])
         self.assertEqual(len(self.archive.sync(0)["events"]), 2)
+        self.assertEqual(self.archive.sync(0)["unknown_deletions"], 0)
 
     def test_channel_deletion_cannot_delete_equal_id_from_another_channel(self):
         self.archive.observe(message("one", kind="channel", peer=1))
@@ -162,6 +163,33 @@ class ArchiveTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
+
+
+    def test_large_pages_do_not_skip_revisions(self):
+        for identifier in range(1, 101):
+            self.archive.observe(message("Я" * 30000, mid=identifier))
+        self.archive.delete(list(range(1, 101)))
+        cursor = 0
+        seen = []
+        while True:
+            page = self.archive.sync(cursor, limit=100)
+            self.assertLess(len(json.dumps(page, ensure_ascii=False).encode()), 3 * 1024 * 1024)
+            seen.extend(event["message_id"] for event in page["events"])
+            cursor = page["next_cursor"]
+            if not page["has_more"]:
+                break
+        self.assertEqual(seen, list(range(1, 101)))
+
+    def test_backup_restore_resets_a_cursor_ahead_of_the_journal(self):
+        self.archive.observe(message("A"))
+        self.archive.observe(message("B", version=110))
+        self.archive.delete([10])
+        previous = self.archive.sync(0)
+        with self.archive.connect() as db:
+            db.execute("DELETE FROM events WHERE seq > 1")
+        page = self.archive.sync(previous["next_cursor"], server_id=previous["server_id"])
+        self.assertTrue(page["reset_required"])
+        self.assertEqual(page["next_cursor"], 0)
 
 
 if __name__ == "__main__":

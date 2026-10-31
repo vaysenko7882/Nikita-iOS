@@ -9,6 +9,7 @@
 В терминале VPS:
 
 ```bash
+sudo apt-get update && sudo apt-get install -y git
 git clone --depth 1 --filter=blob:none --sparse https://github.com/vaysenko7882/Nikita-iOS.git nikita-install
 git -C nikita-install sparse-checkout set server
 sudo bash nikita-install/server/install.sh
