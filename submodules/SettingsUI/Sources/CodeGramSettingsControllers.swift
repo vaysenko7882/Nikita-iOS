@@ -20,7 +20,8 @@ private final class CodeGramSwitch: UISwitch {
     var changed: ((Bool) -> Void)?
     @objc func updateValue() { self.changed?(self.isOn) }
 }
-private final class CodeGramSliderCell: UITableViewCell {
+private final class CodeGramSliderCell: UITableViewCell, CodeGramIconProvidingCell {
+    private let icon = UIImageView()
     private let caption = UILabel()
     private let valueLabel = UILabel()
     private let slider = UISlider()
@@ -31,7 +32,10 @@ private final class CodeGramSliderCell: UITableViewCell {
         self.selectionStyle = .none
         self.changed = changed; self.format = format
         self.caption.text = title
-        self.caption.font = .systemFont(ofSize: 16)
+        self.caption.font = .preferredFont(forTextStyle: .body)
+        self.caption.adjustsFontForContentSizeCategory = true
+        self.caption.numberOfLines = 0
+        self.icon.image = CodeGramSettingsTheme.symbol(CodeGramSettingsTheme.icon(for: title))
         self.valueLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
         self.valueLabel.textColor = .secondaryLabel
         self.valueLabel.textAlignment = .right
@@ -41,9 +45,12 @@ private final class CodeGramSliderCell: UITableViewCell {
         self.slider.value = Float(value)
         self.slider.accessibilityLabel = title
         self.slider.addTarget(self, action: #selector(self.valueChanged), for: .valueChanged)
-        for view in [self.caption, self.valueLabel, self.slider] { view.translatesAutoresizingMaskIntoConstraints = false; self.contentView.addSubview(view) }
+        for view in [self.icon, self.caption, self.valueLabel, self.slider] { view.translatesAutoresizingMaskIntoConstraints = false; self.contentView.addSubview(view) }
         NSLayoutConstraint.activate([
-            self.caption.leadingAnchor.constraint(equalTo: self.contentView.leadingAnchor, constant: 16),
+            self.icon.leadingAnchor.constraint(equalTo: self.contentView.leadingAnchor, constant: 16),
+            self.icon.centerYAnchor.constraint(equalTo: self.caption.centerYAnchor),
+            self.icon.widthAnchor.constraint(equalToConstant: 32), self.icon.heightAnchor.constraint(equalToConstant: 32),
+            self.caption.leadingAnchor.constraint(equalTo: self.icon.trailingAnchor, constant: 12),
             self.caption.topAnchor.constraint(equalTo: self.contentView.topAnchor, constant: 14),
             self.caption.trailingAnchor.constraint(lessThanOrEqualTo: self.valueLabel.leadingAnchor, constant: -8),
             self.valueLabel.trailingAnchor.constraint(equalTo: self.contentView.trailingAnchor, constant: -16),
@@ -77,6 +84,8 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
+        self.displayNode.backgroundColor = CodeGramSettingsTheme.background
+        CodeGramSettingsTheme.configure(self.tableView)
         self.tableView.overrideUserInterfaceStyle = self.context.sharedContext.currentPresentationData.with { $0 }.theme.overallDarkAppearance ? .dark : .light
         self.tableView.contentInsetAdjustmentBehavior = .never
         self.tableView.keyboardDismissMode = .interactive
@@ -104,7 +113,11 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { self.sections[section].rows.count }
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { self.sections[section].title }
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? { self.sections[section].footer }
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell { self.sections[indexPath.section].rows[indexPath.row].cell() }
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = self.sections[indexPath.section].rows[indexPath.row].cell()
+        CodeGramSettingsTheme.prepare(cell)
+        return cell
+    }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { tableView.deselectRow(at: indexPath, animated: true); self.sections[indexPath.section].rows[indexPath.row].action?() }
     func textRow(_ title: String, detail: String? = nil, icon: String? = nil, action: (() -> Void)? = nil) -> CodeGramSettingsRow {
         return CodeGramSettingsRow(cell: {
@@ -112,17 +125,21 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
             cell.textLabel?.text = title; cell.textLabel?.numberOfLines = 0
             cell.detailTextLabel?.text = detail; cell.detailTextLabel?.numberOfLines = 0
             cell.detailTextLabel?.textColor = .secondaryLabel
-            if let icon { cell.imageView?.image = UIImage(systemName: icon); cell.imageView?.tintColor = .systemBlue }
+            cell.imageView?.accessibilityIdentifier = icon
             cell.accessoryType = action == nil ? .none : .disclosureIndicator
             cell.selectionStyle = action == nil ? .none : .default
             return cell
         }, action: action)
     }
-    func switchRow(_ title: String, value: Bool, changed: @escaping (Bool) -> Void) -> CodeGramSettingsRow {
+    func switchRow(_ title: String, value: Bool, detail: String? = nil, icon: String? = nil, enabled: Bool = true, changed: @escaping (Bool) -> Void) -> CodeGramSettingsRow {
         return CodeGramSettingsRow(cell: {
-            let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+            let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
             cell.textLabel?.text = title; cell.textLabel?.numberOfLines = 0
+            cell.detailTextLabel?.text = detail; cell.detailTextLabel?.numberOfLines = 0
+            cell.detailTextLabel?.textColor = .secondaryLabel
+            cell.imageView?.accessibilityIdentifier = icon
             let toggle = CodeGramSwitch(); toggle.isOn = value; toggle.changed = changed
+            toggle.isEnabled = enabled; toggle.onTintColor = .systemGray
             toggle.addTarget(toggle, action: #selector(CodeGramSwitch.updateValue), for: .valueChanged)
             cell.accessoryView = toggle; cell.selectionStyle = .none
             return cell
@@ -133,26 +150,6 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
     }
 }
 
-func codegramSettingsHero() -> UIView {
-    let view = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 142))
-    let card = UIView(); card.backgroundColor = UIColor(white: 0.055, alpha: 1); card.layer.cornerRadius = 24
-    card.layer.borderWidth = 0.5; card.layer.borderColor = UIColor.white.withAlphaComponent(0.2).cgColor
-    let mark = UIImageView(image: codegramBrandMark()); mark.contentMode = .scaleAspectFit
-    let title = UILabel(); title.text = "CodeGram"; title.font = .systemFont(ofSize: 28, weight: .bold); title.textColor = .white
-    let detail = UILabel(); detail.text = "Твой стиль. Твои настройки."; detail.font = .systemFont(ofSize: 13); detail.textColor = UIColor.white.withAlphaComponent(0.6)
-    view.addSubview(card)
-    for child in [card, mark, title, detail] { child.translatesAutoresizingMaskIntoConstraints = false }
-    for child in [mark, title, detail] { card.addSubview(child) }
-    NSLayoutConstraint.activate([
-        card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20), card.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-        card.topAnchor.constraint(equalTo: view.topAnchor, constant: 12), card.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
-        mark.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 24), mark.centerYAnchor.constraint(equalTo: card.centerYAnchor), mark.widthAnchor.constraint(equalToConstant: 52), mark.heightAnchor.constraint(equalToConstant: 56),
-        title.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 20), title.topAnchor.constraint(equalTo: card.topAnchor, constant: 29), title.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -16),
-        detail.leadingAnchor.constraint(equalTo: title.leadingAnchor), detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 5)
-    ])
-    view.accessibilityLabel = "CodeGram. Твой стиль. Твои настройки."
-    return view
-}
 
 final class CodeGramVoiceController: CodeGramTableController {
     private var configuration = NikitaSettingsStore.shared.voiceConfiguration
@@ -211,7 +208,7 @@ final class CodeGramVoiceController: CodeGramTableController {
     }
 }
 
-private final class CodeGramDeletedPreviewCell: UITableViewCell {
+private final class CodeGramDeletedPreviewCell: UITableViewCell, CodeGramIconProvidingCell {
     private let bubble = UIView()
     init() {
         super.init(style: .default, reuseIdentifier: nil)
@@ -269,3 +266,4 @@ final class CodeGramContentController: CodeGramTableController {
         ]
     }
 }
+

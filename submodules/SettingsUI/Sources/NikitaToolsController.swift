@@ -50,6 +50,8 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
 
     override public func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
+        self.displayNode.backgroundColor = CodeGramSettingsTheme.background
+        CodeGramSettingsTheme.configure(self.tableView)
         let dark = self.context.sharedContext.currentPresentationData.with { $0 }.theme.overallDarkAppearance
         self.tableView.overrideUserInterfaceStyle = dark ? .dark : .light
         self.tableView.dataSource = self
@@ -94,7 +96,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
     public func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch section {
         case 0: return "Объём файлов на iPhone и VPS, правила фонового сохранения и исключения для отдельных диалогов."
-        case 1: return "Клиент сохраняет обновления, пока iOS разрешает работу: запрос до 5 минут, фактическое время может быть значительно короче. После принудительного закрытия нужен VPS."
+        case 1: return "Клиент сохраняет обновления, пока iOS разрешает работу: до 60 секунд, при энергосбережении до 15 секунд; при сильном нагреве дополнительное время не запрашивается. iOS может остановить работу раньше. После принудительного закрытия нужен VPS."
         case 2: return "VPS сохраняет полученные фото, видео, кружочки, голосовые, стикеры, GIF, музыку и файлы, даже когда iPhone закрыт. После синхронизации вложения открываются в чате и скачиваются частями. Файлы должны успеть загрузиться до потери доступа в Telegram. При нехватке места очередь приостанавливается; старые файлы не удаляются. Для новых правил и статистики обнови VPS до версии 4. Сохранение подчиняется настройкам в разделе «Правила VPS»."
         default: return "Ключ доступа хранится в Keychain. Сервер не подключается, пока ты не включишь интеграцию и не сохранишь настройки."
         }
@@ -108,7 +110,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
             let icons = ["internaldrive", "line.3.horizontal.decrease.circle"]
             cell.textLabel?.text = titles[indexPath.row]
             cell.imageView?.image = UIImage(systemName: icons[indexPath.row])
-            cell.imageView?.tintColor = .systemBlue
+            cell.imageView?.tintColor = .label
             cell.accessoryType = .disclosureIndicator
         } else if indexPath.section == 1 {
             cell.textLabel?.text = "Продлевать сохранение в фоне"
@@ -132,7 +134,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
                 cell.contentView.addSubview(field)
                 field.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
-                    field.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 16.0),
+                    field.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 64.0),
                     field.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -16.0),
                     field.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 14.0),
                     field.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -14.0)
@@ -140,10 +142,10 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
                 cell.selectionStyle = .none
             case 3:
                 cell.textLabel?.text = "Сохранить настройки VPS"
-                cell.textLabel?.textColor = .systemBlue
+                cell.textLabel?.textColor = .label
             case 4:
                 cell.textLabel?.text = self.isSyncing ? "Синхронизация…" : "Проверить и синхронизировать"
-                cell.textLabel?.textColor = .systemBlue
+                cell.textLabel?.textColor = .label
             default:
                 cell.textLabel?.text = self.statusText
                 cell.textLabel?.font = .systemFont(ofSize: 14.0)
@@ -152,9 +154,10 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
             }
         } else {
             cell.textLabel?.text = "Как установить архив на VPS"
-            cell.textLabel?.textColor = .systemBlue
+            cell.textLabel?.textColor = .label
             cell.accessoryType = .disclosureIndicator
         }
+        CodeGramSettingsTheme.prepare(cell)
         return cell
     }
 
@@ -175,7 +178,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
                 self.importedCount = 0
                 self.statusText = "Соединяюсь с сервером…"
                 self.reloadStatus()
-                self.syncPage(remaining: 20)
+                self.syncPage(remaining: CodeGramEnergyPolicy.current.pageBudget)
             }
         } else if indexPath.section == 3 {
             self.context.sharedContext.applicationBindings.openUrl("https://github.com/vaysenko7882/Nikita-iOS/blob/master/server/README.md")
@@ -238,4 +241,5 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
         }))
     }
 }
+
 

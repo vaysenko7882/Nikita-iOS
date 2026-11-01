@@ -55,6 +55,8 @@ jobs:
           python3 tools/nikita/check_archive_state.py
           xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift tools/nikita/tests/VoiceProcessorCheck.swift -o "$RUNNER_TEMP/nikita-voice-check"
           "$RUNNER_TEMP/nikita-voice-check"
+          xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/CodeGramEnergyPolicy.swift tools/nikita/tests/EnergyPolicyCheck.swift -o "$RUNNER_TEMP/codegram-energy-check"
+          "$RUNNER_TEMP/codegram-energy-check"
       - name: Fetch pinned dependencies
         run: python3 tools/nikita/configure.py --submodules
       - name: Compile CodeGram for iPhone
@@ -84,3 +86,4 @@ jobs:
       - name: Remove temporary API configuration
         if: always()
         run: rm -f build-system/nikita-local-configuration.json
+

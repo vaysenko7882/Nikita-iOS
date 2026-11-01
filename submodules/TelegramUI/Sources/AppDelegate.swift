@@ -2078,9 +2078,10 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     func handleWillResignActive() {
         // Request the assertion while still foregrounded. iOS can expire it at
         // any time; SharedWakeupManager ends it and releases the connection.
-        if NikitaSettingsStore.shared.extendArchiveInBackground {
+        let archiveBackgroundDuration = CodeGramEnergyPolicy.current.backgroundDuration
+        if NikitaSettingsStore.shared.extendArchiveInBackground && archiveBackgroundDuration > 0 {
             let _ = (self.sharedContextPromise.get() |> take(1) |> deliverOnMainQueue).start(next: { context in
-                context.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: true, duration: 300.0)
+                context.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: true, duration: archiveBackgroundDuration)
             })
         }
         self.isActiveValue = false
@@ -2124,8 +2125,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             if !sharedApplicationContext.sharedContext.energyUsageSettings.extendBackgroundWork {
                 extendNow = false
             }
-            let archiveExtension = NikitaSettingsStore.shared.extendArchiveInBackground
-            sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: extendNow || archiveExtension, duration: archiveExtension ? 300.0 : 20.0)
+            let archiveDuration = CodeGramEnergyPolicy.current.backgroundDuration
+            let archiveExtension = NikitaSettingsStore.shared.extendArchiveInBackground && archiveDuration > 0
+            sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: extendNow || archiveExtension, duration: archiveExtension ? archiveDuration : 20.0)
             
             let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
              |> take(1)
@@ -3584,3 +3586,4 @@ private final class NavigationBarOverflowMenuReferenceSource: ContextReferenceCo
         return ContextControllerReferenceViewInfo(referenceView: self.sourceView, contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 }
+

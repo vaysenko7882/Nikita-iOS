@@ -159,7 +159,7 @@ private final class CodeGramCardArtwork: UIView {
             ("Изменено" as NSString).draw(at: CGPoint(x: 61, y: 73), withAttributes: [.font: UIFont.systemFont(ofSize: 13), .foregroundColor: UIColor.label.withAlphaComponent(0.85)])
         case .appearance:
             let outline = UIBezierPath(roundedRect: CGRect(x: 12, y: 7, width: 142, height: 105), cornerRadius: 15)
-            UIColor.label.withAlphaComponent(0.1).setStroke(); outline.lineWidth = 1; outline.stroke()
+
             self.bubble(CGRect(x: 24, y: 21, width: 96, height: 32), color: UIColor.label.withAlphaComponent(0.16), leftTail: true)
             self.bubble(CGRect(x: 49, y: 65, width: 104, height: 33), color: UIColor.label.withAlphaComponent(0.92), leftTail: false)
             for (x, y, color) in [(CGFloat(36), CGFloat(33), UIColor.label.withAlphaComponent(0.32)), (CGFloat(62), CGFloat(77), UIColor.systemBackground.withAlphaComponent(0.6))] {
@@ -177,7 +177,7 @@ private final class CodeGramCardArtwork: UIView {
             }
             let circle = UIBezierPath(ovalIn: CGRect(x: 125, y: 39, width: 37, height: 37))
             UIColor.label.withAlphaComponent(0.12).setFill(); circle.fill()
-            UIColor.label.withAlphaComponent(0.2).setStroke(); circle.lineWidth = 0.7; circle.stroke()
+
             let triangle = UIBezierPath(); triangle.move(to: CGPoint(x: 140, y: 50)); triangle.addLine(to: CGPoint(x: 140, y: 65)); triangle.addLine(to: CGPoint(x: 151, y: 57.5)); triangle.close()
             UIColor.label.withAlphaComponent(0.85).setFill(); triangle.fill()
         default: break
@@ -187,29 +187,23 @@ private final class CodeGramCardArtwork: UIView {
 }
 
 private class CodeGramDashboardSurface: UIControl {
-    private let gradient = CAGradientLayer()
+    private let material = CodeGramMaterialView(radius: 24)
     var action: (() -> Void)?
     override init(frame: CGRect) {
         super.init(frame: frame)
-        self.layer.insertSublayer(self.gradient, at: 0)
-        self.layer.cornerRadius = 22; self.layer.cornerCurve = .continuous
-        self.layer.masksToBounds = true; self.layer.borderWidth = 0.5
-        self.gradient.startPoint = CGPoint(x: 0, y: 0); self.gradient.endPoint = CGPoint(x: 1, y: 1)
+        self.insertSubview(self.material, at: 0)
+        self.layer.cornerRadius = 24; self.layer.cornerCurve = .continuous
+        self.clipsToBounds = true
         self.addTarget(self, action: #selector(self.pressed), for: .touchUpInside)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        CATransaction.begin(); CATransaction.setDisableActions(true); self.gradient.frame = self.bounds; CATransaction.commit()
-    }
-    func applyPalette(dark: Bool) {
-        self.gradient.colors = dark ? [UIColor(white: 0.085, alpha: 1).cgColor, UIColor(white: 0.052, alpha: 1).cgColor] : [UIColor.white.cgColor, UIColor(white: 0.975, alpha: 1).cgColor]
-        self.layer.borderColor = UIColor(white: dark ? 1 : 0, alpha: dark ? 0.035 : 0.045).cgColor
-    }
+    override func layoutSubviews() { super.layoutSubviews(); self.material.frame = self.bounds }
+    func applyPalette(dark: Bool) { self.material.refresh() }
     override var isHighlighted: Bool {
         didSet {
-            let update = { self.transform = self.isHighlighted && !UIAccessibility.isReduceMotionEnabled ? CGAffineTransform(scaleX: 0.98, y: 0.98) : .identity; self.alpha = self.isHighlighted ? 0.78 : 1 }
-            if UIAccessibility.isReduceMotionEnabled { update() }
+            let reduced = UIAccessibility.isReduceMotionEnabled || CodeGramEnergyPolicy.current.usesReducedEffects
+            let update = { self.transform = self.isHighlighted && !reduced ? CGAffineTransform(scaleX: 0.98, y: 0.98) : .identity; self.alpha = self.isHighlighted ? 0.8 : 1 }
+            if reduced { update() }
             else { UIView.animate(withDuration: self.isHighlighted ? 0.12 : 0.18, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: update, completion: nil) }
         }
     }
@@ -354,6 +348,7 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
     private let subtitleLabel = UILabel()
     private let logo = UIImageView(image: codegramBrandMark())
     private let searchBar = UISearchBar()
+    private let searchMaterial = CodeGramMaterialView(radius: 26)
     private let ghost = CodeGramQuickCard(title: "Призрак", symbol: "codegram.ghost")
     private let archive = CodeGramQuickCard(title: "Архив", symbol: "archivebox")
     private let privacy = CodeGramDashboardTile(destination: .privacy)
@@ -402,6 +397,9 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
         self.titleLabel.adjustsFontSizeToFitWidth = true; self.titleLabel.minimumScaleFactor = 0.7
         self.subtitleLabel.text = "Твой стиль. Твои настройки."; self.subtitleLabel.textColor = .secondaryLabel; self.subtitleLabel.numberOfLines = 2
         self.logo.contentMode = .scaleAspectFit; self.logo.isAccessibilityElement = false
+        self.searchBar.searchTextField.insertSubview(self.searchMaterial, at: 0)
+        self.searchBar.searchTextField.backgroundColor = .clear
+        self.searchBar.tintColor = .label
         self.searchBar.placeholder = "Поиск"; self.searchBar.searchBarStyle = .minimal; self.searchBar.delegate = self
         self.searchBar.searchTextField.accessibilityLabel = "Поиск по настройкам CodeGram"
         self.searchBar.searchTextField.layer.cornerRadius = 21; self.searchBar.searchTextField.layer.cornerCurve = .continuous; self.searchBar.searchTextField.clipsToBounds = true
@@ -420,7 +418,7 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
         self.refreshFonts()
         self.displayNodeDidLoad()
         self.subscribeToSettings()
-        self.observers.append(NotificationCenter.default.addObserver(forName: NikitaSettingsStore.changed, object: nil, queue: .main) { [weak self] _ in self?.refreshVoice() })
+        self.observers.append(NotificationCenter.default.addObserver(forName: NikitaSettingsStore.changed, object: nil, queue: .main) { [weak self] _ in guard let self, self.isViewLoaded, self.displayNode.view.window != nil else { return }; self.refreshVoice() })
         self.observers.append(NotificationCenter.default.addObserver(forName: UIContentSizeCategory.didChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshFonts(); self?.layoutContent() })
     }
 
@@ -489,11 +487,12 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
     }
     private func applyPalette(dark: Bool) {
         self.dark = dark; self.displayNode.view.overrideUserInterfaceStyle = dark ? .dark : .light
-        self.displayNode.backgroundColor = dark ? .black : .systemGroupedBackground
+        self.displayNode.backgroundColor = CodeGramSettingsTheme.background
         self.logo.tintColor = .label
         self.logo.image = codegramBrandMark()?.withRenderingMode(.alwaysTemplate)
-        self.searchBar.searchTextField.backgroundColor = dark ? UIColor(white: 0.08, alpha: 1) : .secondarySystemGroupedBackground
-        self.separator.backgroundColor = UIColor(white: dark ? 1 : 0, alpha: 0.08)
+        self.searchBar.searchTextField.backgroundColor = .clear
+        self.searchMaterial.refresh()
+        self.separator.backgroundColor = .clear
         for surface in [self.ghost, self.archive, self.privacy, self.messages, self.appearance, self.voice, self.bottomSurface] as [CodeGramDashboardSurface] { surface.applyPalette(dark: dark) }
         self.refreshAppearanceDetail()
         self.layoutContent()
@@ -517,7 +516,11 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
         self.subtitleLabel.frame = CGRect(x: 8, y: self.titleLabel.frame.maxY + 4, width: width - 16, height: subtitleSize.height)
         y = max(self.logo.frame.maxY, self.subtitleLabel.frame.maxY) + 14
         let searchHeight = max(50, UIFont.preferredFont(forTextStyle: .body).lineHeight + 24)
-        self.searchBar.frame = CGRect(x: -8, y: y, width: width + 16, height: searchHeight); y += searchHeight + 10
+        self.searchBar.frame = CGRect(x: -8, y: y, width: width + 16, height: searchHeight)
+        self.searchBar.layoutIfNeeded()
+        self.searchMaterial.frame = self.searchBar.searchTextField.bounds
+        self.searchMaterial.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        y += searchHeight + 10
         let searching = !self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let home: [UIView] = [self.ghost, self.archive, self.privacy, self.messages, self.appearance, self.voice, self.bottomSurface, self.footer]
         for view in home { view.isHidden = searching }
@@ -526,7 +529,7 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
         if searching {
             for row in self.searchRows {
                 let height = row.preferredHeight(width: width)
-                row.backgroundColor = self.dark ? UIColor(white: 0.07, alpha: 1) : .secondarySystemGroupedBackground
+                row.backgroundColor = CodeGramSettingsTheme.surface
                 row.layer.cornerRadius = 18; row.layer.cornerCurve = .continuous
                 row.frame = CGRect(x: 0, y: y, width: width, height: height); y += height + 8
             }
@@ -616,3 +619,4 @@ private final class CodeGramOrganizedSectionController: CodeGramTableController 
         }
     }
 }
+

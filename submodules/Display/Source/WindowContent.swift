@@ -3,43 +3,23 @@ import UIKit
 import AsyncDisplayKit
 import SwiftSignalKit
 
-private func nikitaStatusBadge() -> UIImage {
-    let size = CGSize(width: 124.0, height: 31.0)
-    return UIGraphicsImageRenderer(size: size).image { renderer in
-        let bounds = CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)
-        let capsule = UIBezierPath(roundedRect: bounds, cornerRadius: 15.5)
-        renderer.cgContext.saveGState()
-        capsule.addClip()
-        let colors = [UIColor(white: 0.21, alpha: 0.98).cgColor, UIColor(white: 0.075, alpha: 0.99).cgColor, UIColor(white: 0.045, alpha: 1).cgColor] as CFArray
-        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0.0, 0.55, 1.0]) {
-            renderer.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0.0, y: size.height), options: [])
-        }
-        let sheen = [UIColor.white.withAlphaComponent(0.1).cgColor, UIColor.white.withAlphaComponent(0).cgColor] as CFArray
-        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: sheen, locations: [0, 1]) {
-            renderer.cgContext.drawLinearGradient(gradient, start: CGPoint(x: 15, y: 0), end: CGPoint(x: 83, y: 24), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-        }
-        renderer.cgContext.restoreGState()
-        renderer.cgContext.saveGState()
-        renderer.cgContext.addPath(capsule.cgPath)
-        renderer.cgContext.setLineWidth(0.75)
-        renderer.cgContext.replacePathWithStrokedPath()
-        renderer.cgContext.clip()
-        let rim = [UIColor.white.withAlphaComponent(0.58).cgColor, UIColor.white.withAlphaComponent(0.18).cgColor] as CFArray
-        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: rim, locations: [0, 1]) {
-            renderer.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: size.height), options: [])
-        }
-        renderer.cgContext.restoreGState()
+// Render once. The 96 x 22 pt mark stays inside the island's existing device
+// offset; it no longer paints a 124 x 31 pt border beyond the camera cutout.
+private let codegramStatusBadgeImage: UIImage = {
+    let size = CGSize(width: 96, height: 22)
+    return UIGraphicsImageRenderer(size: size).image { _ in
+        UIColor(white: 0.16, alpha: 1).setFill()
+        UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 11).fill()
         if let mark = codegramBrandMark() {
-            let height: CGFloat = 22
+            let height: CGFloat = 15
             let width = height * mark.size.width / max(1, mark.size.height)
-            mark.draw(in: CGRect(x: 15 + (22 - width) / 2, y: 4.5, width: width, height: height))
+            mark.draw(in: CGRect(x: 8 + (16 - width) / 2, y: 3.5, width: width, height: height))
         }
-        ("CodeGram" as NSString).draw(at: CGPoint(x: 46.5, y: 8.0), withAttributes: [
-            .font: UIFont.systemFont(ofSize: 12.0, weight: .semibold), .foregroundColor: UIColor.white,
-            .kern: 0.1
+        ("CodeGram" as NSString).draw(at: CGPoint(x: 29, y: 4.5), withAttributes: [
+            .font: UIFont.systemFont(ofSize: 10.5, weight: .semibold), .foregroundColor: UIColor.white
         ])
     }
-}
+}()
 
 private struct WindowReservedArea: Equatable {
     var safeInsets: UIEdgeInsets
@@ -511,7 +491,7 @@ public class Window1 {
     public init(hostView: WindowHostView, statusBarHost: StatusBarHost?) {
         self.hostView = hostView
         self.badgeView = UIImageView()
-        self.badgeView.image = nikitaStatusBadge()
+        self.badgeView.image = codegramStatusBadgeImage
         self.badgeView.isHidden = true
         
         self.systemUserInterfaceStyle = hostView.systemUserInterfaceStyle
@@ -1777,3 +1757,4 @@ private class CustomDimController: ViewController {
         
     }
 }
+

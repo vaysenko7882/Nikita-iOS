@@ -181,7 +181,7 @@ private final class CodeGramStorageBar: UIView {
         }
     }
 }
-private final class CodeGramStorageSummaryCell: UITableViewCell {
+private final class CodeGramStorageSummaryCell: UITableViewCell, CodeGramIconProvidingCell {
     init(total: Int64, categories: [(String, Int64, UIColor)]) {
         super.init(style: .default, reuseIdentifier: nil)
         self.selectionStyle = .none
@@ -244,3 +244,4 @@ final class CodeGramStorageController: CodeGramTableController {
         return result
     }
 }
+

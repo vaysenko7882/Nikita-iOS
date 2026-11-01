@@ -31,6 +31,7 @@ public struct NikitaServerConfiguration: Equatable {
 public final class NikitaSettingsStore {
     public static let shared = NikitaSettingsStore()
     public static let changed = Notification.Name("NikitaSettingsChanged")
+    public static let serverChanged = Notification.Name("CodeGramArchiveServerChanged")
     private let defaults = UserDefaults.standard
     private let tokenService = "personal.nikita.messenger.archive"
 
@@ -102,6 +103,10 @@ public final class NikitaSettingsStore {
             kSecAttrAccount as String: account]
     }
 
+    public func isServerEnabled(account: String) -> Bool {
+        return self.defaults.bool(forKey: "nikita.server.enabled.\(account)")
+    }
+
     public func server(account: String) -> NikitaServerConfiguration {
         var query = self.tokenQuery(account: account)
         query[kSecReturnData as String] = true
@@ -117,6 +122,7 @@ public final class NikitaSettingsStore {
     /// The archive API bearer token stays in this device's Keychain, outside backups.
     @discardableResult
     public func setServer(_ configuration: NikitaServerConfiguration, account: String) -> Bool {
+        if self.server(account: account) == configuration { return true }
         let query = self.tokenQuery(account: account)
         let data = Data(configuration.token.utf8)
         var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
@@ -131,7 +137,9 @@ public final class NikitaSettingsStore {
         }
         self.defaults.set(configuration.enabled, forKey: "nikita.server.enabled.\(account)")
         self.defaults.set(configuration.address, forKey: "nikita.server.address.\(account)")
+        NotificationCenter.default.post(name: Self.serverChanged, object: account)
         NotificationCenter.default.post(name: Self.changed, object: nil)
         return true
     }
 }
+

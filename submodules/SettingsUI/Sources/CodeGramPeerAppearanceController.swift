@@ -62,12 +62,12 @@ private final class CodeGramPeerEditorController: CodeGramTableController, PHPic
             CodeGramSettingsSection(title: "Название", footer: "Пустое поле возвращает оригинальное название. До 128 символов.", rows: [CodeGramSettingsRow(cell: { [weak self] in
                 let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
                 if let self { self.field.removeFromSuperview(); self.field.translatesAutoresizingMaskIntoConstraints = false; cell.contentView.addSubview(self.field)
-                    NSLayoutConstraint.activate([self.field.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 16), self.field.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -16), self.field.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 16), self.field.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -16)]) }
+                    NSLayoutConstraint.activate([self.field.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 64), self.field.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -16), self.field.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 16), self.field.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -16)]) }
                 cell.selectionStyle = .none; return cell
             })]),
             CodeGramSettingsSection(title: "Аватар", footer: "Картинка обрезается по центру до квадрата и остаётся только на устройстве.", rows: [
                 CodeGramSettingsRow(cell: {
-                    let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
+                    let cell = CodeGramAvatarPreviewCell(style: .subtitle, reuseIdentifier: nil)
                     cell.textLabel?.text = data == nil ? "Оригинал Telegram" : "Свой аватар"
                     if let data, let image = UIImage(data: data) {
                         cell.imageView?.image = UIGraphicsImageRenderer(size: CGSize(width: 44, height: 44)).image { _ in image.draw(in: CGRect(x: 0, y: 0, width: 44, height: 44)) }
@@ -116,3 +116,6 @@ private final class CodeGramPeerEditorController: CodeGramTableController, PHPic
         }))
     }
 }
+
+
+private final class CodeGramAvatarPreviewCell: UITableViewCell, CodeGramIconProvidingCell {}
