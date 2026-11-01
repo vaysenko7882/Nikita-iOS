@@ -91,7 +91,7 @@ private final class HarnessController: UIViewController {
                                 let rect = label.convert(label.bounds, to: cell.bodyView)
                                 self.expect(cell.bodyView.bounds.insetBy(dx: -1, dy: -1).contains(rect), "label outside glass: \(label.text ?? "") \(context) \(rect)/\(cell.bodyView.bounds)")
                                 let needed = label.sizeThatFits(CGSize(width: label.bounds.width, height: .greatestFiniteMagnitude)).height
-                                self.expect(label.bounds.height + 1 >= needed, "clipped text: \(label.text ?? "") \(context)")
+                                self.expect(label.bounds.height + 1 >= needed, "clipped text: \(label.text ?? "") \(context) bounds=\(label.bounds), needed=\(needed), maxWidth=\(label.preferredMaxLayoutWidth)")
                                 self.expect(label.isDescendant(of: cell.glass.contentView), "text detached from native material")
                             }
                             if labels.count > 1 {
@@ -131,7 +131,13 @@ private final class HarnessController: UIViewController {
     }
     private func phase(_ name: String, after seconds: TimeInterval = 3, next: @escaping () -> Void) {
         try? name.write(to: self.output.appendingPathComponent("phase.txt"), atomically: true, encoding: .utf8)
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: next)
+        let started = Date()
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+            let captured = FileManager.default.fileExists(atPath: self.output.appendingPathComponent("captured-" + name).path)
+            if (captured && Date().timeIntervalSince(started) >= seconds) || Date().timeIntervalSince(started) > 25 {
+                timer.invalidate(); next()
+            }
+        }
     }
     private func showAppearance() {
         self.title = "Оформление"
@@ -195,7 +201,9 @@ private final class HarnessSceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let scene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: scene)
         let controller = HarnessController()
-        window.rootViewController = UINavigationController(rootViewController: controller)
+        let navigation = UINavigationController(rootViewController: controller)
+        navigation.overrideUserInterfaceStyle = .dark
+        window.rootViewController = navigation
         window.makeKeyAndVisible(); self.window = window
     }
 }

@@ -27,6 +27,18 @@ class CodeGramGlassCell: UITableViewCell {
         ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    func updateWrappingWidth(_ width: CGFloat) {}
+    override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
+        // A glass content host has no intrinsic width while UITableView performs
+        // its fitting pass. Give multiline labels their final wrapping width
+        // before asking Auto Layout for the height.
+        self.updateWrappingWidth(targetSize.width)
+        return super.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: horizontalFittingPriority, verticalFittingPriority: verticalFittingPriority)
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        self.updateWrappingWidth(self.contentView.bounds.width)
+    }
     func install(_ view: UIView) {
         self.bodyView.addSubview(view)
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -51,18 +63,25 @@ final class CodeGramValueSwitch: UISwitch {
 }
 
 final class CodeGramTextCell: CodeGramGlassCell {
+    private let caption = UILabel()
+    private let detailLabel = UILabel()
+    private var iconWidth: CGFloat = 28
+    private var headingControl: UIView?
+    private var showsDisclosure = false
     init(title: String, detail: String? = nil, symbol: String, image: UIImage? = nil, control: UIView? = nil, disclosure: Bool = false) {
         super.init(style: .default, reuseIdentifier: nil)
         let icon = UIImageView(image: image ?? CodeGramSettingsTheme.symbol(symbol))
         icon.contentMode = .scaleAspectFit; icon.tintColor = .label
         icon.accessibilityIdentifier = "CodeGram.icon.\(symbol)"; icon.isAccessibilityElement = false
         let size: CGFloat = image == nil ? 28 : 44
+        self.iconWidth = size; self.headingControl = control; self.showsDisclosure = disclosure
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: size), icon.heightAnchor.constraint(equalToConstant: size)])
         if image != nil { icon.layer.cornerRadius = 22; icon.clipsToBounds = true; icon.contentMode = .scaleAspectFill }
-        let caption = UILabel()
+        let caption = self.caption
         caption.text = title; caption.textColor = .label
         caption.font = .preferredFont(forTextStyle: .body); caption.adjustsFontForContentSizeCategory = true
-        caption.numberOfLines = 0; caption.accessibilityIdentifier = "CodeGram.title"
+        caption.numberOfLines = 0; caption.lineBreakMode = .byWordWrapping
+        caption.accessibilityIdentifier = "CodeGram.title"
         caption.setContentCompressionResistancePriority(.required, for: .vertical)
         let heading = UIStackView(arrangedSubviews: [icon, caption])
         heading.axis = .horizontal; heading.alignment = .center; heading.spacing = 12
@@ -79,10 +98,11 @@ final class CodeGramTextCell: CodeGramGlassCell {
         let stack = UIStackView(arrangedSubviews: [heading])
         stack.axis = .vertical; stack.spacing = 7
         if let detail, !detail.isEmpty {
-            let label = UILabel()
+            let label = self.detailLabel
             label.text = detail; label.textColor = .secondaryLabel
             label.font = .preferredFont(forTextStyle: .footnote); label.adjustsFontForContentSizeCategory = true
-            label.numberOfLines = 0; label.accessibilityIdentifier = "CodeGram.detail"
+            label.numberOfLines = 0; label.lineBreakMode = .byWordWrapping
+            label.accessibilityIdentifier = "CodeGram.detail"
             label.setContentCompressionResistancePriority(.required, for: .vertical)
             stack.addArrangedSubview(label)
         }
@@ -94,6 +114,12 @@ final class CodeGramTextCell: CodeGramGlassCell {
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func updateWrappingWidth(_ width: CGFloat) {
+        guard width > 0 else { return }
+        let accessory = self.headingControl.map { max(0, $0.intrinsicContentSize.width) } ?? (self.showsDisclosure ? 12 : 0)
+        self.caption.preferredMaxLayoutWidth = max(1, width - 32 - self.iconWidth - 12 - (accessory > 0 ? accessory + 12 : 0))
+        self.detailLabel.preferredMaxLayoutWidth = max(1, width - 32)
+    }
 }
 
 final class CodeGramFieldCell: CodeGramGlassCell {
@@ -114,6 +140,7 @@ final class CodeGramFieldCell: CodeGramGlassCell {
 }
 
 final class CodeGramSliderCell: CodeGramGlassCell {
+    private let caption = UILabel()
     private let valueLabel = UILabel()
     private let slider = UISlider()
     private let changed: (Double) -> Void
@@ -124,8 +151,8 @@ final class CodeGramSliderCell: CodeGramGlassCell {
         let icon = UIImageView(image: CodeGramSettingsTheme.symbol(symbol))
         icon.contentMode = .scaleAspectFit; icon.tintColor = .label
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 28), icon.heightAnchor.constraint(equalToConstant: 28)])
-        let caption = UILabel()
-        caption.text = title; caption.textColor = .label; caption.numberOfLines = 0
+        let caption = self.caption
+        caption.text = title; caption.textColor = .label; caption.numberOfLines = 0; caption.lineBreakMode = .byWordWrapping
         caption.font = .preferredFont(forTextStyle: .body); caption.adjustsFontForContentSizeCategory = true
         caption.accessibilityIdentifier = "CodeGram.title"
         self.valueLabel.font = .preferredFont(forTextStyle: .footnote); self.valueLabel.adjustsFontForContentSizeCategory = true
@@ -144,6 +171,11 @@ final class CodeGramSliderCell: CodeGramGlassCell {
         self.install(stack)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func updateWrappingWidth(_ width: CGFloat) {
+        guard width > 0 else { return }
+        self.caption.preferredMaxLayoutWidth = max(1, width - 72)
+        self.valueLabel.preferredMaxLayoutWidth = max(1, width - 72)
+    }
     @objc private func valueChanged() {
         let value = Double(self.slider.value)
         self.valueLabel.text = self.format(value); self.slider.accessibilityValue = self.format(value)

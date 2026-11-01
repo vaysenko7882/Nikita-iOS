@@ -100,6 +100,7 @@ while time.monotonic() - start < 180:
         seen.add(phase)
         timeline.append({'phase': phase, 'seconds_after_launch': round(time.monotonic() - start, 3)})
         subprocess.run(['xcrun', 'simctl', 'io', sim, 'screenshot', str(output / (phase + '.png'))], check=True)
+        (documents / ('captured-' + phase)).touch()
     result = documents / 'result.json'
     if result.exists():
         shutil.copyfile(result, output / 'result.json')
