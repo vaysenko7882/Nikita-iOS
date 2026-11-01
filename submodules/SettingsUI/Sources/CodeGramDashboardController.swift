@@ -158,7 +158,6 @@ private final class CodeGramCardArtwork: UIView {
             ("Удалено" as NSString).draw(at: CGPoint(x: 47, y: 26), withAttributes: [.font: UIFont.systemFont(ofSize: 13), .foregroundColor: UIColor.secondaryLabel, .strikethroughStyle: NSUnderlineStyle.single.rawValue])
             ("Изменено" as NSString).draw(at: CGPoint(x: 61, y: 73), withAttributes: [.font: UIFont.systemFont(ofSize: 13), .foregroundColor: UIColor.label.withAlphaComponent(0.85)])
         case .appearance:
-            let outline = UIBezierPath(roundedRect: CGRect(x: 12, y: 7, width: 142, height: 105), cornerRadius: 15)
 
             self.bubble(CGRect(x: 24, y: 21, width: 96, height: 32), color: UIColor.label.withAlphaComponent(0.16), leftTail: true)
             self.bubble(CGRect(x: 49, y: 65, width: 104, height: 33), color: UIColor.label.withAlphaComponent(0.92), leftTail: false)
