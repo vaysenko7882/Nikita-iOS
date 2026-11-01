@@ -149,7 +149,7 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
     }
     private func applyPalette(dark: Bool) {
         self.dark = dark; self.displayNode.view.overrideUserInterfaceStyle = dark ? .dark : .light
-        self.displayNode.backgroundColor = CodeGramSettingsTheme.background
+        self.displayNode.backgroundColor = dark ? .black : .systemGroupedBackground
         self.logo.tintColor = .label
         self.logo.image = codegramBrandMark()?.withRenderingMode(.alwaysTemplate)
         self.separator.backgroundColor = .clear

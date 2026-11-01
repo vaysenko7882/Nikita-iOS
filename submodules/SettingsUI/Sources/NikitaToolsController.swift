@@ -50,8 +50,9 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
 
     override public func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
-        self.displayNode.view.overrideUserInterfaceStyle = self.context.sharedContext.currentPresentationData.with { $0 }.theme.overallDarkAppearance ? .dark : .light
-        self.displayNode.backgroundColor = CodeGramSettingsTheme.background
+        let dark = self.context.sharedContext.currentPresentationData.with { $0 }.theme.overallDarkAppearance
+        self.displayNode.view.overrideUserInterfaceStyle = dark ? .dark : .light
+        self.displayNode.backgroundColor = dark ? .black : .systemGroupedBackground
         CodeGramSettingsTheme.configure(self.tableView)
         let dark = self.context.sharedContext.currentPresentationData.with { $0 }.theme.overallDarkAppearance
         self.tableView.overrideUserInterfaceStyle = dark ? .dark : .light

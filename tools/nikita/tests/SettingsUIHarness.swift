@@ -69,10 +69,14 @@ private final class HarnessController: UIViewController {
             for category in [UIContentSizeCategory.large, .extraExtraExtraLarge, .accessibilityExtraExtraExtraLarge] {
                 for style in [UIUserInterfaceStyle.dark, .light] {
                     autoreleasepool {
-                        let traits = UITraitCollection(traitsFrom: [UITraitCollection(userInterfaceStyle: style), UITraitCollection(preferredContentSizeCategory: category)])
+                        let traits = UITraitCollection { traits in
+                            traits.userInterfaceStyle = style
+                            traits.preferredContentSizeCategory = category
+                        }
                         let fixture = FixtureTable()
                         self.addChild(fixture)
-                        self.setOverrideTraitCollection(traits, forChild: fixture)
+                        fixture.traitOverrides.userInterfaceStyle = style
+                        fixture.traitOverrides.preferredContentSizeCategory = category
                         self.view.addSubview(fixture.view); fixture.didMove(toParent: self)
                         fixture.view.frame = CGRect(x: 0, y: 0, width: width, height: 16000)
                         traits.performAsCurrent { fixture.show(fixtureCells()) }
