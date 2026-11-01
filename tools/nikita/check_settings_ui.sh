@@ -21,16 +21,18 @@ xcrun simctl list runtimes --json > "$CODEGRAM_UI_OUT/runtimes.json"
 xcrun simctl list devicetypes --json > "$CODEGRAM_UI_OUT/devicetypes.json"
 CODEGRAM_UI_RUNTIME=$(python3 - "$CODEGRAM_UI_OUT/runtimes.json" <<'PY'
 import json, sys
-rows = [r for r in json.load(open(sys.argv[1]))['runtimes'] if r.get('isAvailable') and 'iOS-' in r['identifier'] and int(r['version'].split('.')[0]) >= 26]
+standard = {'iPhone 18 Pro Max', 'iPhone 17 Pro Max', 'iPhone 16 Pro Max', 'iPhone 17 Pro', 'iPhone 16 Pro'}
+rows = [r for r in json.load(open(sys.argv[1]))['runtimes'] if r.get('isAvailable') and r.get('platform') == 'iOS' and int(r['version'].split('.')[0]) >= 26 and any(d['name'] in standard for d in r.get('supportedDeviceTypes', []))]
 if not rows:
     raise SystemExit('Native UI checks need an installed iOS 26+ Simulator runtime')
 print(max(rows, key=lambda r: tuple(map(int, r['version'].split('.'))))['identifier'])
 PY
 )
-CODEGRAM_UI_DEVICE=$(python3 - "$CODEGRAM_UI_OUT/devicetypes.json" <<'PY'
+CODEGRAM_UI_DEVICE=$(python3 - "$CODEGRAM_UI_OUT/runtimes.json" "$CODEGRAM_UI_RUNTIME" <<'PY'
 import json, sys
-rows = json.load(open(sys.argv[1]))['devicetypes']
-for name in ['iPhone 17 Pro Max', 'iPhone 16 Pro Max', 'iPhone 17 Pro', 'iPhone 16 Pro']:
+runtime = next(r for r in json.load(open(sys.argv[1]))['runtimes'] if r['identifier'] == sys.argv[2])
+rows = runtime['supportedDeviceTypes']
+for name in ['iPhone 18 Pro Max', 'iPhone 17 Pro Max', 'iPhone 16 Pro Max', 'iPhone 17 Pro', 'iPhone 16 Pro']:
     found = next((r for r in rows if r['name'] == name), None)
     if found:
         print(found['identifier']); break
@@ -38,9 +40,6 @@ else:
     raise SystemExit('No supported iPhone Simulator device type')
 PY
 )
-CODEGRAM_UI_SIM=$(xcrun simctl create "CodeGram UI ${GITHUB_RUN_ID:-local}" "$CODEGRAM_UI_DEVICE" "$CODEGRAM_UI_RUNTIME")
-xcrun simctl boot "$CODEGRAM_UI_SIM"
-xcrun simctl bootstatus "$CODEGRAM_UI_SIM" -b
 CODEGRAM_UI_APP="$CODEGRAM_UI_OUT/SettingsHarness.app"
 mkdir -p "$CODEGRAM_UI_APP"
 python3 - "$CODEGRAM_UI_APP" "$CODEGRAM_UI_OUT" <<'PY'
@@ -72,6 +71,9 @@ xcrun --sdk iphonesimulator swiftc -parse-as-library -warnings-as-errors \
     submodules/SettingsUI/Sources/CodeGramDashboardComponents.swift \
     tools/nikita/tests/SettingsUIHarness.swift -o "$CODEGRAM_UI_APP/SettingsHarness"
 codesign --force --sign - "$CODEGRAM_UI_APP"
+CODEGRAM_UI_SIM=$(xcrun simctl create "CodeGram UI ${GITHUB_RUN_ID:-local}" "$CODEGRAM_UI_DEVICE" "$CODEGRAM_UI_RUNTIME")
+xcrun simctl boot "$CODEGRAM_UI_SIM"
+xcrun simctl bootstatus "$CODEGRAM_UI_SIM" -b
 xcrun simctl install "$CODEGRAM_UI_SIM" "$CODEGRAM_UI_APP"
 CODEGRAM_UI_DATA=$(xcrun simctl get_app_container "$CODEGRAM_UI_SIM" com.codegram.UIRegression data)
 xcrun simctl status_bar "$CODEGRAM_UI_SIM" override --time '9:41' --batteryState charged --batteryLevel 100
