@@ -50,6 +50,7 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
 
     override public func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
+        self.displayNode.view.overrideUserInterfaceStyle = self.context.sharedContext.currentPresentationData.with { $0 }.theme.overallDarkAppearance ? .dark : .light
         self.displayNode.backgroundColor = CodeGramSettingsTheme.background
         CodeGramSettingsTheme.configure(self.tableView)
         let dark = self.context.sharedContext.currentPresentationData.with { $0 }.theme.overallDarkAppearance
@@ -103,62 +104,30 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
     }
 
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
-        cell.textLabel?.numberOfLines = 0
         if indexPath.section == 0 {
-            let titles = ["Использование памяти", "Правила сохранения VPS"]
-            let icons = ["internaldrive", "line.3.horizontal.decrease.circle"]
-            cell.textLabel?.text = titles[indexPath.row]
-            cell.imageView?.image = UIImage(systemName: icons[indexPath.row])
-            cell.imageView?.tintColor = .label
-            cell.accessoryType = .disclosureIndicator
+            return CodeGramTextCell(title: ["Использование памяти", "Правила сохранения VPS"][indexPath.row], symbol: ["internaldrive", "line.3.horizontal.decrease.circle"][indexPath.row], disclosure: true)
         } else if indexPath.section == 1 {
-            cell.textLabel?.text = "Продлевать сохранение в фоне"
-            let toggle = UISwitch()
+            let toggle = CodeGramValueSwitch()
             toggle.isOn = NikitaSettingsStore.shared.extendArchiveInBackground
             toggle.addTarget(self, action: #selector(self.backgroundChanged(_:)), for: .valueChanged)
-            cell.accessoryView = toggle
-            cell.selectionStyle = .none
+            return CodeGramTextCell(title: "Продлевать сохранение в фоне", symbol: "clock.badge.checkmark", control: toggle)
         } else if indexPath.section == 2 {
             switch indexPath.row {
             case 0:
-                cell.textLabel?.text = "Интеграция с VPS"
-                let toggle = UISwitch()
-                toggle.isOn = self.serverEnabled
+                let toggle = CodeGramValueSwitch(); toggle.isOn = self.serverEnabled
                 toggle.addTarget(self, action: #selector(self.serverChanged(_:)), for: .valueChanged)
-                cell.accessoryView = toggle
-                cell.selectionStyle = .none
+                return CodeGramTextCell(title: "Интеграция с VPS", symbol: "server.rack", control: toggle)
             case 1, 2:
-                let field = indexPath.row == 1 ? self.addressField : self.tokenField
-                field.removeFromSuperview()
-                cell.contentView.addSubview(field)
-                field.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    field.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 64.0),
-                    field.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -16.0),
-                    field.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 14.0),
-                    field.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -14.0)
-                ])
-                cell.selectionStyle = .none
+                return CodeGramFieldCell(field: indexPath.row == 1 ? self.addressField : self.tokenField, symbol: indexPath.row == 1 ? "link" : "key")
             case 3:
-                cell.textLabel?.text = "Сохранить настройки VPS"
-                cell.textLabel?.textColor = .label
+                return CodeGramTextCell(title: "Сохранить настройки VPS", symbol: "square.and.arrow.down")
             case 4:
-                cell.textLabel?.text = self.isSyncing ? "Синхронизация…" : "Проверить и синхронизировать"
-                cell.textLabel?.textColor = .label
+                return CodeGramTextCell(title: self.isSyncing ? "Синхронизация…" : "Проверить и синхронизировать", symbol: "arrow.triangle.2.circlepath")
             default:
-                cell.textLabel?.text = self.statusText
-                cell.textLabel?.font = .systemFont(ofSize: 14.0)
-                cell.textLabel?.textColor = .secondaryLabel
-                cell.selectionStyle = .none
+                return CodeGramTextCell(title: self.statusText, symbol: "info.circle")
             }
-        } else {
-            cell.textLabel?.text = "Как установить архив на VPS"
-            cell.textLabel?.textColor = .label
-            cell.accessoryType = .disclosureIndicator
         }
-        CodeGramSettingsTheme.prepare(cell)
-        return cell
+        return CodeGramTextCell(title: "Как установить архив на VPS", symbol: "terminal", disclosure: true)
     }
 
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -241,5 +210,6 @@ public final class NikitaToolsController: ViewController, UITableViewDataSource,
         }))
     }
 }
+
 
 

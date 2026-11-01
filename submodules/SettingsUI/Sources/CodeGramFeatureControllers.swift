@@ -22,8 +22,8 @@ final class CodeGramGhostController: CodeGramFeatureController {
         self.observe(context.engine.messages.ghostModeSettings()) { [weak self] value in self?.settings = value; self?.reloadContent() }
     }
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    private func flag(_ title: String, _ info: String?, _ key: WritableKeyPath<GhostModeSettings, Bool>, master: Bool = false) -> CodeGramSettingsRow {
-        return self.switchRow(title, value: self.settings?[keyPath: key] ?? false, detail: info, enabled: master || self.settings?.isEnabled == true, changed: { [weak self] value in
+    private func flag(_ title: String, _ info: String?, _ key: WritableKeyPath<GhostModeSettings, Bool>, icon: String, master: Bool = false) -> CodeGramSettingsRow {
+        return self.switchRow(title, value: self.settings?[keyPath: key] ?? false, detail: info, icon: icon, enabled: master || self.settings?.isEnabled == true, changed: { [weak self] value in
             guard let self else { return }
             self.subscriptions.add(self.context.engine.messages.updateGhostModeSettingsInteractively { current in var current = current; current[keyPath: key] = value; return current }.start())
         })
@@ -32,16 +32,16 @@ final class CodeGramGhostController: CodeGramFeatureController {
         guard self.settings != nil else { return [] }
         let s = self.context.sharedContext.currentPresentationData.with { $0 }.strings.localFeatures.ghostMode
         return [
-            CodeGramSettingsSection(title: nil, footer: s.masterInfo, rows: [self.flag(s.title, nil, \.isEnabled, master: true)]),
+            CodeGramSettingsSection(title: nil, footer: s.masterInfo, rows: [self.flag(s.title, nil, \.isEnabled, icon: "eye.slash", master: true)]),
             CodeGramSettingsSection(title: s.hideSection, footer: nil, rows: [
-                self.flag(s.suppressMessageReadReceipts, s.suppressMessageReadReceiptsInfo, \.suppressMessageReadReceipts),
-                self.flag(s.suppressStoryReadReceipts, s.suppressStoryReadReceiptsInfo, \.suppressStoryReadReceipts),
-                self.flag(s.suppressOnlineStatus, s.suppressOnlineStatusInfo, \.suppressOnlineStatus),
-                self.flag(s.suppressTypingStatus, s.suppressTypingStatusInfo, \.suppressTypingStatus),
-                self.flag(s.keepViewOnceMedia, s.keepViewOnceMediaInfo, \.keepViewOnceMedia)]),
+                self.flag(s.suppressMessageReadReceipts, s.suppressMessageReadReceiptsInfo, \.suppressMessageReadReceipts, icon: "checkmark.message"),
+                self.flag(s.suppressStoryReadReceipts, s.suppressStoryReadReceiptsInfo, \.suppressStoryReadReceipts, icon: "eye.circle"),
+                self.flag(s.suppressOnlineStatus, s.suppressOnlineStatusInfo, \.suppressOnlineStatus, icon: "person.crop.circle.badge.clock"),
+                self.flag(s.suppressTypingStatus, s.suppressTypingStatusInfo, \.suppressTypingStatus, icon: "ellipsis.bubble"),
+                self.flag(s.keepViewOnceMedia, s.keepViewOnceMediaInfo, \.keepViewOnceMedia, icon: "timer")]),
             CodeGramSettingsSection(title: s.behaviorSection, footer: nil, rows: [
-                self.flag(s.revealOnInteractions, s.revealOnInteractionsInfo, \.revealOnInteractions),
-                self.flag(s.goOfflineAutomatically, s.goOfflineAutomaticallyInfo, \.goOfflineAutomatically)])]
+                self.flag(s.revealOnInteractions, s.revealOnInteractionsInfo, \.revealOnInteractions, icon: "hand.tap"),
+                self.flag(s.goOfflineAutomatically, s.goOfflineAutomaticallyInfo, \.goOfflineAutomatically, icon: "moon.zzz")])]
     }
 }
 
@@ -65,8 +65,8 @@ final class CodeGramLocalArchiveController: CodeGramFeatureController {
         let signal = self.context.engine.messages.updateDeletedMessageArchiveSettingsInteractively { current in var current = current; body(&current); return current }
         self.subscriptions.add((signal |> then(refresh ? self.context.engine.messages.refreshDeletedMessageArchiveMediaLimit() : .complete()) |> deliverOnMainQueue).start(completed: { [weak self] in if refresh { self?.refreshStats() } }))
     }
-    private func flag(_ title: String, _ key: WritableKeyPath<DeletedMessageArchiveSettings, Bool>) -> CodeGramSettingsRow {
-        return self.switchRow(title, value: self.settings?[keyPath: key] ?? false, changed: { [weak self] value in self?.update { $0[keyPath: key] = value } })
+    private func flag(_ title: String, _ key: WritableKeyPath<DeletedMessageArchiveSettings, Bool>, icon: String) -> CodeGramSettingsRow {
+        return self.switchRow(title, value: self.settings?[keyPath: key] ?? false, icon: icon, changed: { [weak self] value in self?.update { $0[keyPath: key] = value } })
     }
     private func selectLimit(disappearing: Bool) {
         let alert = UIAlertController(title: "Лимит медиа", message: nil, preferredStyle: .alert)
@@ -101,15 +101,15 @@ final class CodeGramLocalArchiveController: CodeGramFeatureController {
         let s = self.context.sharedContext.currentPresentationData.with { $0 }.strings.localFeatures.localMessageArchive
         let usage = self.stats.map { "\($0.messageCount) удалённых · \($0.versionCount) версий · " + ByteCountFormatter.string(fromByteCount: $0.mediaSize, countStyle: .binary) } ?? "Загрузка…"
         return [CodeGramSettingsSection(title: s.saveSection, footer: nil, rows: [
-            self.flag(s.archiveDeletedMessages, \.saveDeletedMessages), self.flag(s.archiveEditedMessages, \.saveEditedVersions),
-            self.flag(s.archiveChats, \.saveMessagesFromArchivedChats), self.flag(s.keepBetweenLaunches, \.keepAcrossLaunches)]),
+            self.flag(s.archiveDeletedMessages, \.saveDeletedMessages, icon: "trash"), self.flag(s.archiveEditedMessages, \.saveEditedVersions, icon: "pencil.and.list.clipboard"),
+            self.flag(s.archiveChats, \.saveMessagesFromArchivedChats, icon: "archivebox"), self.flag(s.keepBetweenLaunches, \.keepAcrossLaunches, icon: "internaldrive")]),
             CodeGramSettingsSection(title: s.deletedMessageMarker, footer: s.deletedMessageMarkerInfo, rows: [self.textRow(s.deletedMessageMarker, detail: settings.deletedMessageMarker, icon: "tag", action: { [weak self] in self?.editMarker() })]),
             CodeGramSettingsSection(title: s.storageSection, footer: s.clearActionsInfo, rows: [
                 self.textRow(s.mediaLimit, detail: "\(settings.mediaLimitGigabytes) ГБ", icon: "internaldrive", action: { [weak self] in self?.selectLimit(disappearing: false) }),
                 self.textRow(s.disappearingMediaLimit, detail: "\(settings.disappearingMediaLimitGigabytes) ГБ", icon: "timer", action: { [weak self] in self?.selectLimit(disappearing: true) }),
                 self.textRow(s.archiveUsage, detail: usage, icon: "chart.bar"),
                 self.textRow(s.clearMedia, icon: "trash", action: { [weak self] in self?.clear(mediaOnly: true) }),
-                self.textRow(s.clearArchive, icon: "trash", action: { [weak self] in self?.clear(mediaOnly: false) })])]
+                self.textRow(s.clearArchive, icon: "externaldrive.badge.xmark", action: { [weak self] in self?.clear(mediaOnly: false) })])]
     }
 }
 
@@ -201,8 +201,8 @@ final class CodeGramInterfaceController: CodeGramFeatureController {
         self.observe(interfaceTuningSettingsSignal()) { [weak self] value in self?.settings = value; self?.reloadContent() }
     }
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    private func flag(_ key: InterfaceTuningKey, title: String, info: String, value: Bool, enabled: Bool) -> CodeGramSettingsRow {
-        return self.switchRow(title, value: value, detail: info, enabled: enabled, changed: { value in
+    private func flag(_ key: InterfaceTuningKey, title: String, info: String, value: Bool, enabled: Bool, icon: String) -> CodeGramSettingsRow {
+        return self.switchRow(title, value: value, detail: info, icon: icon, enabled: enabled, changed: { value in
             InterfaceTuningSettingsStore.shared.update { updatedInterfaceTuningSettings($0, key: key, value: value) }
         })
     }
@@ -211,29 +211,29 @@ final class CodeGramInterfaceController: CodeGramFeatureController {
         let strings = self.context.sharedContext.currentPresentationData.with { $0 }.strings.localFeatures.interfaceTuning
         let barControlsEnabled = !settings.concealBottomBar
         return [CodeGramSettingsSection(title: strings.tabsSection, footer: strings.restartNotice, rows: [
-                self.flag(.concealBottomBar, title: strings.concealBottomBar, info: strings.concealBottomBarInfo, value: settings.concealBottomBar, enabled: true),
-                self.flag(.showContactsShortcut, title: strings.showContactsShortcut, info: strings.showContactsShortcutInfo, value: settings.showContactsShortcut, enabled: barControlsEnabled),
-                self.flag(.showCallsShortcut, title: strings.showCallsShortcut, info: strings.showCallsShortcutInfo, value: settings.showCallsShortcut, enabled: barControlsEnabled),
-                self.flag(.showTabLabels, title: strings.showTabLabels, info: strings.showTabLabelsInfo, value: settings.showTabLabels, enabled: barControlsEnabled),
-                self.flag(.showSearchShortcut, title: strings.showSearchShortcut, info: strings.showSearchShortcutInfo, value: settings.showSearchShortcut, enabled: barControlsEnabled),
-                self.flag(.stretchBottomBar, title: strings.stretchBottomBar, info: strings.stretchBottomBarInfo, value: settings.stretchBottomBar, enabled: barControlsEnabled)]),
+                self.flag(.concealBottomBar, title: strings.concealBottomBar, info: strings.concealBottomBarInfo, value: settings.concealBottomBar, enabled: true, icon: "rectangle.bottomthird.inset.filled"),
+                self.flag(.showContactsShortcut, title: strings.showContactsShortcut, info: strings.showContactsShortcutInfo, value: settings.showContactsShortcut, enabled: barControlsEnabled, icon: "person.crop.circle"),
+                self.flag(.showCallsShortcut, title: strings.showCallsShortcut, info: strings.showCallsShortcutInfo, value: settings.showCallsShortcut, enabled: barControlsEnabled, icon: "phone"),
+                self.flag(.showTabLabels, title: strings.showTabLabels, info: strings.showTabLabelsInfo, value: settings.showTabLabels, enabled: barControlsEnabled, icon: "textformat.abc"),
+                self.flag(.showSearchShortcut, title: strings.showSearchShortcut, info: strings.showSearchShortcutInfo, value: settings.showSearchShortcut, enabled: barControlsEnabled, icon: "magnifyingglass"),
+                self.flag(.stretchBottomBar, title: strings.stretchBottomBar, info: strings.stretchBottomBarInfo, value: settings.stretchBottomBar, enabled: barControlsEnabled, icon: "arrow.left.and.right")]),
             CodeGramSettingsSection(title: strings.profilesSection, footer: nil, rows: [
-                self.flag(.showProfileIdentifiers, title: strings.showProfileIdentifiers, info: strings.showProfileIdentifiersInfo, value: settings.showProfileIdentifiers, enabled: true),
-                self.flag(.showDataCenter, title: strings.showDataCenter, info: strings.showDataCenterInfo, value: settings.showDataCenter, enabled: true),
-                self.flag(.showRegistrationDate, title: strings.showRegistrationDate, info: strings.showRegistrationDateInfo, value: settings.showRegistrationDate, enabled: true),
-                self.flag(.showChatCreationDate, title: strings.showChatCreationDate, info: strings.showChatCreationDateInfo, value: settings.showChatCreationDate, enabled: true)]),
+                self.flag(.showProfileIdentifiers, title: strings.showProfileIdentifiers, info: strings.showProfileIdentifiersInfo, value: settings.showProfileIdentifiers, enabled: true, icon: "number"),
+                self.flag(.showDataCenter, title: strings.showDataCenter, info: strings.showDataCenterInfo, value: settings.showDataCenter, enabled: true, icon: "server.rack"),
+                self.flag(.showRegistrationDate, title: strings.showRegistrationDate, info: strings.showRegistrationDateInfo, value: settings.showRegistrationDate, enabled: true, icon: "calendar.badge.clock"),
+                self.flag(.showChatCreationDate, title: strings.showChatCreationDate, info: strings.showChatCreationDateInfo, value: settings.showChatCreationDate, enabled: true, icon: "calendar.badge.plus")]),
             CodeGramSettingsSection(title: strings.storiesSection, footer: nil, rows: [
-                self.flag(.hideStoryStrip, title: strings.hideStoryStrip, info: strings.hideStoryStripInfo, value: settings.hideStoryStrip, enabled: true),
-                self.flag(.disableStoryCameraSwipe, title: strings.disableStoryCameraSwipe, info: strings.disableStoryCameraSwipeInfo, value: settings.disableStoryCameraSwipe, enabled: true),
-                self.flag(.confirmStoryOpen, title: strings.confirmStoryOpen, info: strings.confirmStoryOpenInfo, value: settings.confirmStoryOpen, enabled: true),
-                self.flag(.allowStoryRepost, title: strings.allowStoryRepost, info: strings.allowStoryRepostInfo, value: settings.allowStoryRepost, enabled: true)]),
+                self.flag(.hideStoryStrip, title: strings.hideStoryStrip, info: strings.hideStoryStripInfo, value: settings.hideStoryStrip, enabled: true, icon: "rectangle.stack.badge.minus"),
+                self.flag(.disableStoryCameraSwipe, title: strings.disableStoryCameraSwipe, info: strings.disableStoryCameraSwipeInfo, value: settings.disableStoryCameraSwipe, enabled: true, icon: "hand.draw"),
+                self.flag(.confirmStoryOpen, title: strings.confirmStoryOpen, info: strings.confirmStoryOpenInfo, value: settings.confirmStoryOpen, enabled: true, icon: "hand.raised"),
+                self.flag(.allowStoryRepost, title: strings.allowStoryRepost, info: strings.allowStoryRepostInfo, value: settings.allowStoryRepost, enabled: true, icon: "arrowshape.turn.up.right")]),
             CodeGramSettingsSection(title: strings.chatsSection, footer: strings.businessBotPanelExceptionsInfo, rows: [
-                self.flag(.showCallbackData, title: strings.showCallbackData, info: strings.showCallbackDataInfo, value: settings.showCallbackData, enabled: true),
-                self.flag(.hideBusinessBotPanel, title: strings.hideBusinessBotPanel, info: strings.hideBusinessBotPanelInfo, value: settings.hideBusinessBotPanel, enabled: true),
+                self.flag(.showCallbackData, title: strings.showCallbackData, info: strings.showCallbackDataInfo, value: settings.showCallbackData, enabled: true, icon: "curlybraces"),
+                self.flag(.hideBusinessBotPanel, title: strings.hideBusinessBotPanel, info: strings.hideBusinessBotPanelInfo, value: settings.hideBusinessBotPanel, enabled: true, icon: "briefcase"),
                 self.textRow(strings.businessBotPanelExceptions, icon: "person.crop.rectangle", action: { [weak self] in guard let self else { return }; self.push(CodeGramBusinessExceptionsController(context: self.context)) })]),
             CodeGramSettingsSection(title: strings.cameraSection, footer: nil, rows: [
-                self.flag(.startRoundVideoWithRearCamera, title: strings.startRoundVideoWithRearCamera, info: strings.startRoundVideoWithRearCameraInfo, value: settings.startRoundVideoWithRearCamera, enabled: true),
-                self.flag(.hideGalleryCamera, title: strings.hideGalleryCamera, info: strings.hideGalleryCameraInfo, value: settings.hideGalleryCamera ?? false, enabled: true)])]
+                self.flag(.startRoundVideoWithRearCamera, title: strings.startRoundVideoWithRearCamera, info: strings.startRoundVideoWithRearCameraInfo, value: settings.startRoundVideoWithRearCamera, enabled: true, icon: "arrow.triangle.2.circlepath.camera"),
+                self.flag(.hideGalleryCamera, title: strings.hideGalleryCamera, info: strings.hideGalleryCameraInfo, value: settings.hideGalleryCamera ?? false, enabled: true, icon: "camera.badge.ellipsis")])]
     }
 }
 
@@ -276,3 +276,4 @@ final class CodeGramBusinessExceptionsController: CodeGramFeatureController {
         return [CodeGramSettingsSection(title: nil, footer: "Переключатель определяет видимость панели в выбранном диалоге. Возврат к общему значению удаляет исключение.", rows: [self.textRow("Добавить исключение", icon: "plus", action: { [weak self] in self?.add() })] + rows)]
     }
 }
+

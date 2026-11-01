@@ -1,112 +1,102 @@
-import Foundation
-import TelegramCore
 import UIKit
 
 enum CodeGramSettingsTheme {
     private static let icons = NSCache<NSString, UIImage>()
     static var background: UIColor {
-        return UIColor { $0.userInterfaceStyle == .dark ? .secondarySystemBackground : .systemGroupedBackground }
-    }
-    static var surface: UIColor {
-        return UIColor { $0.userInterfaceStyle == .dark ? .tertiarySystemBackground : .secondarySystemGroupedBackground }
+        UIColor { $0.userInterfaceStyle == .dark ? .black : .systemGroupedBackground }
     }
     static func symbol(_ name: String) -> UIImage? {
         if let image = self.icons.object(forKey: name as NSString) { return image }
-        let format = UIGraphicsImageRendererFormat(); format.opaque = false
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32), format: format).image { _ in
-            UIColor(white: 0.38, alpha: 1).setFill()
-            UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: 32, height: 32), cornerRadius: 10).fill()
-            UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))?
-                .withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: CGRect(x: 7, y: 7, width: 18, height: 18))
-        }.withRenderingMode(.alwaysOriginal)
+        guard let image = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular))?.withRenderingMode(.alwaysTemplate) else { return nil }
         self.icons.setObject(image, forKey: name as NSString)
         return image
     }
-    static func icon(for title: String) -> String {
-        let title = title.lowercased()
-        for (word, icon) in [("голос", "waveform"), ("пресет", "waveform"), ("высот", "waveform.path"),
-            ("тон", "slider.horizontal.3"), ("робот", "cpu"), ("эхо", "waveform.path"), ("тишин", "speaker.slash"),
-            ("номер", "phone"), ("онлайн", "eye.slash"), ("прочт", "checkmark.message"), ("истор", "clock"),
-            ("архив", "archivebox"), ("удал", "trash"), ("сохран", "square.and.arrow.down"),
-            ("памят", "internaldrive"), ("файл", "doc"), ("фото", "photo"), ("аватар", "person.crop.circle"),
-            ("групп", "person.2"), ("канал", "megaphone"), ("диалог", "bubble.left.and.bubble.right"),
-            ("плашк", "capsule"), ("режим", "leaf"), ("энерго", "leaf"), ("сервер", "server.rack"),
-            ("vps", "server.rack"), ("фильтр", "line.3.horizontal.decrease"), ("скры", "eye.slash"),
-            ("сброс", "arrow.counterclockwise"), ("обнов", "arrow.clockwise"), ("назван", "textformat"),
-            ("имя", "textformat"), ("доступ", "lock.open"), ("рамк", "square.dashed"), ("цвет", "paintpalette"),
-            ("прозрач", "circle.lefthalf.filled"), ("затемн", "circle.lefthalf.filled"), ("поиск", "magnifyingglass")] {
-            if title.contains(word) { return icon }
-        }
-        return "slider.horizontal.3"
-    }
     static func prepare(_ cell: UITableViewCell) {
+        cell.backgroundConfiguration = .clear()
         cell.backgroundColor = .clear
         cell.contentView.backgroundColor = .clear
         cell.tintColor = .label
-        cell.textLabel?.font = .preferredFont(forTextStyle: .body)
-        cell.textLabel?.adjustsFontForContentSizeCategory = true
-        cell.detailTextLabel?.font = .preferredFont(forTextStyle: .footnote)
-        cell.detailTextLabel?.adjustsFontForContentSizeCategory = true
-        let title = cell.textLabel?.text ?? cell.accessibilityLabel ?? "Настройка"
-        let name = cell.imageView?.accessibilityIdentifier ?? self.icon(for: title)
-        if !(cell is CodeGramIconProvidingCell) { cell.imageView?.image = self.symbol(name) }
-        cell.imageView?.tintColor = .white
-        cell.contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 68).isActive = true
-        if cell.backgroundView == nil { cell.backgroundView = CodeGramRowSurface() }
-        cell.selectedBackgroundView = UIView()
-        cell.selectedBackgroundView?.backgroundColor = .tertiarySystemFill
+        // The glass owns feedback. A separate selection overlay hides it.
+        cell.selectionStyle = .none
     }
     static func configure(_ table: UITableView) {
         table.backgroundColor = self.background
         table.separatorStyle = .none
         table.rowHeight = UITableView.automaticDimension
-        table.estimatedRowHeight = 68
+        table.estimatedRowHeight = 88
         table.sectionHeaderHeight = UITableView.automaticDimension
         table.tintColor = .label
     }
 }
 
-/// Custom cells draw their own white icon and keep their content constraints.
-protocol CodeGramIconProvidingCell {}
-
-final class CodeGramMaterialView: UIView {
-    private let material = UIVisualEffectView()
-    private let radius: CGFloat
-    private var reduced: Bool?
-    private var observers: [NSObjectProtocol] = []
+/// Install native glass synchronously, once. UIKit handles accessibility and
+/// adaptation; archive power policy must not remove the user's interface.
+class CodeGramMaterialView: UIVisualEffectView {
     init(radius: CGFloat = 24) {
-        self.radius = radius
-        super.init(frame: .zero)
-        self.isUserInteractionEnabled = false
-        self.layer.cornerRadius = radius; self.layer.cornerCurve = .continuous; self.clipsToBounds = true
-        self.addSubview(self.material)
-        self.material.isUserInteractionEnabled = false
-        self.material.layer.cornerRadius = radius; self.material.clipsToBounds = true
-        if #available(iOS 26.0, *) { self.material.cornerConfiguration = .corners(radius: .fixed(radius)) }
-        _ = ProcessInfo.processInfo.thermalState
-        for name in [ProcessInfo.thermalStateDidChangeNotification, .NSProcessInfoPowerStateDidChange,
-            UIAccessibility.reduceTransparencyStatusDidChangeNotification] {
-            self.observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.refresh() })
+        if #available(iOS 26.0, *) {
+            let glass = UIGlassEffect(style: .regular)
+            glass.isInteractive = true
+            super.init(effect: glass)
+            self.cornerConfiguration = .corners(radius: .fixed(radius))
+        } else {
+            super.init(effect: UIBlurEffect(style: .systemMaterial))
+            self.layer.cornerRadius = radius
+            self.layer.cornerCurve = .continuous
+            self.clipsToBounds = true
         }
-        self.refresh()
+        // Host labels/controls in contentView. Do not clip, scale or fade the
+        // native interactive surface, or detach its content from the effect.
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    deinit { for observer in self.observers { NotificationCenter.default.removeObserver(observer) } }
-    func refresh() {
-        let reduced = CodeGramEnergyPolicy.current.usesReducedEffects || UIAccessibility.isReduceTransparencyEnabled
-        guard reduced != self.reduced else { return }
-        self.reduced = reduced
-        self.backgroundColor = reduced ? CodeGramSettingsTheme.surface : .clear
-        if reduced { self.material.effect = nil }
-        else if #available(iOS 26.0, *) { self.material.effect = UIGlassEffect(style: .regular) }
-        else { self.material.effect = UIBlurEffect(style: .systemMaterial) }
-    }
-    override func layoutSubviews() { super.layoutSubviews(); self.material.frame = self.bounds }
 }
 
-private final class CodeGramRowSurface: UIView {
-    private let surface = CodeGramMaterialView(radius: 22)
-    override init(frame: CGRect) { super.init(frame: frame); self.addSubview(self.surface) }
+/// The search field stays a system UISearchBar. Its public background-image API
+/// makes room for one real glass surface, with the field hosted inside its content.
+final class CodeGramSearchView: CodeGramMaterialView {
+    let searchBar = UISearchBar()
+    init() {
+        super.init(radius: 26)
+        self.searchBar.placeholder = "Поиск"
+        self.searchBar.searchBarStyle = .minimal
+        self.searchBar.backgroundImage = UIImage()
+        self.searchBar.setSearchFieldBackgroundImage(UIImage(), for: .normal)
+        self.searchBar.searchTextField.backgroundColor = .clear
+        self.searchBar.searchTextField.font = .preferredFont(forTextStyle: .body)
+        self.searchBar.searchTextField.adjustsFontForContentSizeCategory = true
+        self.searchBar.searchTextField.autocorrectionType = .no
+        self.searchBar.tintColor = .label
+        self.contentView.addSubview(self.searchBar)
+    }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    override func layoutSubviews() { super.layoutSubviews(); self.surface.frame = self.bounds.insetBy(dx: 0, dy: 4) }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        self.searchBar.frame = self.bounds
+    }
 }
+
+/// A custom control uses the glass's own elasticity, including its content.
+/// Taps on embedded switches remain independent of the card's navigation action.
+class CodeGramDashboardSurface: CodeGramMaterialView, UIGestureRecognizerDelegate {
+    var action: (() -> Void)?
+    init() {
+        super.init(radius: 24)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(self.pressed))
+        tap.cancelsTouchesInView = false; tap.delegate = self
+        self.addGestureRecognizer(tap)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    func applyPalette(dark: Bool) { /* The native effect follows interface traits. */ }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var view = touch.view
+        while let current = view, current !== self {
+            if current is UIControl { return false }
+            view = current.superview
+        }
+        return true
+    }
+    override func accessibilityActivate() -> Bool {
+        guard let action else { return false }; action(); return true
+    }
+    @objc private func pressed() { self.action?() }
+}
+

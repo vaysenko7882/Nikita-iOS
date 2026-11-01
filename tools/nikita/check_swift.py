@@ -5,6 +5,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = [
+    "submodules/SettingsUI/Sources/CodeGramSettingsCells.swift",
+    "submodules/SettingsUI/Sources/CodeGramDashboardComponents.swift",
     "submodules/SettingsUI/Sources/CodeGramSettingsTheme.swift",
     "submodules/SettingsUI/Sources/CodeGramFeatureControllers.swift",
     "submodules/SettingsUI/Sources/InterfaceTuningSettingsController.swift",
@@ -67,6 +69,7 @@ FILES += [
 for relative in FILES:
     subprocess.run(["xcrun", "swiftc", "-frontend", "-parse", str(ROOT / relative)], check=True)
 print(f"Swift syntax parsed: {len(FILES)} files. Full typechecking is performed by the app build.")
+
 
 
 

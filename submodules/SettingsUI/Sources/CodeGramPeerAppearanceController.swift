@@ -60,25 +60,16 @@ private final class CodeGramPeerEditorController: CodeGramTableController, PHPic
         let data = self.removeAvatar ? nil : (self.jpeg ?? CodeGramPeerAppearanceStore.shared.imageData(appearance))
         return [
             CodeGramSettingsSection(title: "Название", footer: "Пустое поле возвращает оригинальное название. До 128 символов.", rows: [CodeGramSettingsRow(cell: { [weak self] in
-                let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
-                if let self { self.field.removeFromSuperview(); self.field.translatesAutoresizingMaskIntoConstraints = false; cell.contentView.addSubview(self.field)
-                    NSLayoutConstraint.activate([self.field.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 64), self.field.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -16), self.field.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 16), self.field.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -16)]) }
-                cell.selectionStyle = .none; return cell
+                guard let self else { return CodeGramTextCell(title: "Название", symbol: "textformat") }
+                return CodeGramFieldCell(field: self.field, symbol: "textformat")
             })]),
             CodeGramSettingsSection(title: "Аватар", footer: "Картинка обрезается по центру до квадрата и остаётся только на устройстве.", rows: [
                 CodeGramSettingsRow(cell: {
-                    let cell = CodeGramAvatarPreviewCell(style: .subtitle, reuseIdentifier: nil)
-                    cell.textLabel?.text = data == nil ? "Оригинал Telegram" : "Свой аватар"
-                    if let data, let image = UIImage(data: data) {
-                        cell.imageView?.image = UIGraphicsImageRenderer(size: CGSize(width: 44, height: 44)).image { _ in image.draw(in: CGRect(x: 0, y: 0, width: 44, height: 44)) }
-                        cell.imageView?.layer.cornerRadius = 22; cell.imageView?.clipsToBounds = true
-                    } else { cell.imageView?.image = UIImage(systemName: "person.crop.circle") }
-                    cell.selectionStyle = .none
-                    return cell
+                    CodeGramTextCell(title: data == nil ? "Оригинал Telegram" : "Свой аватар", symbol: "person.crop.circle", image: data.flatMap { UIImage(data: $0) })
                 }),
                 self.textRow("Выбрать фото", icon: "photo", action: { [weak self] in self?.choosePhoto() }),
-                self.textRow("Вернуть оригинальный аватар", action: { [weak self] in self?.jpeg = nil; self?.removeAvatar = true; self?.reloadContent() })]),
-            CodeGramSettingsSection(title: nil, footer: "Изменения появятся в списке чатов и заголовках после сохранения. Аватар и название у остальных участников не меняются.", rows: [self.textRow("Сбросить локальный вид", action: { [weak self] in self?.reset() })])
+                self.textRow("Вернуть оригинальный аватар", icon: "person.crop.circle.badge.checkmark", action: { [weak self] in self?.jpeg = nil; self?.removeAvatar = true; self?.reloadContent() })]),
+            CodeGramSettingsSection(title: nil, footer: "Изменения появятся в списке чатов и заголовках после сохранения. Аватар и название у остальных участников не меняются.", rows: [self.textRow("Сбросить локальный вид", icon: "arrow.counterclockwise", action: { [weak self] in self?.reset() })])
         ]
     }
     private func choosePhoto() {
@@ -117,5 +108,3 @@ private final class CodeGramPeerEditorController: CodeGramTableController, PHPic
     }
 }
 
-
-private final class CodeGramAvatarPreviewCell: UITableViewCell, CodeGramIconProvidingCell {}

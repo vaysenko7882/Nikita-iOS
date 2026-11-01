@@ -1,0 +1,33 @@
+name: CodeGram native settings UI
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/codegram-14.2-native-energy]
+permissions:
+  contents: read
+concurrency:
+  group: codegram-native-ui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-ui:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode
+        run: |
+          CODEGRAM_XCODE=$(python3 -c 'import json; print(json.load(open("versions.json"))["xcode"])')
+          sudo xcode-select -s "/Applications/Xcode_${CODEGRAM_XCODE}.app/Contents/Developer"
+          xcodebuild -version
+      - name: Check and record production UIKit settings controls
+        run: bash tools/nikita/check_settings_ui.sh "$RUNNER_TEMP/codegram-ui"
+      - name: Retain native frames and regression report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: CodeGram-native-UI-${{ github.run_number }}
+          path: ${{ runner.temp }}/codegram-ui
+          if-no-files-found: error
+          retention-days: 14
