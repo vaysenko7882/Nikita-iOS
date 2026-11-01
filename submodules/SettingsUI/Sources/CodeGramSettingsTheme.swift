@@ -12,7 +12,7 @@ enum CodeGramSettingsTheme {
     }
     static func symbol(_ name: String) -> UIImage? {
         if let image = self.icons.object(forKey: name as NSString) { return image }
-        let format = UIGraphicsImageRendererFormat(); format.scale = 0; format.opaque = false
+        let format = UIGraphicsImageRendererFormat(); format.opaque = false
         let image = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32), format: format).image { _ in
             UIColor(white: 0.38, alpha: 1).setFill()
             UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: 32, height: 32), cornerRadius: 10).fill()
