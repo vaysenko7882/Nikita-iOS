@@ -712,7 +712,7 @@ public final class AccountContextImpl: AccountContext {
 
     private func startNikitaArchiveSync() {
         guard self.sharedContext.applicationBindings.isMainApp else { return }
-        self.nikitaArchiveSyncManager = NikitaArchiveSyncManager(engine: self.engine,
+        self.nikitaArchiveSyncManager = NikitaArchiveSyncManager(engine: self.engine, account: String(self.account.peerId.id._internalGetInt64Value()),
             inForeground: self.sharedContext.applicationBindings.applicationInForeground)
     }
 
@@ -1448,3 +1448,4 @@ private extension AccountContextImpl {
         }
     }
 }
+

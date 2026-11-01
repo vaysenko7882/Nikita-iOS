@@ -26,14 +26,22 @@ public struct CodeGramDeletedStyle: Codable, Equatable {
         return [UIColor.systemGray, .systemBlue, .systemOrange, .systemRed][self.normalized.outlineColor]
     }
     public static let changed = Notification.Name("CodeGramDeletedStyleChanged")
+    private static let cacheLock = NSLock()
+    private static var cached: CodeGramDeletedStyle = (UserDefaults.standard.data(forKey: "codegram.deletedStyle").flatMap {
+        try? JSONDecoder().decode(CodeGramDeletedStyle.self, from: $0)
+    } ?? CodeGramDeletedStyle()).normalized
     public static var current: CodeGramDeletedStyle {
         get {
-            return (UserDefaults.standard.data(forKey: "codegram.deletedStyle").flatMap {
-                try? JSONDecoder().decode(CodeGramDeletedStyle.self, from: $0)
-            } ?? CodeGramDeletedStyle()).normalized
+            self.cacheLock.lock(); defer { self.cacheLock.unlock() }
+            return self.cached
         }
         set {
-            if let data = try? JSONEncoder().encode(newValue.normalized) {
+            let value = newValue.normalized
+            self.cacheLock.lock()
+            guard self.cached != value else { self.cacheLock.unlock(); return }
+            self.cached = value
+            self.cacheLock.unlock()
+            if let data = try? JSONEncoder().encode(value) {
                 UserDefaults.standard.set(data, forKey: "codegram.deletedStyle")
                 NotificationCenter.default.post(name: Self.changed, object: nil)
             }
@@ -48,6 +56,10 @@ private final class CodeGramDeletedDecoration {
     var deleted = false
     var circular = false
     var observer: NSObjectProtocol?
+    private var appliedStyle: CodeGramDeletedStyle?
+    private var appliedRect = CGRect.null
+    private var appliedDeleted = false
+    private var appliedCircular = false
     init(root: CALayer) {
         self.root = root
         self.shape.zPosition = 1000
@@ -57,6 +69,9 @@ private final class CodeGramDeletedDecoration {
     func apply() {
         guard let root else { return }
         let style = CodeGramDeletedStyle.current
+        guard self.appliedStyle != style || self.appliedRect != self.rect || self.appliedDeleted != self.deleted || self.appliedCircular != self.circular || root.opacity != (self.deleted ? Float(style.opacity) : 1) else { return }
+        self.appliedStyle = style; self.appliedRect = self.rect
+        self.appliedDeleted = self.deleted; self.appliedCircular = self.circular
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         root.opacity = self.deleted ? Float(style.opacity) : 1
@@ -80,6 +95,8 @@ public func codegramApplyDeletedAppearance(root: CALayer, rect: CGRect, isDelete
     if let current = objc_getAssociatedObject(root, &codegramDeletedDecorationKey) as? CodeGramDeletedDecoration {
         decoration = current
     } else {
+        // Ordinary messages need no decoration, observer or preferences decode.
+        guard isDeleted else { return }
         decoration = CodeGramDeletedDecoration(root: root)
         objc_setAssociatedObject(root, &codegramDeletedDecorationKey, decoration, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
@@ -88,3 +105,4 @@ public func codegramApplyDeletedAppearance(root: CALayer, rect: CGRect, isDelete
     decoration.circular = circular
     decoration.apply()
 }
+
