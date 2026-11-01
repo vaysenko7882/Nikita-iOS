@@ -28,6 +28,12 @@ class CodeGramGlassCell: UITableViewCell {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     func updateWrappingWidth(_ width: CGFloat) {}
+    func setWrappingWidth(_ width: CGFloat, for label: UILabel) {
+        let width = max(1, width)
+        if abs(label.preferredMaxLayoutWidth - width) > 0.25 {
+            label.preferredMaxLayoutWidth = width
+        }
+    }
     override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
         // A glass content host has no intrinsic width while UITableView performs
         // its fitting pass. Give multiline labels their final wrapping width
@@ -117,8 +123,8 @@ final class CodeGramTextCell: CodeGramGlassCell {
     override func updateWrappingWidth(_ width: CGFloat) {
         guard width > 0 else { return }
         let accessory = self.headingControl.map { max(0, $0.intrinsicContentSize.width) } ?? (self.showsDisclosure ? 12 : 0)
-        self.caption.preferredMaxLayoutWidth = max(1, width - 32 - self.iconWidth - 12 - (accessory > 0 ? accessory + 12 : 0))
-        self.detailLabel.preferredMaxLayoutWidth = max(1, width - 32)
+        self.setWrappingWidth(width - 32 - self.iconWidth - 12 - (accessory > 0 ? accessory + 12 : 0), for: self.caption)
+        self.setWrappingWidth(width - 32, for: self.detailLabel)
     }
 }
 
@@ -173,8 +179,8 @@ final class CodeGramSliderCell: CodeGramGlassCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func updateWrappingWidth(_ width: CGFloat) {
         guard width > 0 else { return }
-        self.caption.preferredMaxLayoutWidth = max(1, width - 72)
-        self.valueLabel.preferredMaxLayoutWidth = max(1, width - 72)
+        self.setWrappingWidth(width - 72, for: self.caption)
+        self.setWrappingWidth(width - 72, for: self.valueLabel)
     }
     @objc private func valueChanged() {
         let value = Double(self.slider.value)
