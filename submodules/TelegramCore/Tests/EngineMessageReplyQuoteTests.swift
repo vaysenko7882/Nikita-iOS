@@ -6,11 +6,19 @@ import TelegramApi
 final class EngineMessageReplyQuoteTests: XCTestCase {
     func testRichQuoteCodableRoundTrip() throws {
         let richText: [RichText] = [.bold(.plain("Hello 😀")), .formula(latex: "x^2"), .textCustomEmoji(fileId: 123, alt: "👍")]
-        let quote = EngineMessageReplyQuote(text: "", offset: nil, entities: [], media: nil, richText: richText)
+        let quote = EngineMessageReplyQuote(richText: richText, offset: nil, media: nil)
         let decoded = try JSONDecoder().decode(EngineMessageReplyQuote.self, from: JSONEncoder().encode(quote))
         XCTAssertEqual(decoded, quote)
         XCTAssertEqual(decoded.richText, richText)
         XCTAssertEqual(decoded.text, "Hello 😀\nx^2\n👍")
+    }
+
+    func testRawLegacyFieldsAreNotSilentlyRewrittenByDecoding() throws {
+        let quote = EngineMessageReplyQuote(text: "legacy fallback", offset: 3, entities: [], media: nil, richText: [.bold(.plain("rich form"))])
+        let decoded = try JSONDecoder().decode(EngineMessageReplyQuote.self, from: JSONEncoder().encode(quote))
+        XCTAssertEqual(decoded.text, "legacy fallback")
+        XCTAssertEqual(decoded.offset, 3)
+        XCTAssertEqual(decoded.richText, quote.richText)
     }
 
     func testLegacyQuoteStillDecodes() throws {

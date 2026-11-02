@@ -212,7 +212,13 @@ public struct InterfaceTuningFeatureStrings {
     public let storyConfirmationAction: String
 }
 
+public struct DisappearingMediaFeatureStrings {
+    public let startCountdown: String
+    public let exportFailed: String
+}
+
 public struct LocalFeatureStrings {
+    public let disappearingMedia: DisappearingMediaFeatureStrings
     public let ghostMode: GhostModeFeatureStrings
     public let localMessageArchive: LocalMessageArchiveFeatureStrings
     public let interfaceTuning: InterfaceTuningFeatureStrings
@@ -231,6 +237,7 @@ public struct LocalFeatureStrings {
 
         switch languageCode {
         case "ru":
+            self.disappearingMedia = DisappearingMediaFeatureStrings(startCountdown: "Начать отсчёт", exportFailed: "Не удалось сохранить медиа. Проверьте подключение и повторите попытку.")
             self.ghostMode = GhostModeFeatureStrings(
                 title: "Режим призрака",
                 on: "Вкл.",
@@ -448,6 +455,7 @@ public struct LocalFeatureStrings {
                 empty: "В этом чате нет ваших сообщений."
             )
         case "uk":
+            self.disappearingMedia = DisappearingMediaFeatureStrings(startCountdown: "Почати відлік", exportFailed: "Не вдалося зберегти медіа. Перевірте з’єднання та повторіть спробу.")
             self.ghostMode = GhostModeFeatureStrings(
                 title: "Режим привида",
                 on: "Увімк.",
@@ -665,6 +673,7 @@ public struct LocalFeatureStrings {
                 empty: "У цьому чаті немає ваших повідомлень."
             )
         default:
+            self.disappearingMedia = DisappearingMediaFeatureStrings(startCountdown: "Start countdown", exportFailed: "Could not save this media. Check your connection and try again.")
             self.ghostMode = GhostModeFeatureStrings(
                 title: "Ghost Mode",
                 on: "On",

@@ -33,6 +33,7 @@ public final class NikitaSettingsStore {
     public static let changed = Notification.Name("NikitaSettingsChanged")
     public static let serverChanged = Notification.Name("CodeGramArchiveServerChanged")
     private let defaults = UserDefaults.standard
+    private let tokenCache = CodeGramArchiveTokenCache()
     private let tokenService = "personal.nikita.messenger.archive"
 
     private init() {
@@ -108,12 +109,16 @@ public final class NikitaSettingsStore {
     }
 
     public func server(account: String) -> NikitaServerConfiguration {
-        var query = self.tokenQuery(account: account)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        let token = status == errSecSuccess ? (result as? Data).flatMap { String(data: $0, encoding: .utf8) } ?? "" : ""
+        let token = self.tokenCache.token(account: account) {
+            var query = self.tokenQuery(account: account)
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            if status == errSecItemNotFound { return "" }
+            guard status == errSecSuccess, let data = result as? Data else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
         return NikitaServerConfiguration(
             enabled: self.defaults.bool(forKey: "nikita.server.enabled.\(account)"),
             address: self.defaults.string(forKey: "nikita.server.address.\(account)") ?? "", token: token)
@@ -123,18 +128,19 @@ public final class NikitaSettingsStore {
     @discardableResult
     public func setServer(_ configuration: NikitaServerConfiguration, account: String) -> Bool {
         if self.server(account: account) == configuration { return true }
-        let query = self.tokenQuery(account: account)
-        let data = Data(configuration.token.utf8)
-        var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if status == errSecItemNotFound {
-            var item = query
-            item[kSecValueData as String] = data
-            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            status = SecItemAdd(item as CFDictionary, nil)
+        let saved = self.tokenCache.store(account: account, token: configuration.token) {
+            let query = self.tokenQuery(account: account)
+            let data = Data(configuration.token.utf8)
+            var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+            if status == errSecItemNotFound {
+                var item = query
+                item[kSecValueData as String] = data
+                item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                status = SecItemAdd(item as CFDictionary, nil)
+            }
+            return status == errSecSuccess
         }
-        guard status == errSecSuccess else {
-            return false
-        }
+        guard saved else { return false }
         self.defaults.set(configuration.enabled, forKey: "nikita.server.enabled.\(account)")
         self.defaults.set(configuration.address, forKey: "nikita.server.address.\(account)")
         NotificationCenter.default.post(name: Self.serverChanged, object: account)

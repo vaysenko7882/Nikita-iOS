@@ -44,7 +44,8 @@ private func removeDeletedMessageArchiveMetadata(transaction: Transaction, ids: 
     }
 }
 
-private func prepareDeletedMessageArchive(transaction: Transaction, mediaBox: MediaBox? = nil) -> DeletedMessageArchiveSettings? {
+private func prepareDeletedMessageArchive(transaction: Transaction, mediaBox: MediaBox? = nil, batch: DeletedMessageArchiveBatch? = nil) -> DeletedMessageArchiveSettings? {
+    if let batch { return batch.settings }
     guard deletedMessageArchiveSessionInitialized.with({ $0 }) else {
         return nil
     }
@@ -161,9 +162,9 @@ public func deletedMessageArchiveRetentionPlan<ID: Hashable>(
     return (retained: retained, removed: removedIds)
 }
 
-private func updateDeletedMessageArchiveMediaRetention(transaction: Transaction, mediaBox: MediaBox) {
-    let settings = deletedMessageArchiveSettings(transaction: transaction)
-    let index = transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty
+private func updateDeletedMessageArchiveMediaRetention(transaction: Transaction, mediaBox: MediaBox, settings suppliedSettings: DeletedMessageArchiveSettings? = nil, index suppliedIndex: DeletedMessageArchiveIndex? = nil) {
+    let settings = suppliedSettings ?? deletedMessageArchiveSettings(transaction: transaction)
+    let index = suppliedIndex ?? (transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty)
 
     var orderedResourceIds: [MediaResourceId] = []
     var disappearingResourceIds = Set<MediaResourceId>()
@@ -203,27 +204,47 @@ private func updateDeletedMessageArchiveMediaRetention(transaction: Transaction,
     if !idsToRemove.isEmpty {
         let _ = mediaBox.removeCachedResources(idsToRemove, force: true).start()
     }
-    var updatedKeepDisposables: [DeletedMessageArchiveKeptResourceKey: Disposable] = [:]
-    for id in retainedIds {
-        updatedKeepDisposables[DeletedMessageArchiveKeptResourceKey(mediaBoxPath: mediaBox.basePath, resourceId: id)] = mediaBox.keepResource(id: id).start()
-    }
+    let desiredKeys = Set(retainedIds.map { DeletedMessageArchiveKeptResourceKey(mediaBoxPath: mediaBox.basePath, resourceId: $0) })
     var removedKeepDisposables: [Disposable] = []
     let _ = deletedMessageArchiveMediaKeepDisposables.modify { current in
         var current = current
-        let removedKeys = current.keys.filter { $0.mediaBoxPath == mediaBox.basePath }
+        let removedKeys = current.keys.filter { $0.mediaBoxPath == mediaBox.basePath && !desiredKeys.contains($0) }
         for key in removedKeys {
-            if let disposable = current.removeValue(forKey: key) {
-                removedKeepDisposables.append(disposable)
-            }
+            if let disposable = current.removeValue(forKey: key) { removedKeepDisposables.append(disposable) }
         }
-        for (key, disposable) in updatedKeepDisposables {
-            current[key] = disposable
+        for key in desiredKeys where current[key] == nil {
+            current[key] = mediaBox.keepResource(id: key.resourceId).start()
         }
         return current
     }
-    for disposable in removedKeepDisposables {
-        disposable.dispose()
+    for disposable in removedKeepDisposables { disposable.dispose() }
+}
+
+func makeDeletedMessageArchiveBatch(transaction: Transaction, mediaBox: MediaBox) -> DeletedMessageArchiveBatch {
+    return DeletedMessageArchiveBatch(
+        loadSettings: { prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox) },
+        loadIndex: { transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty },
+        saveIndex: { index in transaction.updatePreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex, { _ in PreferencesEntry(index) }) },
+        loadRemoteState: { transaction.getPreferencesEntry(key: PreferencesKeys.nikitaServerArchive)?.get(NikitaRemoteArchiveState.self) },
+        saveRemoteState: { state in transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(state) }) },
+        retainMedia: { settings, index in updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox, settings: settings, index: index) }
+    )
+}
+
+private func mutateDeletedMessageArchiveIndex(transaction: Transaction, batch: DeletedMessageArchiveBatch?, _ update: (inout DeletedMessageArchiveIndex) -> Void) {
+    if let batch { batch.updateIndex(update) }
+    else {
+        transaction.updatePreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex, { entry in
+            var index = entry?.get(DeletedMessageArchiveIndex.self) ?? .empty
+            update(&index)
+            return PreferencesEntry(index)
+        })
     }
+}
+
+private func requestDeletedMessageArchiveMediaRetention(transaction: Transaction, mediaBox: MediaBox, batch: DeletedMessageArchiveBatch?) {
+    if let batch { batch.requestMediaRetention() }
+    else { updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox) }
 }
 
 private func archiveAttribute(_ attributes: [MessageAttribute]) -> ArchivedMessageAttribute? {
@@ -395,12 +416,13 @@ func archivePreviousMessageVersionIfNeeded(
     transaction: Transaction,
     id: MessageId,
     updatedMessage: StoreMessage,
-    mediaBox: MediaBox? = nil
+    mediaBox: MediaBox? = nil,
+    batch: DeletedMessageArchiveBatch? = nil
 ) -> StoreMessage {
-    guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox), settings.saveEditedVersions else {
+    guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox, batch: batch), settings.saveEditedVersions else {
         return updatedMessage
     }
-    let updatedMessage = attachNikitaPendingVersions(transaction: transaction, id: id, updated: updatedMessage)
+    let updatedMessage = attachNikitaPendingVersions(transaction: transaction, id: id, updated: updatedMessage, batch: batch)
     guard let previous = transaction.getMessage(id), !isArchiveIneligible(previous) else {
         return updatedMessage
     }
@@ -434,17 +456,15 @@ func archivePreviousMessageVersionIfNeeded(
     ) else {
         return updatedMessage
     }
-    updateDeletedMessageArchiveIndex(transaction: transaction, { current in
-        var current = current
+    mutateDeletedMessageArchiveIndex(transaction: transaction, batch: batch, { current in
         current.messageIds.append(DeletedMessageArchiveIndexEntry(snapshotId))
         let liveEntry = DeletedMessageArchiveIndexEntry(id)
         if !current.liveMessageIds.contains(liveEntry) {
             current.liveMessageIds.append(liveEntry)
         }
-        return current
     })
     if let mediaBox {
-        updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox)
+        requestDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox, batch: batch)
     }
 
     var versionIds = previousArchiveAttribute?.versionIds ?? []
@@ -467,9 +487,10 @@ func archiveMessagesBeforeCloudDeletion(
     transaction: Transaction,
     ids: [MessageId],
     deletedAt: Int32 = archiveTimestamp(),
-    mediaBox: MediaBox? = nil
+    mediaBox: MediaBox? = nil,
+    batch: DeletedMessageArchiveBatch? = nil
 ) -> [MessageId] {
-    guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox) else {
+    guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox, batch: batch) else {
         return []
     }
     var archiveIds: [MessageId] = []
@@ -482,10 +503,10 @@ func archiveMessagesBeforeCloudDeletion(
         }
     }
     if !excludedIds.isEmpty {
-        removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: excludedIds)
+        removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: excludedIds, batch: batch)
     }
     if !settings.saveDeletedMessages {
-        removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: ids)
+        removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: ids, batch: batch)
         return []
     }
     var result: [MessageId] = []
@@ -511,15 +532,13 @@ func archiveMessagesBeforeCloudDeletion(
         }
     }
     if !result.isEmpty {
-        updateDeletedMessageArchiveIndex(transaction: transaction, { current in
-            var current = current
+        mutateDeletedMessageArchiveIndex(transaction: transaction, batch: batch, { current in
             current.messageIds.append(contentsOf: result.map(DeletedMessageArchiveIndexEntry.init))
             let deletedEntries = Set(ids.map(DeletedMessageArchiveIndexEntry.init))
             current.liveMessageIds.removeAll(where: { deletedEntries.contains($0) })
-            return current
         })
         if let mediaBox {
-            updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox)
+            requestDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox, batch: batch)
         }
     }
     return result
@@ -540,7 +559,7 @@ func _internal_deleteArchivedMessage(transaction: Transaction, mediaBox: MediaBo
     updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox)
 }
 
-func removeDeletedMessageArchiveForLocalDeletion(transaction: Transaction, mediaBox: MediaBox?, ids: [MessageId]) {
+func removeDeletedMessageArchiveForLocalDeletion(transaction: Transaction, mediaBox: MediaBox?, ids: [MessageId], batch: DeletedMessageArchiveBatch? = nil) {
     var versionIds: [MessageId] = []
     var archivedSourceIds: [MessageId] = []
     var resourceIds = Set<MediaResourceId>()
@@ -568,14 +587,12 @@ func removeDeletedMessageArchiveForLocalDeletion(transaction: Transaction, media
     }
     let removedStoredEntries = Set(versionIds.map(DeletedMessageArchiveIndexEntry.init))
     let removedLiveEntries = Set(archivedSourceIds.map(DeletedMessageArchiveIndexEntry.init))
-    updateDeletedMessageArchiveIndex(transaction: transaction, { current in
-        var current = current
+    mutateDeletedMessageArchiveIndex(transaction: transaction, batch: batch, { current in
         current.messageIds.removeAll(where: { removedStoredEntries.contains($0) })
         current.liveMessageIds.removeAll(where: { removedLiveEntries.contains($0) })
-        return current
     })
     if let mediaBox {
-        updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox)
+        requestDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox, batch: batch)
     }
 }
 
@@ -606,22 +623,25 @@ private func nikitaArchiveMessageKey(_ id: MessageId) -> String {
     return "\(id.peerId.toInt64()):\(id.id)"
 }
 
-private func attachNikitaPendingVersions(transaction: Transaction, id: MessageId, updated: StoreMessage) -> StoreMessage {
-    guard var state = transaction.getPreferencesEntry(key: PreferencesKeys.nikitaServerArchive)?.get(NikitaRemoteArchiveState.self),
-        let pending = state.pendingVersions.removeValue(forKey: nikitaArchiveMessageKey(id)) else {
-        return updated
+private func attachNikitaPendingVersions(transaction: Transaction, id: MessageId, updated: StoreMessage, batch: DeletedMessageArchiveBatch? = nil) -> StoreMessage {
+    let pending: [DeletedMessageArchiveIndexEntry]
+    if let batch {
+        guard let versions = batch.takePendingVersions(for: nikitaArchiveMessageKey(id)) else { return updated }
+        pending = versions
+    } else {
+        guard var state = transaction.getPreferencesEntry(key: PreferencesKeys.nikitaServerArchive)?.get(NikitaRemoteArchiveState.self),
+            let versions = state.pendingVersions.removeValue(forKey: nikitaArchiveMessageKey(id)) else { return updated }
+        pending = versions
+        transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(state) })
     }
     var ids = archiveAttribute(updated.attributes)?.versionIds ?? transaction.getMessage(id)?.archivedMessageAttribute?.versionIds ?? []
     for entry in pending where transaction.getMessage(entry.messageId) != nil && !ids.contains(entry.messageId) {
         ids.append(entry.messageId)
     }
-    transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(state) })
     guard !ids.isEmpty else { return updated }
-    updateDeletedMessageArchiveIndex(transaction: transaction, { index in
-        var index = index
+    mutateDeletedMessageArchiveIndex(transaction: transaction, batch: batch, { index in
         let entry = DeletedMessageArchiveIndexEntry(id)
         if !index.liveMessageIds.contains(entry) { index.liveMessageIds.append(entry) }
-        return index
     })
     var attributes = attributesWithoutArchiveMetadata(updated.attributes)
     attributes.append(ArchivedMessageAttribute(originalMessageId: id, versionIds: ids, deletedAt: nil, sessionId: deletedMessageArchiveSessionId))

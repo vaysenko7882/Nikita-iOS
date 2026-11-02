@@ -66,6 +66,19 @@ FILES += [
     "submodules/PlatformRestrictionMatching/Sources/PlatformRestrictionMatching.swift",
     "submodules/TelegramUI/Components/Stories/StoryContainerScreen/Sources/StoryItemSetContainerComponent.swift",
 ]
+FILES += [
+    "submodules/TelegramCore/Sources/Nikita/DeletedMessageArchiveBatch.swift",
+    "submodules/TelegramCore/Sources/Nikita/CodeGramArchiveTokenCache.swift",
+    "submodules/TelegramCore/Sources/Nikita/CodeGramMediaConsumptionPolicy.swift",
+    "submodules/TelegramCore/Sources/SyncCore/SyncCore_AutoremoveTimeoutMessageAttribute.swift",
+    "submodules/TelegramCore/Sources/TelegramEngine/Messages/MarkMessageContentAsConsumedInteractively.swift",
+    "submodules/GalleryUI/Sources/SecretMediaPreviewController.swift",
+    "submodules/TelegramUI/Sources/Chat/ChatControllerOpenViewOnceMediaMessage.swift",
+    "submodules/TelegramUI/Sources/ChatMessageContextControllerContentSource.swift",
+    "submodules/SaveToCameraRoll/Sources/CodeGramDisappearingMediaExport.swift",
+    "submodules/SaveToCameraRoll/Sources/CodeGramExportFile.swift",
+    "submodules/Display/Source/CodeGramMediaActions.swift",
+]
 for relative in FILES:
     subprocess.run(["xcrun", "swiftc", "-frontend", "-parse", str(ROOT / relative)], check=True)
 print(f"Swift syntax parsed: {len(FILES)} files. Full typechecking is performed by the app build.")

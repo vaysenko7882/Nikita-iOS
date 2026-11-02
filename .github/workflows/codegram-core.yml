@@ -1,0 +1,77 @@
+name: CodeGram Core regression tests
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/codegram-14.3-catchup-media]
+permissions:
+  contents: read
+concurrency:
+  group: codegram-core-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core-tests:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Prepare personal API configuration
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: python3 tools/nikita/configure.py
+      - name: Select pinned Xcode
+        run: |
+          CODEGRAM_XCODE=$(python3 -c 'import json; print(json.load(open("versions.json"))["xcode"])')
+          sudo xcode-select -s "/Applications/Xcode_${CODEGRAM_XCODE}.app/Contents/Developer"
+          xcodebuild -version
+      - name: Prepare reusable toolchain cache
+        id: cache-config
+        run: python3 tools/nikita/cache_settings.py prepare
+      - name: Restore downloaded repositories and compiler actions
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        continue-on-error: true
+        with:
+          path: ${{ steps.cache-config.outputs.path }}
+          key: nikita-core-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-${{ github.sha }}
+          restore-keys: |
+            nikita-core-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-
+            nikita-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-
+      - name: Fetch pinned dependencies
+        run: python3 tools/nikita/configure.py --submodules
+      - name: Run TelegramCore tests on iPhone 17 with iOS 27.0
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          with Path('.bazelrc').open('a') as f:
+              f.write('\ntest --keep_going\ntest --jobs=2\ntest --local_resources=memory=4096\ntest --//Telegram:disableProvisioningProfiles\ntest --//Telegram:disableExtensions\ntest --//Telegram:disableAppGroups\ntest --features=disable_legacy_signing\n')
+              f.write('test --repository_cache=' + str(Path(os.environ['NIKITA_BUILD_CACHE']) / 'repositories') + '\n')
+          PY
+          python3 build-system/Make/Make.py --cacheDir="$NIKITA_BUILD_CACHE/actions" test --configurationPath=build-system/nikita-local-configuration.json --xcodeManagedCodesigning --apsEnvironment=development --target=//submodules/TelegramCore:TelegramCoreTests
+      - name: Retain native test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: CodeGram-Core-tests-${{ github.run_number }}
+          path: bazel-testlogs/submodules/TelegramCore/TelegramCoreTests
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Bound reusable cache
+        if: always()
+        continue-on-error: true
+        run: python3 tools/nikita/cache_settings.py prune
+      - name: Save compiler actions
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ steps.cache-config.outputs.path }}
+          key: nikita-core-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-${{ github.sha }}
+      - name: Remove temporary API configuration
+        if: always()
+        run: rm -f build-system/nikita-local-configuration.json

@@ -21,7 +21,7 @@ func _internal_markMessageContentAsConsumedInteractively(postbox: Postbox, messa
         let isSecretChat = messageId.peerId.namespace == Namespaces.Peer.SecretChat
         let suppressRemoteConsumption = !force && settings.hidesMessageReadReceipts && !isSecretChat
         if let message = transaction.getMessage(messageId), message.flags.contains(.Incoming) {
-            let deferViewOnceConsumption = ghostModeDefersViewOnceConsumption(
+            let deferViewOnceConsumption = (!force && message.codeGramRequiresExplicitMediaCountdown) || ghostModeDefersViewOnceConsumption(
                 settings: settings,
                 isViewOnce: messageIsViewOnce(message),
                 isSecretChat: isSecretChat,

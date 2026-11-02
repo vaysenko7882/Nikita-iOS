@@ -31,6 +31,7 @@ enum ArchiveStateCheck {
             exit(decoded == nil ? 3 : 0)
         }
 
+        verifyCatchupBatch()
         let empty = roundTrip(NikitaRemoteArchiveState())
         require(empty.pendingVersions.isEmpty && empty.cursor == 0, "Empty state changed")
 
@@ -88,3 +89,56 @@ enum ArchiveStateCheck {
     }
 }
 
+
+
+private func verifyCatchupBatch() {
+    let first = DeletedMessageArchiveIndexEntry(MessageId(peerId: PeerId(123), namespace: 9, id: 1))
+    var persistedIndex = DeletedMessageArchiveIndex(messageIds: [first], liveMessageIds: [first])
+    var persistedState = NikitaRemoteArchiveState()
+    persistedState.pendingVersions = ["123:7": [first], "another-account:9": [first]]
+    var settingsReads = 0, indexReads = 0, stateReads = 0
+    var indexWrites = 0, stateWrites = 0, sweeps = 0
+    var initialized = false
+    let batch = DeletedMessageArchiveBatch(loadSettings: {
+        settingsReads += 1; initialized = true; return .defaultSettings
+    }, loadIndex: {
+        precondition(initialized, "Session initialization must precede index snapshot")
+        indexReads += 1; return persistedIndex
+    }, saveIndex: { value in
+        indexWrites += 1
+        // The same production Codable declaration and actual Postbox codec.
+        persistedIndex = PreferencesEntry(value)!.get(DeletedMessageArchiveIndex.self)!
+    }, loadRemoteState: {
+        stateReads += 1; return roundTrip(persistedState)
+    }, saveRemoteState: { state in stateWrites += 1; persistedState = roundTrip(state) }, retainMedia: { _, index in
+        sweeps += 1; precondition(index == persistedIndex, "Retention ran on stale metadata")
+    })
+    // A local removal may be the first replay operation, before an edit calls prepare.
+    batch.updateIndex { $0.liveMessageIds.removeAll() }
+    var expected = [first]
+    for number in 2 ... 10_001 {
+        precondition(batch.settings != nil)
+        precondition(batch.takePendingVersions(for: "missing") == nil)
+        let entry = DeletedMessageArchiveIndexEntry(MessageId(peerId: PeerId(123), namespace: 9, id: Int32(number)))
+        expected.append(entry)
+        batch.updateIndex { $0.messageIds.append(entry) }
+        batch.requestMediaRetention()
+    }
+    precondition(batch.takePendingVersions(for: "123:7") == [first])
+    precondition(batch.takePendingVersions(for: "123:7") == nil)
+    precondition(indexWrites == 0 && stateWrites == 0 && sweeps == 0, "Work leaked out of transaction batch")
+    batch.finish(); batch.finish()
+    precondition(persistedIndex.messageIds == expected && persistedIndex.liveMessageIds.isEmpty)
+    precondition(persistedState.pendingVersions == ["another-account:9": [first]])
+    precondition(settingsReads == 1 && indexReads == 1 && stateReads == 1)
+    precondition(indexWrites == 1 && stateWrites == 1 && sweeps == 1)
+    var nilReads = 0
+    let absent = DeletedMessageArchiveBatch(loadSettings: { nilReads += 1; return nil },
+        loadIndex: { fatalError("Empty batch read index") }, saveIndex: { _ in fatalError("Unexpected index write") },
+        loadRemoteState: { nilReads += 1; return nil }, saveRemoteState: { _ in fatalError("Unexpected state write") },
+        retainMedia: { _, _ in fatalError("Unexpected retention sweep") })
+    for _ in 0 ..< 100 { precondition(absent.settings == nil && absent.takePendingVersions(for: "none") == nil) }
+    absent.finish(); absent.finish()
+    precondition(nilReads == 2, "Missing settings/state must be cached within the transaction")
+    print("Catch-up: 10,000 edits preserve index/revisions through the real Postbox codec, with one settings/index/state read, one index/state write and one retention sweep. Nil caching and idempotent finish passed.")
+}

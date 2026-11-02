@@ -22,6 +22,15 @@ import Foundation
                     precondition(delay >= previous && delay <= 900)
                     previous = delay
                 }
+                precondition(policy.syncPageDelay >= 1)
+                precondition(policy.syncResumeDelay(inForeground: false, isUpdatingMessages: false, notBefore: 0, now: 100) == nil)
+                precondition(policy.syncResumeDelay(inForeground: true, isUpdatingMessages: true, notBefore: 0, now: 100) == nil)
+                if policy.allowsAutomaticSync {
+                    precondition(policy.syncResumeDelay(inForeground: true, isUpdatingMessages: false, notBefore: 0, now: 100) == (policy.usesReducedEffects ? 15 : 8))
+                    precondition(policy.syncResumeDelay(inForeground: true, isUpdatingMessages: false, notBefore: 400, now: 100) == 300)
+                } else {
+                    precondition(policy.syncResumeDelay(inForeground: true, isUpdatingMessages: false, notBefore: 0, now: 100) == nil)
+                }
                 // Activity clears idle/error backoff without changing preferences.
                 precondition(policy.syncDelay(idleCount: 0, failureCount: 0) == (policy.usesReducedEffects ? 120 : 30))
             }

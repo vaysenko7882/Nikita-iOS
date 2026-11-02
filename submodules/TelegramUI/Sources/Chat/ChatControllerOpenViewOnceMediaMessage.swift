@@ -129,7 +129,39 @@ extension ChatControllerImpl {
         }
         
         let isIncoming = message.effectivelyIncoming(self.context.account.peerId)
-        
+        let waitsForCountdown = message._asMessage().codeGramRequiresExplicitMediaCountdown
+        var countdownStarted = !waitsForCountdown
+        var mediaActions: [ContextMenuItem] = []
+        if isIncoming {
+            mediaActions.append(.action(ContextMenuActionItem(text: self.presentationData.strings.Common_Save, icon: { theme in
+                return UIImage(systemName: "square.and.arrow.down")?.withTintColor(theme.contextMenu.primaryColor, renderingMode: .alwaysOriginal)
+            }, action: { [weak self] controller, completion in
+                let save: () -> Void = { [weak self] in
+                    guard let self else { return }
+                    self.context.sharedContext.mediaManager.setPlaylist(nil, type: .voice, control: .playback(.pause))
+                    exportCodeGramDisappearingMedia(context: self.context, message: message, sourceView: self.chatDisplayNode.view, failed: { [weak self] in
+                        guard let self else { return }
+                        let alert = UIAlertController(title: nil, message: self.presentationData.strings.localFeatures.disappearingMedia.exportFailed, preferredStyle: .alert)
+                        alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
+                        self.context.sharedContext.applicationBindings.presentNativeController(alert)
+                    })
+                }
+                if let controller { controller.dismiss(result: .default, completion: save) }
+                else { completion(.default); save() }
+            })))
+            if waitsForCountdown {
+                mediaActions.append(.action(ContextMenuActionItem(text: self.presentationData.strings.localFeatures.disappearingMedia.startCountdown, icon: { theme in
+                    return UIImage(systemName: "timer")?.withTintColor(theme.contextMenu.primaryColor, renderingMode: .alwaysOriginal)
+                }, action: { [weak self] _, completion in
+                    countdownStarted = true
+                    if let self {
+                        let _ = self.context.engine.messages.markMessageContentAsConsumedInteractively(messageId: message.id, force: true).startStandalone()
+                    }
+                    completion(.default)
+                })))
+            }
+        }
+
         var presentImpl: ((ViewController) -> Void)?
         let configuration = ContextController.Configuration(
             sources: [
@@ -143,12 +175,13 @@ extension ChatControllerImpl {
                         backgroundNode: self.chatBackgroundNode,
                         engine: self.context.engine,
                         message: message,
+                        restoreMessage: { waitsForCountdown && !countdownStarted },
                         present: { c in
                             presentImpl?(c)
                         }
                     )),
-                    items: .single(ContextController.Items(content: .list([]))),
-                    closeActionTitle: isIncoming ? self.presentationData.strings.Chat_PlayOnceMesasgeCloseAndDelete : self.presentationData.strings.Chat_PlayOnceMesasgeClose,
+                    items: .single(ContextController.Items(content: .list(mediaActions))),
+                    closeActionTitle: isIncoming && !waitsForCountdown ? self.presentationData.strings.Chat_PlayOnceMesasgeCloseAndDelete : self.presentationData.strings.Chat_PlayOnceMesasgeClose,
                     closeAction: { [weak self] in
                         if let self {
                             self.context.sharedContext.mediaManager.setPlaylist(nil, type: .voice, control: .playback(.pause))

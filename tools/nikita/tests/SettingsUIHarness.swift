@@ -158,7 +158,7 @@ private final class HarnessController: UIViewController {
             CodeGramSliderCell(title: "Сила робота", symbol: "cpu", value: 0.25, range: 0 ... 1, format: { "\(Int($0 * 100))%" }, changed: { _ in }),
             CodeGramSliderCell(title: "Частота", symbol: "waveform.path", value: 68, range: 20 ... 160, format: { "\(Int($0)) Гц" }, changed: { _ in })
         ])
-        self.phase("voice") { self.showDashboard() }
+        self.phase("voice") { self.showMediaActions() }
     }
     private func showDashboard() {
         self.title = "CodeGram"
@@ -188,9 +188,45 @@ private final class HarnessController: UIViewController {
             }
         }
     }
+    private func showMediaActions() {
+        self.search.searchBar.resignFirstResponder()
+        let sheet = codeGramMediaActions(saveTitle: "Сохранить", startTitle: "Начать отсчёт", cancelTitle: "Отмена",
+            canStart: true, sourceView: self.view, save: {}, start: {})
+        let anchor = sheet.popoverPresentationController?.sourceView
+        self.expect(anchor !== self.view && anchor?.bounds.size == CGSize(width: 2, height: 2), "Popover must not morph the entire presenting screen")
+        self.expect(anchor === codeGramMediaPopoverAnchor(in: self.view), "Repeated presentations must reuse their anchor")
+        self.expect(sheet.actions.map { $0.title ?? "" } == ["Сохранить", "Начать отсчёт", "Отмена"], "Unopened media is missing explicit actions")
+        self.present(sheet, animated: true) {
+            self.phase("media-actions", after: 1) {
+                var firstCalls = 0
+                codeGramDismissMediaActions(sheet) {
+                    firstCalls += 1
+                    self.expect(firstCalls == 1 && sheet.presentingViewController == nil, "Presented action must run once after dismissal")
+                    let started = codeGramMediaActions(saveTitle: "Сохранить", startTitle: "Начать отсчёт", cancelTitle: "Отмена",
+                        canStart: false, sourceView: self.view, save: {}, start: {})
+                    self.expect(started.actions.count == 2, "Existing countdown must not offer a second start")
+                    self.present(started, animated: true) {
+                        self.phase("media-actions-started", after: 1) {
+                            var closedCalls = 0
+                            let closed = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+                            codeGramDismissMediaActions(closed) { closedCalls += 1 }
+                            self.expect(closedCalls == 1, "Already closed action must not be lost")
+                            var closingCalls = 0
+                            started.dismiss(animated: true)
+                            codeGramDismissMediaActions(started) {
+                                closingCalls += 1
+                                self.expect(closingCalls == 1 && started.presentingViewController == nil, "Closing action must wait for the actual transition")
+                                self.showDashboard()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     private func finish() {
         self.search.searchBar.resignFirstResponder()
-        let report: [String: Any] = ["checks": self.checks, "failures": self.failures, "ios": UIDevice.current.systemVersion, "production_sources": ["CodeGramSettingsTheme.swift", "CodeGramSettingsCells.swift", "CodeGramDashboardComponents.swift"], "scope": "Native production controls and table self-sizing, not an authenticated full app session or a physical-device thermal test"]
+        let report: [String: Any] = ["checks": self.checks, "failures": self.failures, "ios": UIDevice.current.systemVersion, "production_sources": ["CodeGramSettingsTheme.swift", "CodeGramSettingsCells.swift", "CodeGramDashboardComponents.swift", "CodeGramMediaActions.swift"], "scope": "Native production controls and table self-sizing, not an authenticated full app session or a physical-device thermal test"]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: self.output.appendingPathComponent("result.json"), options: .atomic) }
     }
 }

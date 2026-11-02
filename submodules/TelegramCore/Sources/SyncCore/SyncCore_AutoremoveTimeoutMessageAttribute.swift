@@ -165,6 +165,18 @@ public extension Message {
         return false
     }
     
+    var codeGramRequiresExplicitMediaCountdown: Bool {
+        let countdownStarted = self.attributes.contains { attribute in
+            if let value = attribute as? AutoremoveTimeoutMessageAttribute { return (value.countdownBeginTime ?? 0) > 0 }
+            if let value = attribute as? AutoclearTimeoutMessageAttribute { return (value.countdownBeginTime ?? 0) > 0 }
+            return false
+        }
+        return CodeGramMediaConsumptionPolicy.defersConsumption(
+            isIncoming: self.flags.contains(.Incoming), isDisappearingMedia: self.containsSecretMedia,
+            isConsumed: self.attributes.contains { ($0 as? ConsumableContentMessageAttribute)?.consumed == true },
+            countdownStarted: countdownStarted, force: false)
+    }
+
     var isSelfExpiring: Bool {
         return self.minAutoremoveOrClearTimeout != nil
     }
