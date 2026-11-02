@@ -59,6 +59,7 @@ Appearance/privacy: every multiline title and description fits inside its own gl
 Voice: title/value/slider stay inside one material; no squashed symbols or gray icon chips.
 Dashboard: artwork and labels share the material content hierarchy. Glass appears on the first displayed cards without a custom fade or a late flat-to-glass swap.
 Scroll/return: content and its material move together, upward then downward, and settle without a detached label or stale material. Only native scroll animation runs.
+Media actions: native system sheet slides up and settles; Save, Start countdown and Cancel are legible, aligned and inside the safe area. After a countdown starts, Save and Cancel remain and Start is absent. No overlapping timer/action labels. The gallery and audio integration still require a real account and received media.
 Search: the real UISearchBar stays inside the material, with aligned icons, editing controls and keyboard. No effects injected into private field subviews.
 The recording does not establish physical-device frame rate, heat, or finger-driven elasticity; those need a full app device check.
 ''')
@@ -69,6 +70,7 @@ xcrun --sdk iphonesimulator swiftc -parse-as-library -warnings-as-errors \
     submodules/SettingsUI/Sources/CodeGramSettingsTheme.swift \
     submodules/SettingsUI/Sources/CodeGramSettingsCells.swift \
     submodules/SettingsUI/Sources/CodeGramDashboardComponents.swift \
+    submodules/Display/Source/CodeGramMediaActions.swift \
     tools/nikita/tests/SettingsUIHarness.swift -o "$CODEGRAM_UI_APP/SettingsHarness"
 codesign --force --sign - "$CODEGRAM_UI_APP"
 CODEGRAM_UI_SIM=$(xcrun simctl create "CodeGram UI ${GITHUB_RUN_ID:-local}" "$CODEGRAM_UI_DEVICE" "$CODEGRAM_UI_RUNTIME")

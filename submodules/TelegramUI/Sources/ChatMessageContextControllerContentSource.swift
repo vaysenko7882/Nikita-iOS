@@ -145,6 +145,7 @@ final class ChatViewOnceMessageContextExtractedContentSource: ContextExtractedCo
     private weak var chatNode: ChatControllerNode?
     private weak var backgroundNode: WallpaperBackgroundNode?
     private let engine: TelegramEngine
+    private let restoreMessage: () -> Bool
     private let message: EngineMessage
     private let present: (ViewController) -> Void
 
@@ -178,13 +179,14 @@ final class ChatViewOnceMessageContextExtractedContentSource: ContextExtractedCo
         )
     }
     
-    init(context: AccountContext, presentationData: PresentationData, chatNode: ChatControllerNode, backgroundNode: WallpaperBackgroundNode, engine: TelegramEngine, message: EngineMessage, present: @escaping (ViewController) -> Void) {
+    init(context: AccountContext, presentationData: PresentationData, chatNode: ChatControllerNode, backgroundNode: WallpaperBackgroundNode, engine: TelegramEngine, message: EngineMessage, restoreMessage: @escaping () -> Bool, present: @escaping (ViewController) -> Void) {
         self.context = context
         self.presentationData = presentationData
         self.chatNode = chatNode
         self.backgroundNode = backgroundNode
         self.engine = engine
         self.message = message
+        self.restoreMessage = restoreMessage
         self.present = present
     }
     
@@ -395,6 +397,10 @@ final class ChatViewOnceMessageContextExtractedContentSource: ContextExtractedCo
             tooltipController.dismiss()
         }
         
+        if self.restoreMessage() {
+            self.messageNodeCopy?.removeFromSupernode()
+            self.messageNodeCopy = nil
+        }
         if let messageNodeCopy = self.messageNodeCopy, let sourceView = messageNodeCopy.supernode?.view, let contentNode = messageNodeCopy.getMessageContextSourceNode(stableId: nil)?.contentNode, let parentNode = contentNode.supernode?.supernode?.supernode {
             let dustEffectLayer = DustEffectLayer()
             dustEffectLayer.position = sourceView.bounds.center.offsetBy(dx: (parentNode.frame.width - messageNodeCopy.frame.width), dy: 0.0)

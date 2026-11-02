@@ -24,6 +24,13 @@ public struct CodeGramEnergyPolicy {
         return self.usesReducedEffects ? 15 : 60
     }
 
+    public var syncPageDelay: Double { return self.usesReducedEffects ? 3 : 1 }
+
+    public func syncResumeDelay(inForeground: Bool, isUpdatingMessages: Bool, notBefore: Double, now: Double) -> Double? {
+        guard inForeground, !isUpdatingMessages, self.allowsAutomaticSync else { return nil }
+        return max(self.usesReducedEffects ? 15 : 8, notBefore - now)
+    }
+
     public func syncDelay(idleCount: Int, failureCount: Int) -> Double {
         if failureCount > 0 { return min(900, 30 * pow(2, Double(min(5, failureCount)))) }
         let base: Double = self.usesReducedEffects ? 120 : 30

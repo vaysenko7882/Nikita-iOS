@@ -183,14 +183,32 @@ private final class HarnessController: UIViewController {
                 self.phase("return", after: 2) {
                     self.search.searchBar.setShowsCancelButton(true, animated: true)
                     self.search.searchBar.searchTextField.becomeFirstResponder()
-                    self.phase("search", after: 3) { self.finish() }
+                    self.phase("search", after: 3) { self.showMediaActions() }
+                }
+            }
+        }
+    }
+    private func showMediaActions() {
+        self.search.searchBar.resignFirstResponder()
+        let sheet = codeGramMediaActions(saveTitle: "Сохранить", startTitle: "Начать отсчёт", cancelTitle: "Отмена",
+            canStart: true, sourceView: self.view, save: {}, start: {})
+        self.expect(sheet.actions.map { $0.title ?? "" } == ["Сохранить", "Начать отсчёт", "Отмена"], "Unopened media is missing explicit actions")
+        self.present(sheet, animated: true) {
+            self.phase("media-actions", after: 1) {
+                self.dismiss(animated: true) {
+                    let started = codeGramMediaActions(saveTitle: "Сохранить", startTitle: "Начать отсчёт", cancelTitle: "Отмена",
+                        canStart: false, sourceView: self.view, save: {}, start: {})
+                    self.expect(started.actions.count == 2, "Existing countdown must not offer a second start")
+                    self.present(started, animated: true) {
+                        self.phase("media-actions-started", after: 1) { self.dismiss(animated: true) { self.finish() } }
+                    }
                 }
             }
         }
     }
     private func finish() {
         self.search.searchBar.resignFirstResponder()
-        let report: [String: Any] = ["checks": self.checks, "failures": self.failures, "ios": UIDevice.current.systemVersion, "production_sources": ["CodeGramSettingsTheme.swift", "CodeGramSettingsCells.swift", "CodeGramDashboardComponents.swift"], "scope": "Native production controls and table self-sizing, not an authenticated full app session or a physical-device thermal test"]
+        let report: [String: Any] = ["checks": self.checks, "failures": self.failures, "ios": UIDevice.current.systemVersion, "production_sources": ["CodeGramSettingsTheme.swift", "CodeGramSettingsCells.swift", "CodeGramDashboardComponents.swift", "CodeGramMediaActions.swift"], "scope": "Native production controls and table self-sizing, not an authenticated full app session or a physical-device thermal test"]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: self.output.appendingPathComponent("result.json"), options: .atomic) }
     }
 }

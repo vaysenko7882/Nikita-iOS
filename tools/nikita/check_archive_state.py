@@ -30,7 +30,7 @@ def main():
         state = declaration("submodules/TelegramCore/Sources/Nikita/NikitaArchiveSync.swift",
             "struct NikitaRemoteArchiveState:", "\nstruct NikitaRemoteArchiveEvent:")
         index = declaration("submodules/TelegramCore/Sources/Settings/DeletedMessageArchiveSettings.swift",
-            "struct DeletedMessageArchiveIndexEntry:", "\nstruct DeletedMessageArchiveIndex:")
+            "public struct DeletedMessageArchiveSettings:", "\nfunc deletedMessageArchiveSettings(")
         declarations = temporary / "ProductionArchiveState.swift"
         resource = (ROOT / "submodules/TelegramCore/Sources/Nikita/NikitaArchiveMediaResource.swift").read_text().replace("import Postbox\n", "")
         resource_protocol = (ROOT / "submodules/TelegramCore/Sources/SyncCore/SyncCore_TelegramMediaResource.swift").read_text().replace("import Postbox\n", "")
@@ -68,6 +68,7 @@ func mdb_cmp_memn(_ left: UnsafeRawPointer, _ leftCount: Int,
         executable = temporary / "archive-state-check"
         subprocess.run(["xcrun", "--sdk", "macosx", "swiftc", "-O", "-g", "-parse-as-library",
             "-I", str(module), *map(str, sources), str(support), str(declarations),
+            str(ROOT / "submodules/TelegramCore/Sources/Nikita/DeletedMessageArchiveBatch.swift"),
             str(ROOT / "tools/nikita/tests/ArchiveStateCheck.swift"), str(objective_c),
             "-framework", "Foundation", "-o", str(executable)], check=True)
 

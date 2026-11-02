@@ -4118,6 +4118,9 @@ func replayFinalState(
         }
     }
     
+    let archiveBatch = makeDeletedMessageArchiveBatch(transaction: transaction, mediaBox: mediaBox)
+    defer { archiveBatch.finish() }
+
     var peerIdsWithAddedSecretMessages = Set<PeerId>()
     
     var updatedTypingActivities: [PeerActivitySpace: [PeerId: PeerInputActivity?]] = [:]
@@ -4441,7 +4444,7 @@ func replayFinalState(
                     guard case let .Id(id) = message.id, id.namespace == Namespaces.Message.Cloud else {
                         return message
                     }
-                    return archivePreviousMessageVersionIfNeeded(transaction: transaction, id: id, updatedMessage: message, mediaBox: mediaBox)
+                    return archivePreviousMessageVersionIfNeeded(transaction: transaction, id: id, updatedMessage: message, mediaBox: mediaBox, batch: archiveBatch)
                 }
                 let _ = transaction.addMessages(messages, location: location)
                 if case .UpperHistoryBlock = location {
@@ -4631,9 +4634,9 @@ func replayFinalState(
                 deleteEphemeralMessages(transaction: transaction, peerId: peerId, ids: ids)
             case let .DeleteMessagesWithGlobalIds(ids):
                 let messageIds = transaction.messageIdsForGlobalIds(ids)
-                let archivedIds = archiveMessagesBeforeCloudDeletion(transaction: transaction, ids: messageIds, mediaBox: mediaBox)
+                let archivedIds = archiveMessagesBeforeCloudDeletion(transaction: transaction, ids: messageIds, mediaBox: mediaBox, batch: archiveBatch)
                 if archivedIds.isEmpty {
-                    removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: messageIds)
+                    removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: messageIds, batch: archiveBatch)
                 }
                 var resourceIds: [MediaResourceId] = []
                 transaction.deleteMessagesWithGlobalIds(ids, forEachMedia: { media in
@@ -4661,9 +4664,9 @@ func replayFinalState(
                         }
                         return true
                     })
-                    archivedIds = archiveMessagesBeforeCloudDeletion(transaction: transaction, ids: archiveIds, mediaBox: mediaBox)
+                    archivedIds = archiveMessagesBeforeCloudDeletion(transaction: transaction, ids: archiveIds, mediaBox: mediaBox, batch: archiveBatch)
                     if archivedIds.isEmpty {
-                        removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: archiveIds)
+                        removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: archiveIds, batch: archiveBatch)
                     }
                 }
                 var resourceIds: [MediaResourceId] = []
@@ -4699,7 +4702,8 @@ func replayFinalState(
                     transaction: transaction,
                     id: id,
                     updatedMessage: messageValue,
-                    mediaBox: mediaBox
+                    mediaBox: mediaBox,
+                    batch: archiveBatch
                 )
                 var generatedEvent: (reactionAuthor: Peer, reaction: MessageReaction.Reaction, message: Message, timestamp: Int32)?
                 transaction.updateMessage(id, update: { previousMessage in

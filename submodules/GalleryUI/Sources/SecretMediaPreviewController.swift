@@ -13,6 +13,7 @@ import AppBundle
 import LocalizedPeerData
 import TooltipUI
 import TelegramNotices
+import SaveToCameraRoll
 
 private func galleryMediaForMedia(media: Media) -> Media? {
     if let media = media as? TelegramMediaImage {
@@ -58,6 +59,11 @@ private func mediaForMessage(message: Message) -> Media? {
 private final class SecretMediaPreviewControllerNode: GalleryControllerNode {
     fileprivate var timeoutNode: RadialStatusNode?
     
+    var hasMediaActions = false {
+        didSet {
+            if let (layout, height) = self.validLayout { self.layoutTimeoutNode(layout, navigationBarHeight: height, transition: .immediate) }
+        }
+    }
     private var validLayout: (ContainerViewLayout, CGFloat)?
         
     var beginTimeAndTimeout: (Double, Double, Bool)? {
@@ -140,7 +146,7 @@ private final class SecretMediaPreviewControllerNode: GalleryControllerNode {
         if let timeoutNode = self.timeoutNode {
             let diameter: CGFloat = 28.0
             // In the bar's trailing place, clear of a status island beside the bar (iPhone Duo).
-            transition.updateFrame(node: timeoutNode, frame: CGRect(origin: CGPoint(x: layout.size.width - layout.safeInsets.right - layout.navigationBarTrailingButtonsInset - diameter - 9.0, y: navigationBarHeight - 9.0 - diameter), size: CGSize(width: diameter, height: diameter)))
+            transition.updateFrame(node: timeoutNode, frame: CGRect(origin: CGPoint(x: layout.size.width - layout.safeInsets.right - layout.navigationBarTrailingButtonsInset - diameter - 9.0 - (self.hasMediaActions ? 44.0 : 0.0), y: navigationBarHeight - 9.0 - diameter), size: CGSize(width: diameter, height: diameter)))
         }
     }
 }
@@ -254,23 +260,43 @@ public final class SecretMediaPreviewController: ViewController {
         self.dismiss(forceAway: false)
     }
 
-    private func updateBurnButton() {
-        var shouldDisplay = false
-        if self.ghostModeSettings.keepsViewOnceMedia, self.currentNodeMessageIsViewOnce, let message = self.messageView?.message, message.flags.contains(.Incoming) {
-            shouldDisplay = !message.attributes.contains(where: { ($0 as? ConsumableContentMessageAttribute)?.consumed == true })
+    private func updateMediaActionsButton() {
+        let shouldDisplay: Bool
+        if let message = self.messageView?.message {
+            shouldDisplay = message.flags.contains(.Incoming) && message.containsSecretMedia && !self.currentMessageIsDismissed
+        } else {
+            shouldDisplay = false
         }
         if shouldDisplay {
             if self.navigationItem.rightBarButtonItem == nil {
-                self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.localFeatures.ghostMode.burnViewOnceMedia, style: .plain, target: self, action: #selector(self.burnPressed))
+                self.navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), style: .plain, target: self, action: #selector(self.mediaActionsPressed))
             }
         } else {
             self.navigationItem.rightBarButtonItem = nil
         }
+        if self.isNodeLoaded { self.controllerNode.hasMediaActions = shouldDisplay }
     }
 
-    @objc private func burnPressed() {
-        self.markMessageAsConsumedDisposable.set(self.context.engine.messages.markMessageContentAsConsumedInteractively(messageId: self.messageId, force: true).start())
-        self.dismiss(forceAway: false)
+    @objc private func mediaActionsPressed() {
+        guard let message = self.messageView?.message, message.flags.contains(.Incoming), message.containsSecretMedia else { return }
+        let sheet = codeGramMediaActions(saveTitle: self.presentationData.strings.Common_Save,
+            startTitle: self.presentationData.strings.localFeatures.disappearingMedia.startCountdown,
+            cancelTitle: self.presentationData.strings.Common_Cancel,
+            canStart: message.codeGramRequiresExplicitMediaCountdown, sourceView: self.view,
+            save: { [weak self] in self?.saveMedia(message) }, start: { [weak self] in
+                guard let self else { return }
+                self.markMessageAsConsumedDisposable.set(self.context.engine.messages.markMessageContentAsConsumedInteractively(messageId: self.messageId, force: true).start())
+            })
+        self.context.sharedContext.applicationBindings.presentNativeController(sheet)
+    }
+
+    private func saveMedia(_ message: Message) {
+        exportCodeGramDisappearingMedia(context: self.context, message: EngineMessage(message), sourceView: self.view, failed: { [weak self] in
+            guard let self else { return }
+            let alert = UIAlertController(title: nil, message: self.presentationData.strings.localFeatures.disappearingMedia.exportFailed, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
+            self.context.sharedContext.applicationBindings.presentNativeController(alert)
+        })
     }
 
     private func allowsCaptureOfViewOnceMedia(_ message: Message) -> Bool {
@@ -373,7 +399,7 @@ public final class SecretMediaPreviewController: ViewController {
                         if let attribute = message.autoclearAttribute {
                             strongSelf.currentNodeMessageIsViewOnce = attribute.timeout == viewOnceTimeout
                             
-                            if let countdownBeginTime = attribute.countdownBeginTime {
+                            if let countdownBeginTime = attribute.countdownBeginTime, countdownBeginTime > 0 {
                                 timerStarted = true
                                 if let videoDuration = videoDuration, attribute.timeout != viewOnceTimeout {
                                     beginTimeAndTimeout = (CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970, max(videoDuration, Double(attribute.timeout)), isOutgoing)
@@ -386,7 +412,7 @@ public final class SecretMediaPreviewController: ViewController {
                         } else if let attribute = message.autoremoveAttribute {
                             strongSelf.currentNodeMessageIsViewOnce = attribute.timeout == viewOnceTimeout
                             
-                            if let countdownBeginTime = attribute.countdownBeginTime {
+                            if let countdownBeginTime = attribute.countdownBeginTime, countdownBeginTime > 0 {
                                 timerStarted = true
                                 if let videoDuration = videoDuration, attribute.timeout != viewOnceTimeout {
                                     beginTimeAndTimeout = (CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970, max(videoDuration, Double(attribute.timeout)), isOutgoing)
@@ -416,9 +442,7 @@ public final class SecretMediaPreviewController: ViewController {
                             }
                         }
                         
-                        if let beginTimeAndTimeout = beginTimeAndTimeout {
-                            strongSelf.controllerNode.beginTimeAndTimeout = beginTimeAndTimeout
-                        }
+                        strongSelf.controllerNode.beginTimeAndTimeout = beginTimeAndTimeout
                         
                         if message.flags.contains(.Incoming) || strongSelf.currentNodeMessageIsVideo {
                             if let node = strongSelf.controllerNode.pager.centralItemNode() {
@@ -602,7 +626,9 @@ public final class SecretMediaPreviewController: ViewController {
                     self?.didSetReady = true
                 }
                 self._ready.set(ready |> map { true })
-                self.markMessageAsConsumedDisposable.set(self.context.engine.messages.markMessageContentAsConsumedInteractively(messageId: message.id).start())
+                if !message.codeGramRequiresExplicitMediaCountdown {
+                    self.markMessageAsConsumedDisposable.set(self.context.engine.messages.markMessageContentAsConsumedInteractively(messageId: message.id).start())
+                }
             } else {
                 var beginTimeAndTimeout: (Double, Double, Bool)?
                 var videoDuration: Double?
@@ -614,7 +640,7 @@ public final class SecretMediaPreviewController: ViewController {
                 
                 let isOutgoing = !message.flags.contains(.Incoming)
                 if let attribute = message.autoclearAttribute {
-                    if let countdownBeginTime = attribute.countdownBeginTime {
+                    if let countdownBeginTime = attribute.countdownBeginTime, countdownBeginTime > 0 {
                         if let videoDuration = videoDuration, attribute.timeout != viewOnceTimeout {
                             beginTimeAndTimeout = (CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970, max(videoDuration, Double(attribute.timeout)), isOutgoing)
                         } else {
@@ -624,7 +650,7 @@ public final class SecretMediaPreviewController: ViewController {
                         beginTimeAndTimeout = (CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970, attribute.timeout != viewOnceTimeout ? 0.0 : Double(viewOnceTimeout), isOutgoing)
                     }
                 } else if let attribute = message.autoremoveAttribute {
-                    if let countdownBeginTime = attribute.countdownBeginTime {
+                    if let countdownBeginTime = attribute.countdownBeginTime, countdownBeginTime > 0 {
                         if let videoDuration = videoDuration, attribute.timeout != viewOnceTimeout {
                             beginTimeAndTimeout = (CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970, max(videoDuration, Double(attribute.timeout)), isOutgoing)
                         } else {
@@ -636,9 +662,7 @@ public final class SecretMediaPreviewController: ViewController {
                 }
                 
                 if self.isNodeLoaded {
-                    if let beginTimeAndTimeout = beginTimeAndTimeout {
-                        self.controllerNode.beginTimeAndTimeout = beginTimeAndTimeout
-                    }
+                    self.controllerNode.beginTimeAndTimeout = beginTimeAndTimeout
                 }
             }
         } else {
@@ -650,7 +674,7 @@ public final class SecretMediaPreviewController: ViewController {
             }
             self.currentMessageIsDismissed = true
         }
-        self.updateBurnButton()
+        self.updateMediaActionsButton()
     }
     
     private func dismissAllTooltips() {
