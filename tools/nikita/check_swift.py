@@ -76,6 +76,7 @@ FILES += [
     "submodules/TelegramUI/Sources/Chat/ChatControllerOpenViewOnceMediaMessage.swift",
     "submodules/TelegramUI/Sources/ChatMessageContextControllerContentSource.swift",
     "submodules/SaveToCameraRoll/Sources/CodeGramDisappearingMediaExport.swift",
+    "submodules/SaveToCameraRoll/Sources/CodeGramExportFile.swift",
     "submodules/Display/Source/CodeGramMediaActions.swift",
 ]
 for relative in FILES:

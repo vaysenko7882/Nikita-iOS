@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 import SwiftSignalKit
 import TelegramCore
 import AccountContext
-import Display
 
 /// Export the received bytes through the system sheet (Photos or Files), with
 /// no playback/consumption side effect and no re-encoding on the main thread.
@@ -30,21 +29,19 @@ public func exportCodeGramDisappearingMedia(context: AccountContext, message: En
     }
     |> take(1)
     |> deliverOn(Queue.concurrentDefaultQueue())
-    |> map { state, _ -> TempBoxFile? in
+    |> map { state, _ -> CodeGramExportFile? in
         guard case let .data(data) = state else { return nil }
-        let file = TempBox.shared.file(path: data.path, fileName: name)
-        guard FileManager.default.isReadableFile(atPath: file.path) else { TempBox.shared.dispose(file); return nil }
-        return file
+        return CodeGramExportFile(sourcePath: data.path, fileName: name)
     }
     |> deliverOnMainQueue
     |> timeout(60.0, queue: .mainQueue(), alternate: .complete())).startStandalone(next: { file in
         guard let file else { return }
         exported = true
-        let controller = UIActivityViewController(activityItems: [URL(fileURLWithPath: file.path)], applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
         controller.popoverPresentationController?.sourceView = sourceView
         controller.popoverPresentationController?.sourceRect = CGRect(x: sourceView.bounds.midX,
             y: sourceView.bounds.maxY - 1, width: 1, height: 1)
-        controller.completionWithItemsHandler = { _, _, _, _ in TempBox.shared.dispose(file) }
+        controller.completionWithItemsHandler = { _, _, _, _ in file.dispose() }
         context.sharedContext.applicationBindings.presentNativeController(controller)
     }, completed: {
         if !exported { failed() }

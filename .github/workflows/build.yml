@@ -59,6 +59,8 @@ jobs:
           "$RUNNER_TEMP/codegram-energy-check"
           xcrun swiftc -O -warnings-as-errors submodules/TelegramCore/Sources/Nikita/CodeGramMediaConsumptionPolicy.swift submodules/TelegramCore/Sources/Nikita/CodeGramArchiveTokenCache.swift tools/nikita/tests/CatchupPolicyCheck.swift -o "$RUNNER_TEMP/codegram-catchup-check"
           "$RUNNER_TEMP/codegram-catchup-check"
+          xcrun swiftc -O -warnings-as-errors submodules/SaveToCameraRoll/Sources/CodeGramExportFile.swift tools/nikita/tests/MediaExportFileCheck.swift -o "$RUNNER_TEMP/codegram-export-check"
+          "$RUNNER_TEMP/codegram-export-check"
       - name: Fetch pinned dependencies
         run: python3 tools/nikita/configure.py --submodules
       - name: Compile CodeGram for iPhone
