@@ -22,7 +22,7 @@ public func codeGramMediaActions(saveTitle: String, startTitle: String, cancelTi
 func codeGramDismissMediaActions(_ controller: UIAlertController?, perform: @escaping () -> Void) {
     guard let controller, controller.presentingViewController != nil else { perform(); return }
     if controller.isBeingDismissed, let coordinator = controller.transitionCoordinator {
-        if !coordinator.animate(alongsideTransition: nil, completion: { _ in perform() }) {
+        if !coordinator.animate(alongsideTransition: nil, completion: { _ in DispatchQueue.main.async(execute: perform) }) {
             DispatchQueue.main.async(execute: perform)
         }
     } else {
