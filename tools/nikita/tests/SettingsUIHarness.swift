@@ -195,12 +195,27 @@ private final class HarnessController: UIViewController {
         self.expect(sheet.actions.map { $0.title ?? "" } == ["Сохранить", "Начать отсчёт", "Отмена"], "Unopened media is missing explicit actions")
         self.present(sheet, animated: true) {
             self.phase("media-actions", after: 1) {
-                self.dismiss(animated: true) {
+                var firstCalls = 0
+                codeGramDismissMediaActions(sheet) {
+                    firstCalls += 1
+                    self.expect(firstCalls == 1 && sheet.presentingViewController == nil, "Presented action must run once after dismissal")
                     let started = codeGramMediaActions(saveTitle: "Сохранить", startTitle: "Начать отсчёт", cancelTitle: "Отмена",
                         canStart: false, sourceView: self.view, save: {}, start: {})
                     self.expect(started.actions.count == 2, "Existing countdown must not offer a second start")
                     self.present(started, animated: true) {
-                        self.phase("media-actions-started", after: 1) { self.dismiss(animated: true) { self.showDashboard() } }
+                        self.phase("media-actions-started", after: 1) {
+                            var closedCalls = 0
+                            let closed = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+                            codeGramDismissMediaActions(closed) { closedCalls += 1 }
+                            self.expect(closedCalls == 1, "Already closed action must not be lost")
+                            var closingCalls = 0
+                            started.dismiss(animated: true)
+                            codeGramDismissMediaActions(started) {
+                                closingCalls += 1
+                                self.expect(closingCalls == 1 && started.presentingViewController == nil, "Closing action must wait for the actual transition")
+                                self.showDashboard()
+                            }
+                        }
                     }
                 }
             }
