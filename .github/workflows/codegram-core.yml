@@ -37,9 +37,9 @@ jobs:
         continue-on-error: true
         with:
           path: ${{ steps.cache-config.outputs.path }}
-          key: nikita-core-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-${{ github.sha }}
+          key: nikita-core-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-${{ github.sha }}
           restore-keys: |
-            nikita-core-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-
+            nikita-core-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-
             nikita-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-
       - name: Fetch pinned dependencies
         run: python3 tools/nikita/configure.py --submodules
@@ -47,10 +47,12 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import os
           with Path('.bazelrc').open('a') as f:
               f.write('\ntest --keep_going\ntest --jobs=2\ntest --local_resources=memory=4096\ntest --//Telegram:disableProvisioningProfiles\ntest --//Telegram:disableExtensions\ntest --//Telegram:disableAppGroups\ntest --features=disable_legacy_signing\n')
+              f.write('test --repository_cache=' + str(Path(os.environ['NIKITA_BUILD_CACHE']) / 'repositories') + '\n')
           PY
-          python3 build-system/Make/Make.py --cacheDir="build/nikita-cache/actions" test --configurationPath=build-system/nikita-local-configuration.json --xcodeManagedCodesigning --apsEnvironment=development --target=//submodules/TelegramCore:TelegramCoreTests
+          python3 build-system/Make/Make.py --cacheDir="$NIKITA_BUILD_CACHE/actions" test --configurationPath=build-system/nikita-local-configuration.json --xcodeManagedCodesigning --apsEnvironment=development --target=//submodules/TelegramCore:TelegramCoreTests
       - name: Retain native test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -69,7 +71,7 @@ jobs:
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ steps.cache-config.outputs.path }}
-          key: nikita-core-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-${{ github.sha }}
+          key: nikita-core-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-config.outputs.toolchain }}-${{ github.sha }}
       - name: Remove temporary API configuration
         if: always()
         run: rm -f build-system/nikita-local-configuration.json

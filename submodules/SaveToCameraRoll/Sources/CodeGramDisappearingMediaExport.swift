@@ -16,7 +16,8 @@ public func exportCodeGramDisappearingMedia(context: AccountContext, message: En
     let name: String
     if let file = media as? TelegramMediaFile {
         let fallback = "media." + (UTType(mimeType: file.mimeType)?.preferredFilenameExtension ?? "bin")
-        name = ((file.fileName ?? fallback) as NSString).lastPathComponent
+        let candidate = ((file.fileName ?? fallback) as NSString).lastPathComponent
+        name = candidate.isEmpty || candidate == "." || candidate == ".." || candidate.utf8.count > 200 || candidate.contains("\0") ? fallback : candidate
     } else {
         name = "photo.jpg"
     }
@@ -31,7 +32,9 @@ public func exportCodeGramDisappearingMedia(context: AccountContext, message: En
     |> deliverOn(Queue.concurrentDefaultQueue())
     |> map { state, _ -> TempBoxFile? in
         guard case let .data(data) = state else { return nil }
-        return TempBox.shared.file(path: data.path, fileName: name)
+        let file = TempBox.shared.file(path: data.path, fileName: name)
+        guard FileManager.default.isReadableFile(atPath: file.path) else { TempBox.shared.dispose(file); return nil }
+        return file
     }
     |> deliverOnMainQueue
     |> timeout(60.0, queue: .mainQueue(), alternate: .complete())).startStandalone(next: { file in

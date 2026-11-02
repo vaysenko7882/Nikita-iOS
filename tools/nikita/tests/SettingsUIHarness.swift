@@ -158,7 +158,7 @@ private final class HarnessController: UIViewController {
             CodeGramSliderCell(title: "Сила робота", symbol: "cpu", value: 0.25, range: 0 ... 1, format: { "\(Int($0 * 100))%" }, changed: { _ in }),
             CodeGramSliderCell(title: "Частота", symbol: "waveform.path", value: 68, range: 20 ... 160, format: { "\(Int($0)) Гц" }, changed: { _ in })
         ])
-        self.phase("voice") { self.showDashboard() }
+        self.phase("voice") { self.showMediaActions() }
     }
     private func showDashboard() {
         self.title = "CodeGram"
@@ -183,7 +183,7 @@ private final class HarnessController: UIViewController {
                 self.phase("return", after: 2) {
                     self.search.searchBar.setShowsCancelButton(true, animated: true)
                     self.search.searchBar.searchTextField.becomeFirstResponder()
-                    self.phase("search", after: 3) { self.showMediaActions() }
+                    self.phase("search", after: 3) { self.finish() }
                 }
             }
         }
@@ -200,7 +200,7 @@ private final class HarnessController: UIViewController {
                         canStart: false, sourceView: self.view, save: {}, start: {})
                     self.expect(started.actions.count == 2, "Existing countdown must not offer a second start")
                     self.present(started, animated: true) {
-                        self.phase("media-actions-started", after: 1) { self.dismiss(animated: true) { self.finish() } }
+                        self.phase("media-actions-started", after: 1) { self.dismiss(animated: true) { self.showDashboard() } }
                     }
                 }
             }

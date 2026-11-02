@@ -138,12 +138,11 @@ public final class NikitaSettingsStore {
                 item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
                 status = SecItemAdd(item as CFDictionary, nil)
             }
-            guard status == errSecSuccess else { return false }
-            self.defaults.set(configuration.enabled, forKey: "nikita.server.enabled.\(account)")
-            self.defaults.set(configuration.address, forKey: "nikita.server.address.\(account)")
-            return true
+            return status == errSecSuccess
         }
         guard saved else { return false }
+        self.defaults.set(configuration.enabled, forKey: "nikita.server.enabled.\(account)")
+        self.defaults.set(configuration.address, forKey: "nikita.server.address.\(account)")
         NotificationCenter.default.post(name: Self.serverChanged, object: account)
         NotificationCenter.default.post(name: Self.changed, object: nil)
         return true

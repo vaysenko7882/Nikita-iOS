@@ -135,11 +135,10 @@ extension ChatControllerImpl {
         if isIncoming {
             mediaActions.append(.action(ContextMenuActionItem(text: self.presentationData.strings.Common_Save, icon: { theme in
                 return UIImage(systemName: "square.and.arrow.down")?.withTintColor(theme.contextMenu.primaryColor, renderingMode: .alwaysOriginal)
-            }, action: { [weak self] _, completion in
-                completion(.default)
-                guard let self else { return }
-                Queue.mainQueue().after(0.25) { [weak self] in
+            }, action: { [weak self] controller, completion in
+                let save: () -> Void = { [weak self] in
                     guard let self else { return }
+                    self.context.sharedContext.mediaManager.setPlaylist(nil, type: .voice, control: .playback(.pause))
                     exportCodeGramDisappearingMedia(context: self.context, message: message, sourceView: self.chatDisplayNode.view, failed: { [weak self] in
                         guard let self else { return }
                         let alert = UIAlertController(title: nil, message: self.presentationData.strings.localFeatures.disappearingMedia.exportFailed, preferredStyle: .alert)
@@ -147,6 +146,8 @@ extension ChatControllerImpl {
                         self.context.sharedContext.applicationBindings.presentNativeController(alert)
                     })
                 }
+                if let controller { controller.dismiss(result: .default, completion: save) }
+                else { completion(.default); save() }
             })))
             if waitsForCountdown {
                 mediaActions.append(.action(ContextMenuActionItem(text: self.presentationData.strings.localFeatures.disappearingMedia.startCountdown, icon: { theme in

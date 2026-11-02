@@ -5,9 +5,10 @@ public func codeGramMediaActions(saveTitle: String, startTitle: String, cancelTi
     canStart: Bool, sourceView: UIView, save: @escaping () -> Void,
     start: @escaping () -> Void) -> UIAlertController {
     let controller = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-    controller.addAction(UIAlertAction(title: saveTitle, style: .default, handler: { _ in save() }))
+    controller.overrideUserInterfaceStyle = .dark
+    controller.addAction(UIAlertAction(title: saveTitle, style: .default, handler: { [weak controller] _ in controller?.dismiss(animated: true, completion: save) }))
     if canStart {
-        controller.addAction(UIAlertAction(title: startTitle, style: .default, handler: { _ in start() }))
+        controller.addAction(UIAlertAction(title: startTitle, style: .default, handler: { [weak controller] _ in controller?.dismiss(animated: true, completion: start) }))
     }
     controller.addAction(UIAlertAction(title: cancelTitle, style: .cancel))
     controller.popoverPresentationController?.sourceView = sourceView
