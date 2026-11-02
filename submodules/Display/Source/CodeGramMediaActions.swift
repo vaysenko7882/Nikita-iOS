@@ -11,9 +11,9 @@ public func codeGramMediaActions(saveTitle: String, startTitle: String, cancelTi
         controller.addAction(UIAlertAction(title: startTitle, style: .default, handler: { [weak controller] _ in codeGramDismissMediaActions(controller, perform: start) }))
     }
     controller.addAction(UIAlertAction(title: cancelTitle, style: .cancel))
-    controller.popoverPresentationController?.sourceView = sourceView
-    controller.popoverPresentationController?.sourceRect = CGRect(x: sourceView.bounds.midX,
-        y: sourceView.bounds.maxY - 1, width: 1, height: 1)
+    let anchor = codeGramMediaPopoverAnchor(in: sourceView)
+    controller.popoverPresentationController?.sourceView = anchor
+    controller.popoverPresentationController?.sourceRect = anchor.bounds
     return controller
 }
 
@@ -28,4 +28,23 @@ func codeGramDismissMediaActions(_ controller: UIAlertController?, perform: @esc
     } else {
         controller.dismiss(animated: true, completion: perform)
     }
+}
+
+private final class CodeGramMediaPopoverAnchorView: UIView {}
+
+/// iOS may morph a popover's source view. Never use the entire gallery/chat as
+/// that source: reuse one tiny, transparent anchor owned by the presenting view.
+public func codeGramMediaPopoverAnchor(in sourceView: UIView) -> UIView {
+    let anchor: UIView
+    if let existing = sourceView.subviews.first(where: { $0 is CodeGramMediaPopoverAnchorView }) {
+        anchor = existing
+    } else {
+        anchor = CodeGramMediaPopoverAnchorView()
+        anchor.backgroundColor = .clear
+        anchor.isUserInteractionEnabled = false
+        sourceView.addSubview(anchor)
+    }
+    anchor.frame = CGRect(x: sourceView.bounds.midX - 1,
+        y: sourceView.bounds.maxY - max(2, sourceView.safeAreaInsets.bottom) - 2, width: 2, height: 2)
+    return anchor
 }

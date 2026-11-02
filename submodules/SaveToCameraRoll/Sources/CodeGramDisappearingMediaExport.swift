@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import SwiftSignalKit
 import TelegramCore
 import AccountContext
+import Display
 
 /// Export the received bytes through the system sheet (Photos or Files), with
 /// no playback/consumption side effect and no re-encoding on the main thread.
@@ -38,9 +39,9 @@ public func exportCodeGramDisappearingMedia(context: AccountContext, message: En
         guard let file else { return }
         exported = true
         let controller = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
-        controller.popoverPresentationController?.sourceView = sourceView
-        controller.popoverPresentationController?.sourceRect = CGRect(x: sourceView.bounds.midX,
-            y: sourceView.bounds.maxY - 1, width: 1, height: 1)
+        let anchor = codeGramMediaPopoverAnchor(in: sourceView)
+        controller.popoverPresentationController?.sourceView = anchor
+        controller.popoverPresentationController?.sourceRect = anchor.bounds
         controller.completionWithItemsHandler = { _, _, _, _ in file.dispose() }
         context.sharedContext.applicationBindings.presentNativeController(controller)
     }, completed: {

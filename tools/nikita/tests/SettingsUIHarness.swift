@@ -192,6 +192,9 @@ private final class HarnessController: UIViewController {
         self.search.searchBar.resignFirstResponder()
         let sheet = codeGramMediaActions(saveTitle: "Сохранить", startTitle: "Начать отсчёт", cancelTitle: "Отмена",
             canStart: true, sourceView: self.view, save: {}, start: {})
+        let anchor = sheet.popoverPresentationController?.sourceView
+        self.expect(anchor !== self.view && anchor?.bounds.size == CGSize(width: 2, height: 2), "Popover must not morph the entire presenting screen")
+        self.expect(anchor === codeGramMediaPopoverAnchor(in: self.view), "Repeated presentations must reuse their anchor")
         self.expect(sheet.actions.map { $0.title ?? "" } == ["Сохранить", "Начать отсчёт", "Отмена"], "Unopened media is missing explicit actions")
         self.present(sheet, animated: true) {
             self.phase("media-actions", after: 1) {
