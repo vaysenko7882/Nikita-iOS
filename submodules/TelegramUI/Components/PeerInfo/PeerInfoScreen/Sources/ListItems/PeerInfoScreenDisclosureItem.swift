@@ -246,6 +246,8 @@ private final class PeerInfoScreenDisclosureItemNode: PeerInfoScreenItemNode {
             }
             let iconFrame = CGRect(origin: CGPoint(x: sideInset, y: floorToScreenPixels((height - iconSize.height) / 2.0)), size: iconSize)
             transition.updateFrame(node: self.iconNode, frame: iconFrame)
+            self.iconNode.clipsToBounds = true
+            self.iconNode.cornerRadius = min(iconFrame.width, iconFrame.height) / 2
         } else if self.iconNode.supernode != nil {
             self.iconNode.image = nil
             self.iconNode.removeFromSupernode()

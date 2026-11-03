@@ -10,6 +10,8 @@ from .archive import Archive
 from .media_capture import MediaCapture
 from .media_store import MediaStore
 from .policy import CapturePolicy
+from .profiles import ProfileStore
+from .profile_collector import ProfileCollector
 
 
 def peer(value):
@@ -72,6 +74,8 @@ async def collect(config):
     client = client_for(config)
     media = MediaStore(archive,config)
     archive.media = media
+    archive.profiles = ProfileStore(archive)
+    profile_collector = ProfileCollector(client,archive.profiles)
     capture = MediaCapture(media)
 
     def retain(message, seed=False):
@@ -139,6 +143,20 @@ async def collect(config):
 
     client.add_event_handler(deleted, events.MessageDeleted())
 
+    async def profile_story(update):
+        try:
+            await profile_collector.pushed_story(update)
+        except Exception:
+            pass  # A profile attachment must never interrupt the message collector.
+    client.add_event_handler(profile_story,events.Raw(types.UpdateStory))
+    async def profile_updated(update):
+        try:
+            profile_collector.user_update(update)
+        except Exception:
+            pass
+    profile_update_types = [getattr(types,name) for name in ("UpdateUser","UpdateUserName","UpdateUserPhoto") if hasattr(types,name)]
+    client.add_event_handler(profile_updated,events.Raw(profile_update_types))
+
     async def folders_changed(update):
         for item in update.folder_peers:
             kind,identifier = peer(item.peer)
@@ -168,6 +186,7 @@ async def collect(config):
     media.recover()
     downloads = [asyncio.create_task(media.worker(client,small_only=(index==0))) for index in range(media.workers)]
     monitor = asyncio.create_task(connection_monitor())
+    profiles_task = asyncio.create_task(profile_collector.run())
     metadata = asyncio.create_task(metadata_monitor())
     try:
         # Register handlers BEFORE catch-up. The baseline is only what still
@@ -180,9 +199,10 @@ async def collect(config):
         await client.run_until_disconnected()
     finally:
         monitor.cancel()
+        profiles_task.cancel()
         metadata.cancel()
         for task in downloads:
             task.cancel()
-        await asyncio.gather(monitor,metadata,*downloads, return_exceptions=True)
+        await asyncio.gather(monitor,metadata,profiles_task,*downloads, return_exceptions=True)
         archive.set_connected(False)
         await client.disconnect()

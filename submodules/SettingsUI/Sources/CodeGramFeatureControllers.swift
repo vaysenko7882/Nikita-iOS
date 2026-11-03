@@ -182,7 +182,8 @@ final class CodeGramGeneralController: CodeGramFeatureController {
                 self.textRow(s.messageFilter.title, icon: "line.3.horizontal.decrease", action: { [weak self] in guard let self else { return }; self.push(CodeGramFiltersController(context: self.context)) })]
         case .appearance:
             footer = s.madgram.classicDesignInfo
-            rows = [self.flag(s.madgram.classicDesign, info: s.madgram.classicDesignInfo, key: \.classicDesign, icon: "rectangle.on.rectangle"),
+            rows = [self.textRow("Иконка приложения", detail: "Твои иконки и живая карусель", icon: "app", action: { [weak self] in guard let self else { return }; self.push(CodeGramIconPickerController(context: self.context)) }),
+                self.flag(s.madgram.classicDesign, info: s.madgram.classicDesignInfo, key: \.classicDesign, icon: "rectangle.on.rectangle"),
                 self.flag(s.interfaceTuning.showAppBadge, info: s.interfaceTuning.showAppBadgeInfo, key: \.showAppBadge, icon: "capsule"),
                 self.textRow(s.interfaceTuning.title, icon: "slider.horizontal.3", action: { [weak self] in guard let self else { return }; self.push(CodeGramInterfaceController(context: self.context)) })]
         case .additional:

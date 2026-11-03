@@ -69,9 +69,11 @@ xcrun --sdk iphonesimulator swiftc -parse-as-library -warnings-as-errors \
     -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
     submodules/SettingsUI/Sources/CodeGramSettingsTheme.swift \
     submodules/SettingsUI/Sources/CodeGramSettingsCells.swift \
+    submodules/SettingsUI/Sources/CodeGramIconPickerView.swift \
     submodules/SettingsUI/Sources/CodeGramDashboardComponents.swift \
     submodules/Display/Source/CodeGramMediaActions.swift \
     tools/nikita/tests/SettingsUIHarness.swift -o "$CODEGRAM_UI_APP/SettingsHarness"
+cp Telegram/Telegram-iOS/CodeGramIconPreviews/*.png "$CODEGRAM_UI_APP/"
 codesign --force --sign - "$CODEGRAM_UI_APP"
 CODEGRAM_UI_SIM=$(xcrun simctl create "CodeGram UI ${GITHUB_RUN_ID:-local}" "$CODEGRAM_UI_DEVICE" "$CODEGRAM_UI_RUNTIME")
 xcrun simctl boot "$CODEGRAM_UI_SIM"

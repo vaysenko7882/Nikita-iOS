@@ -183,7 +183,7 @@ private final class HarnessController: UIViewController {
                 self.phase("return", after: 2) {
                     self.search.searchBar.setShowsCancelButton(true, animated: true)
                     self.search.searchBar.searchTextField.becomeFirstResponder()
-                    self.phase("search", after: 3) { self.finish() }
+                    self.phase("search", after: 3) { self.showIconCarousel() }
                 }
             }
         }
@@ -217,6 +217,48 @@ private final class HarnessController: UIViewController {
                                 closingCalls += 1
                                 self.expect(closingCalls == 1 && started.presentingViewController == nil, "Closing action must wait for the actual transition")
                                 self.showDashboard()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    private func showIconCarousel() {
+        self.search.searchBar.resignFirstResponder()
+        self.search.isHidden = true; self.table.view.isHidden = true; self.dashboard.isHidden = true
+        let picker = CodeGramIconPickerView(currentName: "CGRift")
+        self.view.addSubview(picker)
+        picker.frame = CGRect(x: 0,y: self.view.safeAreaInsets.top,width: self.view.bounds.width,height: 1000)
+        picker.layoutIfNeeded()
+        self.expect(picker.selectedIndex == 4,"Picker must open on the actually installed alternate icon")
+        var applied = 0
+        picker.onApply = { _ in applied += 1 }
+        for choice in CodeGramAppIconChoice.all { self.expect(UIImage(named: choice.previewName) != nil,"Missing bundled preview for \(choice.title)") }
+        for index in CodeGramAppIconChoice.all.indices {
+            picker.select(index: index,animated: false); picker.layoutIfNeeded()
+            self.expect(picker.selectedIndex == index,"Carousel selection differs from centered icon")
+            self.expect(picker.pageControl.currentPage == index,"Page dots differ from preview")
+            self.expect(picker.applyButton.frame.minY > picker.detailLabel.frame.maxY,"Apply button overlaps the icon description")
+        }
+        self.expect(applied == 0,"Scrolling must never apply an icon without an explicit press")
+        picker.select(index: 0,animated: false)
+        self.phase("icons-original",after: 2) {
+            picker.select(index: 1,animated: true)
+            self.phase("icons-clip",after: 2) {
+                picker.select(index: 2,animated: true)
+                self.phase("icons-paper",after: 2) {
+                    picker.select(index: 6,animated: true)
+                    self.phase("icons-pixel",after: 2) {
+                        picker.select(index: 7,animated: true)
+                        self.phase("icons-chrome",after: 2) {
+                            picker.select(index: 8,animated: true)
+                            self.phase("icons-stairs",after: 2) {
+                                picker.applyButton.sendActions(for: .touchUpInside)
+                                self.expect(applied == 1,"Apply must run exactly once")
+                                picker.setApplying(false,appliedName: "CGStairs",succeeded: true)
+                                self.expect(!picker.applyButton.isEnabled,"Applied icon must be marked as installed")
+                                self.finish()
                             }
                         }
                     }

@@ -265,12 +265,14 @@ private final class CodeGramOrganizedSectionController: CodeGramTableController 
     override func makeSections() -> [CodeGramSettingsSection] {
         if self.section == .messages {
             return [CodeGramSettingsSection(title: "История и сохранение", footer: "Параметры локального архива относятся к этому iPhone. Фоновое сохранение на сервере настраивается в разделе «Хранилище и VPS».", rows: [
+                self.switchRow("TikTok и Instagram → видео", value: NikitaSettingsStore.shared.sendsSocialLinksAsVideo, detail: "Одну ссылку на публичное видео скачать через VPS и отправить видеофайлом. Нужна служба VPS версии 5. При ошибке ссылка останется в черновике.", icon: "play.rectangle", changed: { value in NikitaSettingsStore.shared.sendsSocialLinksAsVideo = value }),
                 self.textRow("Локальный архив", detail: "Удалённые сообщения и версии правок", icon: "archivebox", action: { [weak self] in guard let self else { return }; self.push(localMessageArchiveSettingsController(context: self.context)) }),
                 self.textRow("Оформление удалённых", detail: "Прозрачность, затемнение и рамка", icon: "bubble.left", action: { [weak self] in guard let self else { return }; self.push(CodeGramDeletedStyleController(context: self.context)) }),
                 self.textRow("Фильтры сообщений", icon: "line.3.horizontal.decrease.circle", action: { [weak self] in guard let self else { return }; self.push(messageFilterSettingsController(context: self.context)) }),
                 self.textRow("Сохранение и доступ", detail: "Копирование, истории и одноразовые медиа", icon: "square.and.arrow.down", action: { [weak self] in guard let self else { return }; self.push(CodeGramContentController(context: self.context)) }) ])]
         } else {
             return [CodeGramSettingsSection(title: "На этом iPhone", footer: "Локальный вид, ресурсы и дополнительные возможности клиента.", rows: [
+                self.textRow("Отслеживаемые профили", detail: "История изменений и сохранённые сторис на VPS", icon: "person.crop.circle.badge.clock", action: { [weak self] in guard let self else { return }; self.push(CodeGramTrackedProfilesController(context: self.context)) }),
                 self.textRow("Имена и аватары для себя", icon: "person.crop.circle", action: { [weak self] in guard let self else { return }; self.push(CodeGramPeerAppearanceController(context: self.context)) }),
                 self.textRow("Ресурсы и локальные функции", detail: "Энергосбережение и локальные возможности", icon: "slider.horizontal.3", action: { [weak self] in guard let self else { return }; self.push(codegramSectionSettingsController(context: self.context, section: .additional)) }) ])]
         }

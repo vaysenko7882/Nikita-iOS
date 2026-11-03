@@ -2,7 +2,7 @@ name: CodeGram Core regression tests
 on:
   workflow_dispatch:
   push:
-    branches: [codex/codegram-14.3-catchup-media]
+    branches: [codex/codegram-14.3-catchup-media, codex/codegram-14.4-links-profile-icons]
 permissions:
   contents: read
 concurrency:
@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   core-tests:
+    if: github.ref != 'refs/heads/codex/codegram-14.4-links-profile-icons' || contains(github.event.head_commit.message, '[core]') || github.event_name == 'workflow_dispatch'
     runs-on: xcode-27
     timeout-minutes: 90
     steps:

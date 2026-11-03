@@ -43,7 +43,7 @@ if [[ ! "$nikita_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || [[ "
   exit 1
 fi
 apt-get update
-apt-get install -y python3 python3-venv ca-certificates
+apt-get install -y python3 python3-venv ca-certificates ffmpeg
 if ! apt-cache show caddy >/dev/null 2>&1; then
   # Minimal Ubuntu images may omit Universe. Use Caddy's official signed
   # repository without changing the server's Ubuntu repository selection.

@@ -482,6 +482,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     }
     
     private var lastSendTimestamp = 0.0
+    var codegramVideoConversion: CodeGramSocialVideoConversion?
     
     private var openStickersBeginWithEmoji: Bool = false
     private var openStickersDisposable: Disposable?
@@ -1095,6 +1096,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     }
     
     deinit {
+        self.codegramVideoConversion?.cancel()
         self.interactiveEmojisDisposable?.dispose()
         self.openStickersDisposable?.dispose()
         self.displayVideoUnmuteTipDisposable?.dispose()
@@ -5108,7 +5110,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
     }
 
-    func sendCurrentMessage(silentPosting: Bool? = nil, scheduleTime: Int32? = nil, repeatPeriod: Int32? = nil, postpone: Bool = false, messageEffect: ChatSendMessageEffect? = nil, sendWithoutFormatting: Bool = false, completion: @escaping () -> Void = {}) {
+    func sendCurrentMessage(silentPosting: Bool? = nil, scheduleTime: Int32? = nil, repeatPeriod: Int32? = nil, postpone: Bool = false, messageEffect: ChatSendMessageEffect? = nil, sendWithoutFormatting: Bool = false, codegramVideo: TelegramMediaFile? = nil, completion: @escaping () -> Void = {}) {
         guard let textInputPanelNode = self.inputPanelNode as? ChatTextInputPanelNode else {
             return
         }
@@ -5313,6 +5315,13 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 }
             }
             
+            if codegramVideo == nil, !sendAsRichMessage,
+                effectivePresentationInterfaceState.interfaceState.editMessage == nil,
+                effectivePresentationInterfaceState.interfaceState.forwardMessageIds == nil,
+                self.codegramConvertLinkIfNeeded(text: effectiveInputText.string, resume: { [weak self] file in
+                    self?.sendCurrentMessage(silentPosting: silentPosting,scheduleTime: scheduleTime,repeatPeriod: repeatPeriod,postpone: postpone,messageEffect: messageEffect,sendWithoutFormatting: sendWithoutFormatting,codegramVideo: file,completion: completion)
+                }) { return }
+
             let timestamp = CACurrentMediaTime()
             if self.lastSendTimestamp + 0.15 > timestamp {
                 return
@@ -5351,7 +5360,10 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                     }
                 }
                 
-                if sendAsRichMessage {
+                if let codegramVideo {
+                    messages.append(.message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: codegramVideo), threadId: self.chatLocation.threadId, replyToMessageId: self.chatPresentationInterfaceState.interfaceState.replyMessageSubject?.subjectModel, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: []))
+                    mediaReference = nil
+                } else if sendAsRichMessage {
                     var attributes: [MessageAttribute] = [RichTextMessageAttribute(instantPage: instantPage(from: composeContent), fullInstantPage: nil)]
 
                     // url-preview attribute parity (duplicated, not shared, to keep the text loop byte-identical)

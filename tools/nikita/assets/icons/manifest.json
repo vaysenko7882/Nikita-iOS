@@ -1,0 +1,42 @@
+[
+  {
+    "name": "CGClip",
+    "title": "Скрепка",
+    "source": "CGClip.png"
+  },
+  {
+    "name": "CGPaper",
+    "title": "Бумага",
+    "source": "CGPaper.jpeg"
+  },
+  {
+    "name": "CGEcho",
+    "title": "Эхо",
+    "source": "CGEcho.png"
+  },
+  {
+    "name": "CGRift",
+    "title": "Разлом",
+    "source": "CGRift.png"
+  },
+  {
+    "name": "CGSlice",
+    "title": "Разрез",
+    "source": "CGSlice.png"
+  },
+  {
+    "name": "CGPixel",
+    "title": "Пиксели",
+    "source": "CGPixel.jpeg"
+  },
+  {
+    "name": "CGChrome",
+    "title": "Хром",
+    "source": "CGChrome.jpeg"
+  },
+  {
+    "name": "CGStairs",
+    "title": "Лестницы",
+    "source": "CGStairs.png"
+  }
+]

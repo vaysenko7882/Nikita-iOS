@@ -65,6 +65,8 @@ class MediaStore:
                 db.execute("INSERT OR REPLACE INTO meta VALUES('storage_categories_v4','1')")
 
     def permitted(self, identifier):
+        if self.archive.profiles is not None and self.archive.profiles.permits_asset(identifier):
+            return True
         if self.archive.policy is None: return True
         with self.archive.connect() as db:
             sources = db.execute("SELECT DISTINCT peer_type,peer_id FROM media_sources WHERE id=?",(identifier,)).fetchall()
@@ -253,7 +255,7 @@ class MediaStore:
                 # message. Refresh that reference once; deletion is not treated
                 # as recoverable content and never creates an invented file.
                 source = job["request"].get("source")
-                if type(error).__name__ in ("FileReferenceExpiredError", "FileReferenceInvalidError") and source:
+                if type(error).__name__ in ("FileReferenceExpiredError", "FileReferenceInvalidError") and source and source.get("type")!="CodeGramProfile":
                     try:
                         from telethon import types
                         from .media_capture import MediaCapture

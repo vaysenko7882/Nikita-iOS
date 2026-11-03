@@ -12,7 +12,7 @@ def make_server(archive, token: str, port: int = 8765):
         raise ValueError("Use a random API token of at least 32 characters")
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "CodeGramArchive/4"
+        server_version = "CodeGramArchive/5"
 
         def log_message(self, *args):
             pass  # Never log request paths, account identifiers or credentials.
@@ -106,10 +106,56 @@ def make_server(archive, token: str, port: int = 8765):
             with archive.connect() as db:
                 return int(archive._meta(db,"account_id","0"))
 
+        def envelope(self, value):
+            return {**value,"account_id":self.account_id(),"server_id":archive.server_id,"server_version":5}
+
+        def read_body(self, maximum=16384):
+            size = int(self.headers.get("Content-Length","0"))
+            if not 0<size<=maximum or self.headers.get("Transfer-Encoding") is not None:
+                raise ValueError("Invalid body size")
+            raw = self.rfile.read(size)
+            if len(raw)!=size:
+                raise ValueError("Incomplete body")
+            value = json.loads(raw)
+            if not isinstance(value,dict):
+                raise ValueError("Expected object")
+            return value
+
+        def do_POST(self):
+            if not self.authorized():
+                self.send_json(401,{"error":"unauthorized"}); return
+            if self.headers.get("X-CodeGram-Account-ID")!=str(self.account_id()):
+                self.send_json(403,{"error":"account_mismatch"}); return
+            if self.path!="/v1/video" or archive.social_videos is None:
+                self.send_json(404,{"error":"not_found"}); return
+            try:
+                result = archive.social_videos.create(self.read_body().get("url"))
+                self.send_json(200,self.envelope(result))
+            except (ValueError,TypeError,UnicodeError):
+                self.send_json(400,{"error":"invalid_video_link"})
+            except BlockingIOError:
+                self.send_json(429,{"error":"video_queue_busy"})
+            except OSError:
+                self.send_json(507,{"error":"insufficient_storage"})
+            except Exception:
+                self.send_json(503,{"error":"video_unavailable"})
+
         def do_PUT(self):
             from .policy import PolicyConflict
             if not self.authorized():
                 self.send_json(401,{"error":"unauthorized"}); return
+            profile_match = re.fullmatch(r"/v1/profiles/([0-9]{1,19})",self.path)
+            if profile_match and archive.profiles is not None:
+                if self.headers.get("X-CodeGram-Account-ID")!=str(self.account_id()):
+                    self.send_json(403,{"error":"account_mismatch"}); return
+                try:
+                    result = archive.profiles.configure(profile_match[1],self.read_body())
+                    self.send_json(200,self.envelope(result))
+                except (ValueError,TypeError,UnicodeError):
+                    self.send_json(400,{"error":"invalid_profile"})
+                except Exception:
+                    self.send_json(503,{"error":"archive_unavailable"})
+                return
             if urlsplit(self.path).path!="/v1/policy" or archive.policy is None:
                 self.send_json(404,{"error":"not_found"}); return
             if self.headers.get("X-CodeGram-Account-ID")!=str(self.account_id()):
@@ -134,6 +180,48 @@ def make_server(archive, token: str, port: int = 8765):
                 self.send_json(401, {"error": "unauthorized"})
                 return
             route = urlsplit(self.path)
+            profile_match = re.fullmatch(r"/v1/profiles(?:/([0-9]{1,19})(/history)?)?",route.path)
+            if profile_match and archive.profiles is not None:
+                try:
+                    query = parse_qs(route.query,max_num_fields=8)
+                    identifier,history = profile_match.groups()
+                    result = archive.profiles.history(identifier,query.get("before",["0"])[0],query.get("limit",["30"])[0]) if history else archive.profiles.status(identifier)
+                    self.send_json(200,self.envelope(result))
+                except (ValueError,TypeError):
+                    self.send_json(400,{"error":"invalid_request"})
+                except Exception:
+                    self.send_json(503,{"error":"archive_unavailable"})
+                return
+            video_match = re.fullmatch(r"/v1/video/([a-f0-9]{32})(/file)?",route.path)
+            if video_match and archive.social_videos is not None:
+                identifier,is_file = video_match.groups()
+                try:
+                    if not is_file:
+                        self.send_json(200,self.envelope(archive.social_videos.status(identifier)))
+                        return
+                    if self.headers.get("X-Nikita-Archive-Epoch")!=archive.server_id:
+                        self.send_json(409,{"error":"archive_changed"}); return
+                    path,value = archive.social_videos.ready(identifier)
+                    with path.open("rb") as source:
+                        self.send_response(200)
+                        self.send_header("Content-Type","video/mp4")
+                        self.send_header("Content-Length",str(value["size"]))
+                        self.send_header("Cache-Control","private, no-store")
+                        self.send_header("X-Nikita-Archive-Epoch",archive.server_id)
+                        self.send_header("X-Content-Type-Options","nosniff")
+                        self.end_headers()
+                        if self.command!="HEAD":
+                            while True:
+                                block = source.read(64*1024)
+                                if not block: break
+                                self.wfile.write(block)
+                except KeyError:
+                    self.send_json(404,{"error":"not_found"})
+                except BlockingIOError:
+                    self.send_json(409,{"error":"video_not_ready"})
+                except (BrokenPipeError,ConnectionResetError):
+                    pass
+                return
             if route.path in ("/v1/policy","/v1/storage"):
                 try:
                     query = parse_qs(route.query,max_num_fields=8)

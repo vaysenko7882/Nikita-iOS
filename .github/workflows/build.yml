@@ -2,7 +2,7 @@ name: Build CodeGram IPA
 on:
   workflow_dispatch:
   push:
-    branches: [nikita/v2]
+    branches: [nikita/v2, codex/codegram-14.4-links-profile-icons]
 permissions:
   contents: read
 concurrency:
@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
+    if: github.ref == 'refs/heads/nikita/v2' || contains(github.event.head_commit.message, '[build ipa]') || github.event_name == 'workflow_dispatch'
     runs-on: xcode-27
     timeout-minutes: 360
     steps:

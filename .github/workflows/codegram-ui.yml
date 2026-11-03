@@ -2,7 +2,7 @@ name: CodeGram native settings UI
 on:
   workflow_dispatch:
   push:
-    branches: [codex/codegram-14.2-native-energy, codex/codegram-14.3-catchup-media]
+    branches: [codex/codegram-14.2-native-energy, codex/codegram-14.3-catchup-media, codex/codegram-14.4-links-profile-icons]
 permissions:
   contents: read
 concurrency:
@@ -22,7 +22,10 @@ jobs:
           sudo xcode-select -s "/Applications/Xcode_${CODEGRAM_XCODE}.app/Contents/Developer"
           xcodebuild -version
       - name: Check and record production UIKit settings controls
-        run: bash tools/nikita/check_settings_ui.sh "$RUNNER_TEMP/codegram-ui"
+        run: |
+          python3 -m pip install --disable-pip-version-check Pillow==11.3.0
+          python3 tools/nikita/generate_icon.py
+          bash tools/nikita/check_settings_ui.sh "$RUNNER_TEMP/codegram-ui"
       - name: Retain native frames and regression report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

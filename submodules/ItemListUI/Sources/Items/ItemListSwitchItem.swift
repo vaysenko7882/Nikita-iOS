@@ -412,6 +412,8 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
                         }
                         if updateIcon {
                             strongSelf.iconNode.image = icon
+                            strongSelf.iconNode.clipsToBounds = true
+                            strongSelf.iconNode.cornerRadius = min(icon.size.width, icon.size.height) / 2
                         }
                         let iconY: CGFloat
                         if item.text == nil {
