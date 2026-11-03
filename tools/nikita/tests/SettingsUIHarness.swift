@@ -228,9 +228,10 @@ private final class HarnessController: UIViewController {
     private func showIconCarousel() {
         self.search.searchBar.resignFirstResponder()
         self.search.isHidden = true; self.table.view.isHidden = true; self.dashboard.isHidden = true
+        // Run the state sweep offscreen. Recording a fresh production instance
+        // avoids carrying stress-test button transitions into the visual path.
         let picker = CodeGramIconPickerView(currentName: "CGRift")
-        self.view.addSubview(picker)
-        picker.frame = CGRect(x: 0,y: self.view.safeAreaInsets.top,width: self.view.bounds.width,height: 1000)
+        picker.frame = CGRect(x: 0,y: 0,width: self.view.bounds.width,height: 1000)
         picker.layoutIfNeeded()
         self.expect(picker.selectedIndex == 4,"Picker must open on the actually installed alternate icon")
         var applied = 0
@@ -259,6 +260,15 @@ private final class HarnessController: UIViewController {
                 self.expect((max(text,backdrop)+0.05)/(min(text,backdrop)+0.05) >= 4.5,"Primary carousel text disappears during a background transition")
             }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now()+0.6) { self.recordIconCarousel() }
+    }
+    private func recordIconCarousel() {
+        let picker = CodeGramIconPickerView(currentName: "CGRift")
+        self.view.addSubview(picker)
+        picker.frame = CGRect(x: 0,y: self.view.safeAreaInsets.top,width: self.view.bounds.width,height: 1000)
+        picker.layoutIfNeeded()
+        var applied = 0
+        picker.onApply = { _ in applied += 1 }
         picker.select(index: 0,animated: false)
         self.phase("icons-original",after: 2) {
             picker.select(index: 1,animated: true)
