@@ -161,7 +161,16 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
         }
         self.backgroundColor = blend(CodeGramAppIconChoice.all[lower].background, CodeGramAppIconChoice.all[upper].background)
         if let backgroundColor = self.backgroundColor { self.onPalette?(backgroundColor) }
-        let foreground = blend(CodeGramAppIconChoice.all[lower].light ? .black : .white, CodeGramAppIconChoice.all[upper].light ? .black : .white)
+        // Blending black and white text makes it disappear on the intermediate
+        // gray background. Keep primary text contrasting throughout the gesture.
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        _ = self.backgroundColor?.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        func linear(_ value: CGFloat) -> Double {
+            let value = Double(value)
+            return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+        let foreground: UIColor = luminance > 0.179 ? .black : .white
         for label in [self.brandLabel, self.titleLabel, self.detailLabel] { label.textColor = foreground }
         self.detailLabel.alpha = 0.66
         self.pageControl.currentPageIndicatorTintColor = foreground

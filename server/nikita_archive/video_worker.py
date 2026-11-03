@@ -10,6 +10,8 @@ import subprocess
 import sys
 from .social_video import MAX_VIDEO_BYTES, social_url
 
+VIDEO_FORMAT = "best[ext=mp4][protocol=https][vcodec~='^(avc1|h264)']/best[ext=mp4][protocol=https]"
+
 
 def public_addresses(host, port, *args, **kwargs):
     addresses = _getaddrinfo(host,port,*args,**kwargs)
@@ -41,7 +43,7 @@ def main():
                    socket_timeout=15,retries=2,fragment_retries=1,
                    max_filesize=MAX_VIDEO_BYTES,concurrent_fragment_downloads=1,
                    outtmpl=str(directory/"download.%(ext)s"),
-                   format="best[ext=mp4][protocol=https][vcodec^=avc1]/best[ext=mp4][protocol=https]",
+                   format=VIDEO_FORMAT,
                    allowed_extractors=["TikTok",r"vm\.tiktok","Instagram"],
                    noprogress=True,overwrites=False)
     with YoutubeDL(options) as downloader:

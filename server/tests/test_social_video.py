@@ -10,10 +10,20 @@ from unittest.mock import patch
 from nikita_archive.archive import Archive
 from nikita_archive.http_api import make_server
 from nikita_archive.social_video import MAX_VIDEO_BYTES, SocialVideoStore, social_url
-from nikita_archive.video_worker import public_addresses
+from nikita_archive.video_worker import VIDEO_FORMAT, public_addresses
 
 
 class SocialURLTests(unittest.TestCase):
+    def test_real_format_selector_prefers_supported_codec_over_higher_quality_hevc(self):
+        from yt_dlp import YoutubeDL
+        with YoutubeDL({"quiet":True}) as downloader:
+            selector=downloader.build_format_selector(VIDEO_FORMAT)
+            for codec in ["h264","avc1.640028"]:
+                formats=[dict(format_id="supported",url="https://example.com/low.mp4",ext="mp4",protocol="https",vcodec=codec,acodec="aac",height=720),
+                         dict(format_id="hevc",url="https://example.com/high.mp4",ext="mp4",protocol="https",vcodec="h265",acodec="aac",height=1080)]
+                chosen=list(selector(dict(formats=formats,has_merged_format=False,incomplete_formats=False)))
+                self.assertEqual(chosen[0]["format_id"],"supported")
+
     def test_real_extractors_include_short_tiktok_links(self):
         from yt_dlp import YoutubeDL
         from yt_dlp.globals import plugin_dirs

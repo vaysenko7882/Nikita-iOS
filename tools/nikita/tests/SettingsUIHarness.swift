@@ -243,6 +243,22 @@ private final class HarnessController: UIViewController {
             self.expect(picker.applyButton.frame.minY > picker.detailLabel.frame.maxY,"Apply button overlaps the icon description")
         }
         self.expect(applied == 0,"Scrolling must never apply an icon without an explicit press")
+        func luminance(_ color: UIColor) -> Double {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            color.getRed(&r,green: &g,blue: &b,alpha: &a)
+            let channels = [r,g,b].map { value -> Double in
+                let value = Double(value)
+                return value <= 0.04045 ? value / 12.92 : pow((value+0.055)/1.055,2.4)
+            }
+            return channels[0]*0.2126 + channels[1]*0.7152 + channels[2]*0.0722
+        }
+        for index in 0 ..< (CodeGramAppIconChoice.all.count-1) {
+            for fraction in [0.0,0.25,0.5,0.75,1.0] {
+                picker.scrollView.setContentOffset(CGPoint(x: (CGFloat(index)+CGFloat(fraction))*156-picker.scrollView.contentInset.left,y: 0),animated: false)
+                let text = luminance(picker.titleLabel.textColor), backdrop = luminance(picker.backgroundColor ?? .black)
+                self.expect((max(text,backdrop)+0.05)/(min(text,backdrop)+0.05) >= 4.5,"Primary carousel text disappears during a background transition")
+            }
+        }
         picker.select(index: 0,animated: false)
         self.phase("icons-original",after: 2) {
             picker.select(index: 1,animated: true)
@@ -259,7 +275,10 @@ private final class HarnessController: UIViewController {
                                 self.expect(applied == 1,"Apply must run exactly once")
                                 picker.setApplying(false,appliedName: "CGStairs",succeeded: true)
                                 self.expect(!picker.applyButton.isEnabled,"Applied icon must be marked as installed")
-                                self.finish()
+                                self.expect(picker.applyButton.configuration?.title == "Установлена","Applied icon must have the installed title")
+                                DispatchQueue.main.asyncAfter(deadline: .now()+0.5) {
+                                    self.phase("icons-applied",after: 2) { self.finish() }
+                                }
                             }
                         }
                     }
@@ -269,7 +288,7 @@ private final class HarnessController: UIViewController {
     }
     private func finish() {
         self.search.searchBar.resignFirstResponder()
-        let report: [String: Any] = ["checks": self.checks, "failures": self.failures, "ios": UIDevice.current.systemVersion, "production_sources": ["CodeGramSettingsTheme.swift", "CodeGramSettingsCells.swift", "CodeGramDashboardComponents.swift", "CodeGramMediaActions.swift"], "scope": "Native production controls and table self-sizing, not an authenticated full app session or a physical-device thermal test"]
+        let report: [String: Any] = ["checks": self.checks, "failures": self.failures, "ios": UIDevice.current.systemVersion, "production_sources": ["CodeGramSettingsTheme.swift", "CodeGramSettingsCells.swift", "CodeGramDashboardComponents.swift", "CodeGramIconPickerView.swift", "CodeGramMediaActions.swift"], "scope": "Native production controls and table self-sizing, not an authenticated full app session or a physical-device thermal test"]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: self.output.appendingPathComponent("result.json"), options: .atomic) }
     }
 }
