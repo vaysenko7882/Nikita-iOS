@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: nikita-device-build
+  group: ${{ (github.ref == 'refs/heads/nikita/v2' || contains(github.event.head_commit.message, '[build ipa]') || github.event_name == 'workflow_dispatch') && 'nikita-device-build' || format('nikita-device-skipped-{0}', github.sha) }}
   cancel-in-progress: true
 jobs:
   build:

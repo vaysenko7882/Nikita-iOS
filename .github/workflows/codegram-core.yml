@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: codegram-core-${{ github.ref }}
+  group: codegram-core-${{ (github.ref != 'refs/heads/codex/codegram-14.4-links-profile-icons' || contains(github.event.head_commit.message, '[core]') || github.event_name == 'workflow_dispatch') && github.ref || github.sha }}
   cancel-in-progress: true
 jobs:
   core-tests:
