@@ -78,6 +78,7 @@ class ProfileCollector:
         while True:
             page = await self.request(functions.payments.GetSavedStarGiftsRequest(input_peer,offset,100))
             users = {user.id:user for user in page.users}
+            chats = {chat.id:chat for chat in getattr(page,"chats",[]) if getattr(chat,"id",None) is not None}
             count = page.count
             for gift in page.gifts:
                 value = public_value(gift)
@@ -89,7 +90,9 @@ class ProfileCollector:
                 if sender_user:
                     value["sender"] = dict(id=str(sender_user.id),first_name=sender_user.first_name,last_name=sender_user.last_name,username=sender_user.username)
                 else:
-                    value["sender"] = None
+                    chat_id = getattr(sender,"channel_id",None) or getattr(sender,"chat_id",None)
+                    chat = None if getattr(gift,"name_hidden",False) else chats.get(chat_id)
+                    value["sender"] = dict(id=str(chat.id),title=getattr(chat,"title",""),username=getattr(chat,"username",None)) if chat else None
                 # Mutable display/pin flags must not turn an existing gift into a new one.
                 source_gift = getattr(gift,"gift",None)
                 stable = dict(gift_id=getattr(source_gift,"id",None),date=value.get("date"))

@@ -19,7 +19,7 @@ public func codeGramMediaActions(saveTitle: String, startTitle: String, cancelTi
 
 // UIAlertAction may run before, during or after UIKit's automatic dismissal.
 // Keep the action exactly once in each state, including an already-closed sheet.
-func codeGramDismissMediaActions(_ controller: UIAlertController?, perform: @escaping () -> Void) {
+public func codeGramDismissMediaActions(_ controller: UIAlertController?, perform: @escaping () -> Void) {
     guard let controller, controller.presentingViewController != nil else { perform(); return }
     if controller.isBeingDismissed, let coordinator = controller.transitionCoordinator {
         if !coordinator.animate(alongsideTransition: nil, completion: { _ in DispatchQueue.main.async(execute: perform) }) {

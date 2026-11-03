@@ -75,6 +75,11 @@ class ArtifactTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Simulator'):
                 validator.validate(self.artifact(folder, platform=7))
 
+    def test_rejects_missing_alternate_icons_before_shipping(self):
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as folder:
+            with self.assertRaisesRegex(ValueError,'alternate icons'):
+                validator.validate(self.artifact(folder),required_alternate_icons=['CGClip'])
+
     def test_rejects_a_different_clients_binary(self):
         with tempfile.TemporaryDirectory(dir=SCRATCH) as folder:
             with self.assertRaisesRegex(ValueError, 'display name'):

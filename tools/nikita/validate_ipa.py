@@ -13,7 +13,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 
-def validate(path, expected_version=None, expected_build=None):
+def validate(path, expected_version=None, expected_build=None, required_alternate_icons=()):
     with zipfile.ZipFile(path) as archive:
         if archive.testzip() is not None:
             raise ValueError('IPA integrity check failed.')
@@ -30,6 +30,19 @@ def validate(path, expected_version=None, expected_build=None):
             raise ValueError('Compiled app version differs from the current source; refusing a stale artifact.')
         if expected_build is not None and info.get('CFBundleVersion') != str(expected_build):
             raise ValueError('Compiled build number differs from this run; refusing a stale artifact.')
+        bundle = location.rsplit('/', 1)[0] + '/'
+        for key in ('CFBundleIcons', 'CFBundleIcons~ipad'):
+            declared = info.get(key, {}).get('CFBundleAlternateIcons', {})
+            if any(name not in declared for name in required_alternate_icons):
+                raise ValueError('Compiled app is missing declared CodeGram alternate icons.')
+        for name in required_alternate_icons:
+            for suffix, size in (('@2x', 120), ('@3x', 180), ('Preview', 256)):
+                filename = bundle + name + suffix + '.png'
+                if filename not in archive.namelist():
+                    raise ValueError('Compiled app is missing a CodeGram icon image: ' + name)
+                header = archive.read(filename)[:24]
+                if not header.startswith(b'\x89PNG\r\n\x1a\n') or struct.unpack_from('>II', header, 16) != (size, size):
+                    raise ValueError('Invalid compiled CodeGram icon dimensions: ' + name)
         executable = location.rsplit('/', 1)[0] + '/' + info['CFBundleExecutable']
         data = archive.read(executable)
         magic, cpu = struct.unpack_from('<II', data)
@@ -54,7 +67,9 @@ def validate(path, expected_version=None, expected_build=None):
 def main():
     source = Path(sys.argv[1])
     version = json.loads((ROOT / 'versions.json').read_text())['app']
-    result = validate(source, expected_version=version, expected_build=os.environ.get('GITHUB_RUN_NUMBER', '1'))
+    choices = json.loads((ROOT / 'tools/nikita/assets/icons/manifest.json').read_text())
+    result = validate(source, expected_version=version, expected_build=os.environ.get('GITHUB_RUN_NUMBER', '1'), required_alternate_icons=[item['name'] for item in choices])
+    result['alternate_icons'] = [item['name'] for item in choices]
     output = ROOT / 'build' / 'nikita'
     output.mkdir(parents=True, exist_ok=True)
     target = output / 'CodeGram.ipa'

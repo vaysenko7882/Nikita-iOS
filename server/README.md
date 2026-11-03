@@ -70,12 +70,12 @@ apt-get install -y git ca-certificates
 nikita_update_dir=$(mktemp -d /tmp/nikita-update.XXXXXX)
 git clone --depth 1 --filter=blob:none --sparse https://github.com/vaysenko7882/Nikita-iOS.git "$nikita_update_dir"
 git -C "$nikita_update_dir" sparse-checkout set server
-bash "$nikita_update_dir/server/install.sh" --domain archive.mavasya.lol --reuse-session
+bash "$nikita_update_dir/server/install.sh" --domain archive.mavasyaa.best --reuse-session
 NIKITA_UPDATE
 ```
 
 Установи клиент 13.1.4 или новее поверх текущего, с тем же сертификатом и bundle ID.
-В «VPS и VoiceChanger» оставь адрес `https://archive.mavasya.lol` и прежний ключ, нажми
+В «VPS и VoiceChanger» оставь адрес `https://archive.mavasyaa.best` и прежний ключ, нажми
 «Проверить и синхронизировать». После обновления клиент один раз перечитывает журнал,
 чтобы добавить вложения старым записям, если сервер знает эти файлы. Подсказка статуса
 показывает число готовых файлов, очередь, ошибки и нехватку места. Открытые до обновления
@@ -137,7 +137,7 @@ SQLite-журнал и HTTP-авторизация покрыты автоном
 На уже работающем сервере обновление сохраняет сессию, ключ, журнал и файлы. Под root:
 
 ```bash
-codegram_update_dir=$(mktemp -d /tmp/codegram-update.XXXXXX) && git clone --depth 1 --filter=blob:none --sparse https://github.com/vaysenko7882/Nikita-iOS.git "$codegram_update_dir" && git -C "$codegram_update_dir" sparse-checkout set server && bash "$codegram_update_dir/server/install.sh" --domain archive.mavasya.lol --reuse-session
+codegram_update_dir=$(mktemp -d /tmp/codegram-update.XXXXXX) && git clone --depth 1 --filter=blob:none --sparse https://github.com/vaysenko7882/Nikita-iOS.git "$codegram_update_dir" && git -C "$codegram_update_dir" sparse-checkout set server && bash "$codegram_update_dir/server/install.sh" --domain archive.mavasyaa.best --reuse-session
 ```
 
 В CodeGram открой «Правила сохранения VPS». По умолчанию сохраняются личные диалоги; группы, каналы и всё в папке «Архив» исключены. Исключение «Всегда» включает конкретный диалог даже в Архиве, «Никогда» исключает его при любых общих настройках. Нажми «Сохранить»: правила хранятся на VPS, поэтому действуют и при закрытом iPhone. Метаданные папки обновляются при уведомлениях Telegram и полной сверке примерно раз в минуту. Неизвестные диалоги не включаются до проверки их типа и папки. Изменение правил приостанавливает новые записи и очередь загрузок, но не удаляет старые данные. Файл, встречающийся и в разрешённом диалоге, может продолжить загрузку из него.
@@ -147,3 +147,12 @@ codegram_update_dir=$(mktemp -d /tmp/codegram-update.XXXXXX) && git clone --dept
 API: `GET /v1/policy?q=...`, `PUT /v1/policy`, `GET /v1/storage`. Все запросы требуют прежний Bearer-ключ. PUT дополнительно проверяет X-CodeGram-Account-ID, размер тела и ревизию (409 при конфликте). API не принимает файлы сессий или команды. Отключение интеграции на телефоне останавливает импорт, но не службу VPS: сбором управляют серверные правила или systemctl stop nikita-archive.
 
 Архив получает только содержимое, доступное твоей сессии. Не восстанавливает пропущенные версии, уже недоступные/исчезнувшие файлы, не получает секретные чаты другого устройства и не снимает серверные ограничения Telegram.
+
+
+## CodeGram 14.4 / сервер 5
+
+Добавлены отдельный журнал отслеживаемых профилей и подготовка публичных видео TikTok/Instagram.
+Наблюдение включается только для выбранных пользователей из клиента. Обработка происходит на VPS,
+с сохранением существующего архива, ключа и сессии. Установщик добавляет ffmpeg.
+Частота проверок зависит от лимитов Telegram; точный статус блокировки другой стороной API не раскрывает.
+Подробности и ограничения — в `CODEGRAM-14.4.md` в корне репозитория.

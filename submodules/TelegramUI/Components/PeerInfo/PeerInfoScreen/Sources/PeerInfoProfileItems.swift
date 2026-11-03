@@ -908,7 +908,7 @@ func infoItems(
         let account = String(context.account.peerId.id._internalGetInt64Value())
         let identifier = String(peer.id.id._internalGetInt64Value())
         let tracked = NikitaSettingsStore.shared.isProfileTracked(account: account, peerId: identifier)
-        items[.technical]!.append(PeerInfoScreenDisclosureItem(id: 91991, label: .text(tracked ? "Включено" : ""), text: "Отслеживание профиля", icon: UIImage(systemName: "person.crop.circle.badge.clock"), action: {
+        items[.technical]!.append(PeerInfoScreenDisclosureItem(id: 91991, label: .text(tracked ? "Включено" : ""), text: "Отслеживание профиля", icon: UIImage(systemName: "person.crop.circle.badge.clock")?.withTintColor(presentationData.theme.list.itemPrimaryTextColor, renderingMode: .alwaysOriginal), action: {
             interaction.getController()?.push(codegramProfileTrackingController(context: context, peerId: peer.id, accessHash: user.accessHash?.value, title: peer.debugDisplayTitle))
         }))
     }

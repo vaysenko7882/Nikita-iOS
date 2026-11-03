@@ -33,6 +33,7 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
     private(set) var selectedIndex: Int
     private var appliedName: String?
     private var busy = false
+    private var buttonState = ""
     var onApply: ((CodeGramAppIconChoice) -> Void)?
     var onSelection: ((CodeGramAppIconChoice) -> Void)?
     var onPalette: ((UIColor) -> Void)?
@@ -95,8 +96,10 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
         let top = max(28, min(90, self.bounds.height * 0.12))
         self.scrollView.frame = CGRect(x: 0, y: top, width: width, height: 174)
         let inset = max(0, (width - self.stride) / 2)
-        self.scrollView.contentInset = UIEdgeInsets(top: 0, left: inset, bottom: 0, right: inset)
-        self.scrollView.contentSize = CGSize(width: self.stride * CGFloat(self.images.count), height: 174)
+        let contentInset = UIEdgeInsets(top: 0, left: inset, bottom: 0, right: inset)
+        if self.scrollView.contentInset != contentInset { self.scrollView.contentInset = contentInset }
+        let contentSize = CGSize(width: self.stride * CGFloat(self.images.count), height: 174)
+        if self.scrollView.contentSize != contentSize { self.scrollView.contentSize = contentSize }
         for (index, image) in self.images.enumerated() {
             image.transform = .identity
             image.bounds = CGRect(x: 0, y: 0, width: 128, height: 128)
@@ -165,11 +168,17 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
         self.pageControl.pageIndicatorTintColor = foreground.withAlphaComponent(0.22)
         let choice = CodeGramAppIconChoice.all[index]
         if self.titleLabel.text != choice.title { self.titleLabel.text = choice.title; self.setNeedsLayout() }
-        self.pageControl.currentPage = index
-        self.applyButton.configuration?.baseBackgroundColor = foreground
-        self.applyButton.configuration?.baseForegroundColor = choice.background
-        self.applyButton.setTitle(self.busy ? "Применяю…" : choice.name == self.appliedName ? "Установлена" : "Использовать эту иконку", for: .normal)
-        self.applyButton.isEnabled = !self.busy && choice.name != self.appliedName
+        if self.pageControl.currentPage != index { self.pageControl.currentPage = index }
+        let buttonState = "\(index):\(self.busy):\(self.appliedName ?? "default")"
+        if self.buttonState != buttonState {
+            self.buttonState = buttonState
+            var configuration = self.applyButton.configuration
+            configuration?.baseBackgroundColor = choice.light ? .black : .white
+            configuration?.baseForegroundColor = choice.background
+            configuration?.title = self.busy ? "Применяю…" : choice.name == self.appliedName ? "Установлена" : "Использовать эту иконку"
+            self.applyButton.configuration = configuration
+            self.applyButton.isEnabled = !self.busy && choice.name != self.appliedName
+        }
         for (i, image) in self.images.enumerated() {
             let distance = min(1, abs(CGFloat(i) - position))
             let scale = 1 - distance * 0.27

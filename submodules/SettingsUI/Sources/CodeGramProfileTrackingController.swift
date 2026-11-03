@@ -44,6 +44,33 @@ private func profileDate(_ value: Any?) -> String {
     return DateFormatter.localizedString(from: Date(timeIntervalSince1970: timestamp.doubleValue), dateStyle: .medium, timeStyle: .medium)
 }
 
+private func profileReadable(_ value: Any?) -> String {
+    guard let object = value as? [String: Any] else { return profileJSON(value) }
+    if let gift = object["gift"] as? [String: Any] {
+        let title = gift["title"] as? String ?? gift["slug"] as? String ?? "Подарок \(gift["id"].map { String(describing: $0) } ?? "")"
+        let sender = object["sender"] as? [String: Any]
+        let name = sender?["title"] as? String ?? [sender?["first_name"] as? String,sender?["last_name"] as? String].compactMap { $0 }.joined(separator: " ")
+        let senderText = name.isEmpty ? "Telegram не передал отправителя" : name
+        return "\(title)\nОтправитель: \(senderText)\nДата подарка: \(profileDate(object["date"]))\nВсе атрибуты и прежние значения доступны ниже в полных данных."
+    }
+    if object["blocked_by_target"] != nil {
+        var lines = ["ЧС у этого человека: Telegram не раскрывает этот статус."]
+        if let visible = object["photo_visible"] as? Bool { lines.append("Аватарка доступна: \(visible ? "да" : "нет")") }
+        if let visible = object["about_visible"] as? Bool { lines.append("Описание доступно: \(visible ? "да" : "нет")") }
+        if let blocked = object["blocked_by_me"] as? Bool { lines.append("Я заблокировал(а) пользователя: \(blocked ? "да" : "нет")") }
+        lines.append("Изменение доступности может быть связано с настройками приватности.")
+        return lines.joined(separator: "\n")
+    }
+    if object["caption"] != nil || object["expire_date"] != nil {
+        return "Опубликовано: \(profileDate(object["date"]))\n\(object["caption"] as? String ?? "Без подписи")"
+    }
+    let fields = object.keys.sorted().compactMap { key -> String? in
+        guard let title = profileFieldNames[key], let value = object[key], !(value is NSNull) else { return nil }
+        return "\(title): \(profileJSON(value))"
+    }
+    return fields.isEmpty ? "Полученные данные сохранены. Открой полные данные события, чтобы увидеть все значения." : fields.joined(separator: "\n")
+}
+
 final class CodeGramTrackedProfilesController: CodeGramTableController {
     private lazy var client = CodeGramVPSClient(configuration: NikitaSettingsStore.shared.server(account: self.accountKey),accountId: self.accountKey)
     private var profiles: [[String: Any]] = []
@@ -168,6 +195,9 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
     private var files: [URL] = []
     private var previewURL: URL?
     private var download: URLSessionDownloadTask?
+    private var opening = false
+    private var cancelledDownload = false
+    private var expanded = false
     init(context: AccountContext,event: [String: Any]) { self.event = event; super.init(context: context,title: profileEventTitle(event)) }
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     deinit { self.client.close(); for file in self.files { try? FileManager.default.removeItem(at: file) } }
@@ -176,7 +206,7 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
         var sections = [CodeGramSettingsSection(title: "Обнаружено на VPS",footer: nil,rows: [self.textRow(profileDate(self.event["observed_at"]),icon: "clock")])]
         for (key,title) in [("before","До изменения"),("after","После изменения")] {
             if let value = payload[key], !(value is NSNull) {
-                sections.append(CodeGramSettingsSection(title: title,footer: nil,rows: [self.textRow(profileJSON(value),icon: "text.alignleft")]))
+                sections.append(CodeGramSettingsSection(title: title,footer: nil,rows: [self.textRow(profileReadable(value),icon: "text.alignleft")]))
             }
         }
         let assets = self.event["media"] as? [[String: Any]] ?? []
@@ -186,26 +216,34 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
                 return self.textRow("Файл \(index+1)",detail: "\(asset["mime"] as? String ?? "медиа") · \(ready ? "сохранён" : "ещё не готов")",icon: "doc",action: ready ? { [weak self] in self?.open(asset) } : nil)
             }))
         }
-        sections.append(CodeGramSettingsSection(title: "Все полученные данные",footer: "Если Telegram не передал имя отправителя подарка, журнал не может его восстановить.",rows: [self.textRow(profileJSON(payload),icon: "list.bullet.rectangle")]))
+        sections.append(CodeGramSettingsSection(title: "Полные данные события",footer: "Если Telegram не передал имя отправителя подарка, журнал не может его восстановить.",rows: [self.textRow(self.expanded ? "Скрыть полные данные" : "Показать все данные и атрибуты",icon: "list.bullet.rectangle",action: { [weak self] in guard let self else { return }; self.expanded.toggle(); self.reloadContent() })] + (self.expanded ? [self.textRow(profileJSON(payload),icon: "text.alignleft")] : [])))
         return sections
     }
     private func open(_ asset: [String: Any]) {
-        guard self.download == nil, let id = asset["blob_id"] as? String, id.range(of: "^[a-f0-9]{64}$",options: .regularExpression) != nil,
+        guard !self.opening, let id = asset["blob_id"] as? String, id.range(of: "^[a-f0-9]{64}$",options: .regularExpression) != nil,
             let size = asset["size"] as? NSNumber else { return }
+        self.opening = true
+        self.cancelledDownload = false
         self.client.json(path: "profiles",completion: { [weak self] result in
             guard let self else { return }
             guard case let .success(value) = result, let epoch = value["server_id"] as? String else {
+                self.opening = false
                 if case let .failure(error) = result { self.notice(error.message) }; return
             }
             let mime = asset["mime"] as? String ?? ""
             let ext = mime == "video/mp4" ? "mp4" : mime == "image/jpeg" ? "jpg" : mime == "image/png" ? "png" : mime.contains("ogg") ? "ogg" : mime.contains("webp") ? "webp" : "bin"
             let destination = FileManager.default.temporaryDirectory.appendingPathComponent("CodeGram-profile-\(UUID().uuidString).\(ext)")
             let alert = UIAlertController(title: "Загрузка файла",message: "Файл из истории профиля скачивается на iPhone…",preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Отменить",style: .cancel,handler: { [weak self] _ in self?.download?.cancel() }))
+            alert.addAction(UIAlertAction(title: "Отменить",style: .cancel,handler: { [weak self] _ in self?.cancelledDownload = true; self?.download?.cancel() }))
             self.present(alert,animated: true)
             self.download = self.client.download(path: "media/\(id)",epoch: epoch,size: size.int64Value,destination: destination,completion: { [weak self,weak alert] result in
                 guard let self else { return }
                 self.download = nil
+                self.opening = false
+                if self.cancelledDownload {
+                    if case let .success(url) = result { try? FileManager.default.removeItem(at: url) }
+                    return
+                }
                 let presentResult = { [weak self] in
                     guard let self else { return }
                     switch result {
@@ -216,7 +254,7 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
                         self.present(preview,animated: true)
                     }
                 }
-                if let alert, alert.presentingViewController != nil { alert.dismiss(animated: true,completion: presentResult) } else { presentResult() }
+                if let alert { codeGramDismissMediaActions(alert, perform: presentResult) } else { presentResult() }
             })
         })
     }

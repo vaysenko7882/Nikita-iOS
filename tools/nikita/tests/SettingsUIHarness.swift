@@ -134,7 +134,8 @@ private final class HarnessController: UIViewController {
         let started = Date()
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
             let captured = FileManager.default.fileExists(atPath: self.output.appendingPathComponent("captured-" + name).path)
-            if (captured && Date().timeIntervalSince(started) >= seconds) || Date().timeIntervalSince(started) > 25 {
+            if (captured && Date().timeIntervalSince(started) >= seconds) || Date().timeIntervalSince(started) > 120 {
+                if !captured { self.expect(false, "Missing recorded phase: \(name)") }
                 timer.invalidate(); next()
             }
         }
