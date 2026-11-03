@@ -20,6 +20,10 @@ class SocialURLTests(unittest.TestCase):
         plugin_dirs.value=[]
         with YoutubeDL({"quiet":True,"allowed_extractors":["TikTok",r"vm\.tiktok","Instagram"]}) as downloader:
             self.assertEqual(set(downloader._ies),{"TikTok","TikTokVM","Instagram"})
+            from yt_dlp.extractor.tiktok import TikTokIE, TikTokVMIE
+            for link in ["https://tiktok.com/@owner/video/123", "https://m.tiktok.com/@owner/video/123", "https://tiktok.com/t/ZP8abc_/"]:
+                normalized=social_url(link)
+                self.assertTrue(TikTokIE.suitable(normalized) or TikTokVMIE.suitable(normalized))
 
     def test_only_standalone_supported_https_video_routes_are_accepted(self):
         for url in ["https://www.tiktok.com/@user/video/123", "https://vm.tiktok.com/Abcd12/", "https://vt.tiktok.com/Abcd12/", "https://www.instagram.com/reel/ABC-def_1/", "https://instagram.com/p/ABC123/?igsh=private"]:

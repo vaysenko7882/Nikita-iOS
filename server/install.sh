@@ -139,10 +139,14 @@ nikita_resume_service=0
 systemctl enable caddy
 systemctl reload-or-restart caddy
 echo
-echo 'В Никита → VPS и VoiceChanger включи интеграцию и сохрани:'
+echo 'В CodeGram → Хранилище и VPS включи интеграцию и сохрани:'
 echo "Адрес: https://$nikita_domain"
-echo 'Ключ доступа (не публикуй):'
-runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive show-token
+if [ "$nikita_reuse_session" = 1 ]; then
+  echo 'Прежний ключ доступа и Telegram-сессия сохранены.'
+else
+  echo 'Ключ доступа (не публикуй):'
+  runuser -u nikita-archive -- /opt/nikita-archive/venv/bin/nikita-archive show-token
+fi
 echo 'Затем нажми «Проверить и синхронизировать».'
 echo 'Порты 80/443 должны быть доступны для HTTPS; API 8765 доступен только на самом VPS.'
 

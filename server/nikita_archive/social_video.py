@@ -23,7 +23,7 @@ def social_url(value):
         raise ValueError("A public HTTPS video link is required")
     host = (url.hostname or "").lower()
     if host in {"tiktok.com","www.tiktok.com","m.tiktok.com"}:
-        valid = re.fullmatch(r"/@[A-Za-z0-9_.-]+/video/[0-9]+/?",url.path)
+        valid = re.fullmatch(r"(?:/@[A-Za-z0-9_.-]+/video/[0-9]+|/t/[A-Za-z0-9_]+)/?",url.path)
     elif host in {"vm.tiktok.com","vt.tiktok.com"}:
         valid = re.fullmatch(r"/[A-Za-z0-9]+/?",url.path)
     elif host in {"instagram.com","www.instagram.com","m.instagram.com"}:
@@ -32,7 +32,7 @@ def social_url(value):
         valid = False
     if not valid:
         raise ValueError("Only TikTok videos and Instagram video posts are supported")
-    host = {"m.instagram.com":"www.instagram.com","m.tiktok.com":"www.tiktok.com"}.get(host,host)
+    host = {"m.instagram.com":"www.instagram.com","tiktok.com":"www.tiktok.com","m.tiktok.com":"www.tiktok.com"}.get(host,host)
     return urlunsplit(("https",host,url.path,"",""))
 
 

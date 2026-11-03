@@ -13,6 +13,8 @@ final class CodeGramSocialVideoTests: XCTestCase {
     }
     func testTrackingQueryAndFragmentNeverReachVPS() {
         XCTAssertEqual(CodeGramSocialVideoLink.url(in: "https://m.instagram.com/reel/ABC/?igsh=private#fragment")?.absoluteString,"https://www.instagram.com/reel/ABC/")
+        XCTAssertEqual(CodeGramSocialVideoLink.url(in: "https://tiktok.com/@owner/video/123?share=private")?.absoluteString,"https://www.tiktok.com/@owner/video/123")
+        XCTAssertEqual(CodeGramSocialVideoLink.url(in: "https://tiktok.com/t/ZP8abc_/?share=private")?.absoluteString,"https://www.tiktok.com/t/ZP8abc_/")
     }
     func testVideoUsesNormalTemporaryFileUploaderAndStreamingAttribute() {
         let media = codegramSocialVideoMedia(path: "/tmp/test-video.mp4",size: 123,duration: 2.5,width: 720,height: 1280)

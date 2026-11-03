@@ -61,6 +61,7 @@ Dashboard: artwork and labels share the material content hierarchy. Glass appear
 Scroll/return: content and its material move together, upward then downward, and settle without a detached label or stale material. Only native scroll animation runs.
 Media actions: native system sheet slides up and settles; Save and Start countdown are legible, aligned and inside the safe area; dismissal uses the native Cancel action or an outside tap when iOS presents a popover. After a countdown starts, Save and Cancel remain and Start is absent. No overlapping timer/action labels. The presenting controls stay in place; a tiny transparent anchor prevents UIKit from morphing the entire source screen. The gallery and audio integration still require a real account and received media.
 Search: the real UISearchBar stays inside the material, with aligned icons, editing controls and keyboard. No effects injected into private field subviews.
+Icon carousel: the installed icon is initially centered. Artwork moves horizontally and scales together inside its clipping shape; labels, page dots and the explicit Apply button stay aligned below. Background interpolates with scrolling; Paper uses a cream backdrop with dark text, Chrome a red backdrop. Each animation settles once without a loop, late image or text overlap. Scrolling alone never applies an icon.
 The recording does not establish physical-device frame rate, heat, or finger-driven elasticity; those need a full app device check.
 ''')
 PY
