@@ -50,5 +50,6 @@ python3 build-system/Make/Make.py \
   --configuration=release_arm64 \
   --buildNumber=1
 # Use the actual current Bazel output, never the possibly stale archive-root folder.
-python3 tools/nikita/validate_ipa.py bazel-bin/Telegram/Telegram.ipa
+python3 tools/nikita/prepare_app_icons.py bazel-bin/Telegram/Telegram.ipa build/nikita/CodeGramWithIcons.ipa
+python3 tools/nikita/validate_ipa.py build/nikita/CodeGramWithIcons.ipa
 

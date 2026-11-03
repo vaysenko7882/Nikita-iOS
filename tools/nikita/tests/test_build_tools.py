@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+import zlib
 
 TOOLS = Path(__file__).resolve().parents[1]
 ROOT = TOOLS.parents[1]
@@ -24,6 +25,7 @@ def load(name):
 
 configure = load('configure')
 validator = load('validate_ipa')
+icon_packager = load('prepare_app_icons')
 
 class ConfigurationTests(unittest.TestCase):
     def test_relative_submodules_keep_the_original_fork_owner(self):
@@ -57,10 +59,32 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotIn(test_hash, capture.getvalue())
 
 class ArtifactTests(unittest.TestCase):
-    def artifact(self, folder, *, platform=2, name='CodeGram', cryptid=0, version='13.1.4', build_number='11'):
+    def icon_inputs(self, root):
+        choices = json.loads((ROOT / 'tools/nikita/assets/icons/manifest.json').read_text())
+        manifest = root / 'tools/nikita/assets/icons/manifest.json'
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps(choices))
+        def image(path, size):
+            def chunk(kind, data):
+                return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+            header = struct.pack('>2I5B', size, size, 8, 2, 0, 0, 0)
+            pixels = (b'\0' + b'\xff\xff\xff' * size) * size
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', header) + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b''))
+        icons = root / 'Telegram/Telegram-iOS'
+        for choice in choices:
+            name = choice['name']
+            for suffix, size in (('@2x', 120), ('@3x', 180), ('Ipad', 76), ('Ipad@2x', 152), ('LargeIpad@2x', 167)):
+                image(icons / (name + '.alticon') / (name + suffix + '.png'), size)
+            image(icons / 'CodeGramIconPreviews' / (name + 'Preview.png'), 256)
+        image(icons / 'CodeGramIconPreviews/CGOriginalPreview.png', 256)
+        return [choice['name'] for choice in choices]
+
+    def artifact(self, folder, *, platform=2, name='CodeGram', cryptid=0, version='13.1.4', build_number='11', extra_info=None):
         # Tiny format fixtures only, never a runnable application or deliverable.
         info = {'CFBundleDisplayName': name, 'CFBundleIdentifier': 'personal.nikita.messenger', 'CFBundleExecutable': 'Client', 'MinimumOSVersion': '15.0'}
         info.update(CFBundleShortVersionString=version, CFBundleVersion=build_number)
+        info.update(extra_info or {})
         header = struct.pack('<8I', 0xfeedfacf, 0x100000c, 0, 2, 2, 48, 0x200085, 0)
         build = struct.pack('<6I', 0x32, 24, platform, 15 << 16, 27 << 16, 0)
         encryption = struct.pack('<6I', 0x2c, 24, 0, 0, cryptid, 0)
@@ -79,6 +103,51 @@ class ArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=SCRATCH) as folder:
             with self.assertRaisesRegex(ValueError,'alternate icons'):
                 validator.validate(self.artifact(folder),required_alternate_icons=['CGClip'])
+
+    def test_packaged_icons_register_on_both_devices_without_changing_code(self):
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as folder:
+            root = Path(folder)
+            names = self.icon_inputs(root)
+            primary = {'CFBundleIconName': 'Telegram'}
+            source = self.artifact(folder, extra_info={
+                'CFBundleIcons': {'CFBundlePrimaryIcon': primary, 'CFBundleAlternateIcons': {'Legacy': {'CFBundleIconFiles': ['LegacyIcon']}}},
+                'CFBundleIcons~ipad': {'CFBundlePrimaryIcon': primary},
+            })
+            with zipfile.ZipFile(source, 'a') as fixture:
+                fixture.writestr('Payload/Client.app/UnrelatedResource.txt', b'preserved')
+            with zipfile.ZipFile(source) as fixture:
+                executable = fixture.read('Payload/Client.app/Client')
+            output = root / 'prepared.ipa'
+            self.assertEqual(icon_packager.prepare(source, output, root=root), names)
+            validator.validate(output, required_alternate_icons=names)
+            with zipfile.ZipFile(output) as result:
+                self.assertEqual(result.read('Payload/Client.app/Client'), executable)
+                self.assertEqual(result.read('Payload/Client.app/UnrelatedResource.txt'), b'preserved')
+                info = plistlib.loads(result.read('Payload/Client.app/Info.plist'))
+                self.assertEqual(info['CFBundleIcons']['CFBundlePrimaryIcon'], primary)
+                self.assertEqual(info['CFBundleIcons~ipad']['CFBundlePrimaryIcon'], primary)
+                self.assertIn('Legacy', info['CFBundleIcons']['CFBundleAlternateIcons'])
+                for name in names:
+                    self.assertEqual(info['CFBundleIcons']['CFBundleAlternateIcons'][name]['CFBundleIconFiles'], [name])
+                    self.assertEqual(info['CFBundleIcons~ipad']['CFBundleAlternateIcons'][name]['CFBundleIconFiles'], [name + 'Ipad', name + 'LargeIpad'])
+            self.assertTrue(source.exists())
+
+    def test_missing_icon_file_cannot_produce_a_partial_package(self):
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as folder:
+            root = Path(folder)
+            names = self.icon_inputs(root)
+            (root / 'Telegram/Telegram-iOS' / (names[0] + '.alticon') / (names[0] + '@3x.png')).unlink()
+            output = root / 'prepared.ipa'
+            with self.assertRaises(FileNotFoundError):
+                icon_packager.prepare(self.artifact(folder), output, root=root)
+            self.assertFalse(output.exists())
+
+    def test_icon_packager_rejects_a_different_client(self):
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as folder:
+            root = Path(folder)
+            self.icon_inputs(root)
+            with self.assertRaisesRegex(ValueError, 'different application'):
+                icon_packager.prepare(self.artifact(folder, name='Other'), root / 'prepared.ipa', root=root)
 
     def test_rejects_a_different_clients_binary(self):
         with tempfile.TemporaryDirectory(dir=SCRATCH) as folder:

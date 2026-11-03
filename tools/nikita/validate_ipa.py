@@ -33,8 +33,9 @@ def validate(path, expected_version=None, expected_build=None, required_alternat
         bundle = location.rsplit('/', 1)[0] + '/'
         for key in ('CFBundleIcons', 'CFBundleIcons~ipad'):
             declared = info.get(key, {}).get('CFBundleAlternateIcons', {})
-            if any(name not in declared for name in required_alternate_icons):
-                raise ValueError('Compiled app is missing declared CodeGram alternate icons.')
+            missing = [name for name in required_alternate_icons if name not in declared]
+            if missing:
+                raise ValueError('Compiled app is missing declared CodeGram alternate icons in ' + key + ': ' + ', '.join(missing))
         for name in required_alternate_icons:
             for suffix, size in (('@2x', 120), ('@3x', 180), ('Preview', 256)):
                 filename = bundle + name + suffix + '.png'
