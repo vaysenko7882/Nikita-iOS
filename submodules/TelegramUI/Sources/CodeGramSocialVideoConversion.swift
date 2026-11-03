@@ -71,8 +71,8 @@ final class CodeGramSocialVideoConversion {
 }
 
 extension ChatControllerNode {
-    func codegramConvertLinkIfNeeded(text: String, resume: @escaping (TelegramMediaFile) -> Void) -> Bool {
-        guard NikitaSettingsStore.shared.sendsSocialLinksAsVideo, let url = CodeGramSocialVideoLink.url(in: text), let controller = self.controller else { return false }
+    func codegramConvertLinkIfNeeded(text: String, controller: ChatControllerImpl?, resume: @escaping (TelegramMediaFile) -> Void) -> Bool {
+        guard NikitaSettingsStore.shared.sendsSocialLinksAsVideo, let url = CodeGramSocialVideoLink.url(in: text), let controller else { return false }
         if self.codegramVideoConversion != nil { return true }
         let reply = self.chatPresentationInterfaceState.interfaceState.replyMessageSubject
         let alert = UIAlertController(title: "Видео вместо ссылки",message: "Получаю видео…",preferredStyle: .alert)

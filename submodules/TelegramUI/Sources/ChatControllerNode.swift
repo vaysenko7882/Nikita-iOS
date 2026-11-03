@@ -5318,7 +5318,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             if codegramVideo == nil, !sendAsRichMessage,
                 effectivePresentationInterfaceState.interfaceState.editMessage == nil,
                 effectivePresentationInterfaceState.interfaceState.forwardMessageIds == nil,
-                self.codegramConvertLinkIfNeeded(text: effectiveInputText.string, resume: { [weak self] file in
+                self.codegramConvertLinkIfNeeded(text: effectiveInputText.string, controller: self.controller, resume: { [weak self] file in
                     self?.sendCurrentMessage(silentPosting: silentPosting,scheduleTime: scheduleTime,repeatPeriod: repeatPeriod,postpone: postpone,messageEffect: messageEffect,sendWithoutFormatting: sendWithoutFormatting,codegramVideo: file,completion: completion)
                 }) { return }
 
