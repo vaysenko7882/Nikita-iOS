@@ -237,7 +237,10 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
             alert.addAction(UIAlertAction(title: "Отменить",style: .cancel,handler: { [weak self] _ in self?.cancelledDownload = true; self?.download?.cancel() }))
             self.present(alert,animated: true)
             self.download = self.client.download(path: "media/\(id)",epoch: epoch,size: size.int64Value,destination: destination,completion: { [weak self,weak alert] result in
-                guard let self else { return }
+                guard let self else {
+                    if case let .success(url) = result { try? FileManager.default.removeItem(at: url) }
+                    return
+                }
                 self.download = nil
                 self.opening = false
                 if self.cancelledDownload {

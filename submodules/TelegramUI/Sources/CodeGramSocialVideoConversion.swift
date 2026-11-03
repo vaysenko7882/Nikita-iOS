@@ -42,7 +42,10 @@ final class CodeGramSocialVideoConversion {
                     let epoch = value["server_id"] as? String else { self.completion(.failure(CodeGramVPSError("Видео имеет неподдерживаемые параметры."))); return }
                 self.progress("Загружаю видео на iPhone…")
                 self.task = self.client.download(path: "video/\(id)/file",epoch: epoch,size: size,destination: self.destination,completion: { [weak self] result in
-                    guard let self else { return }
+                    guard let self else {
+                        if case let .success(url) = result { try? FileManager.default.removeItem(at: url) }
+                        return
+                    }
                     guard !self.cancelled else { try? FileManager.default.removeItem(at: self.destination); return }
                     switch result {
                     case let .failure(error): self.completion(.failure(error))
@@ -77,7 +80,10 @@ extension ChatControllerNode {
             self?.codegramVideoConversion?.cancel(); self?.codegramVideoConversion = nil
         }))
         let operation = CodeGramSocialVideoConversion(context: self.context,progress: { [weak alert] in alert?.message = $0 },completion: { [weak self,weak alert,weak controller] result in
-            guard let self else { return }
+            guard let self else {
+                if case let .success((_,url)) = result { try? FileManager.default.removeItem(at: url) }
+                return
+            }
             self.codegramVideoConversion = nil
             let finish = { [weak self,weak controller] in
                 guard let self, let controller else {
