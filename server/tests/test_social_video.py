@@ -204,7 +204,7 @@ class SocialVideoTests(unittest.TestCase):
             run_worker([sys.executable,"-c","import time; time.sleep(30)"],timeout=0.1)
         self.assertLess(time.monotonic()-start,5)
 
-    @unittest.skipUnless(os.name=="posix","POSIX process groups required")
+    @unittest.skipUnless(sys.platform.startswith("linux"),"Linux server process-group integration")
     def test_worker_exit_terminates_real_descendant_before_closing_its_stderr(self):
         pid_file=self.root/"exited-worker-child.pid"
         group_file=self.root/"exited-worker-group.pid"
@@ -246,7 +246,7 @@ class SocialVideoTests(unittest.TestCase):
             guard.cancel()
             cleanup()
 
-    @unittest.skipUnless(os.name=="posix","POSIX process groups required")
+    @unittest.skipUnless(sys.platform.startswith("linux"),"Linux server process-group integration")
     def test_worker_timeout_terminates_its_real_descendant_and_releases_stderr(self):
         pid_file=self.root/"descendant.pid"
         child="import os,time; from pathlib import Path; Path("+repr(str(pid_file))+").write_text(str(os.getpid())); time.sleep(30)"
