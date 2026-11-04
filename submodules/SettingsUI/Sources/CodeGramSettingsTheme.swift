@@ -26,12 +26,21 @@ enum CodeGramSettingsTheme {
         cell.selectionStyle = .none
     }
     static func configure(_ table: UITableView) {
+        self.disableScrollEdgeEffects(table)
         table.backgroundColor = self.background
         table.separatorStyle = .none
         table.rowHeight = UITableView.automaticDimension
         table.estimatedRowHeight = 88
         table.sectionHeaderHeight = UITableView.automaticDimension
         table.tintColor = .label
+    }
+    static func disableScrollEdgeEffects(_ scrollView: UIScrollView) {
+        if #available(iOS 26.0, *) {
+            scrollView.topEdgeEffect.isHidden = true
+            scrollView.bottomEdgeEffect.isHidden = true
+            scrollView.leftEdgeEffect.isHidden = true
+            scrollView.rightEdgeEffect.isHidden = true
+        }
     }
 }
 

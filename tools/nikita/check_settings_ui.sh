@@ -13,9 +13,8 @@ cleanup() {
         wait "$CODEGRAM_UI_REC" 2>/dev/null || true
     fi
     if [ -n "$CODEGRAM_UI_SIM" ]; then
-        xcrun simctl shutdown "$CODEGRAM_UI_SIM" 2>/dev/null || true
         python3 - "$CODEGRAM_UI_OUT" "$CODEGRAM_UI_DATA" "$CODEGRAM_UI_SIM" <<'PY'
-import os, pathlib, shutil, sys
+import os, pathlib, shutil, subprocess, sys, time
 output, data, sim = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 if data:
     documents = pathlib.Path(data) / 'Documents'
@@ -28,11 +27,25 @@ roots = [home / 'Library/Logs/DiagnosticReports', home / 'Library/Developer/Core
 crashes = output / 'crash-reports'
 for root in roots:
     if root.is_dir():
-        for source in root.rglob('SettingsHarness*'):
-            if source.is_file():
+        for source in root.rglob('*'):
+            try:
+                if not source.is_file() or source.suffix not in ('.ips', '.crash') or source.stat().st_mtime < time.time() - 3600:
+                    continue
+                text = source.read_text(errors='replace')
+                if 'SettingsHarness' not in text and 'com.codegram.UIRegression' not in text:
+                    continue
                 crashes.mkdir(exist_ok=True)
                 shutil.copyfile(source, crashes / source.name)
+            except (FileNotFoundError, PermissionError):
+                pass
+if not (output / 'result.json').is_file():
+    with (output / 'simulator-system.log').open('w') as log:
+        try:
+            subprocess.run(['xcrun', 'simctl', 'spawn', sim, 'log', 'show', '--last', '15m', '--style', 'compact', '--predicate', 'process == "SettingsHarness" OR eventMessage CONTAINS "com.codegram.UIRegression"'], stdout=log, stderr=subprocess.STDOUT, timeout=20, check=False)
+        except subprocess.TimeoutExpired:
+            log.write('\nUnified-log collection stopped after 20 seconds.\n')
 PY
+        xcrun simctl shutdown "$CODEGRAM_UI_SIM" 2>/dev/null || true
         xcrun simctl delete "$CODEGRAM_UI_SIM" 2>/dev/null || true
     fi
 }

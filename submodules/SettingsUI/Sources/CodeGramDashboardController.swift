@@ -58,6 +58,7 @@ final class CodeGramDashboardController: ViewController {
 
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
+        CodeGramSettingsTheme.disableScrollEdgeEffects(self.scrollView)
         self.scrollView.contentInsetAdjustmentBehavior = .never; self.scrollView.keyboardDismissMode = .interactive; self.scrollView.alwaysBounceVertical = true
         self.displayNode.view.addSubview(self.scrollView); self.scrollView.addSubview(self.contentView)
         self.titleLabel.text = "CodeGram"; self.titleLabel.textColor = .label; self.titleLabel.accessibilityTraits = .header

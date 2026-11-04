@@ -56,6 +56,7 @@ private final class HarnessController: UIViewController {
         self.view.backgroundColor = .black; self.overrideUserInterfaceStyle = .dark
         self.addChild(self.table); self.view.addSubview(self.table.view); self.table.didMove(toParent: self)
         self.view.addSubview(self.dashboard); self.view.addSubview(self.search)
+        CodeGramSettingsTheme.disableScrollEdgeEffects(self.dashboard)
         self.dashboard.isHidden = true; self.search.isHidden = true
     }
     override func viewDidAppear(_ animated: Bool) {
@@ -120,6 +121,11 @@ private final class HarnessController: UIViewController {
         let backdrop = luminance(br, bg, bb)
         return (max(text, backdrop) + 0.05) / (min(text, backdrop) + 0.05)
     }
+    private func expectPlainScroll(_ scroll: UIScrollView, context: String) {
+        if #available(iOS 26.0, *) {
+            self.expect([scroll.topEdgeEffect, scroll.bottomEdgeEffect, scroll.leftEdgeEffect, scroll.rightEdgeEffect].allSatisfy { $0.isHidden }, "scroll edge effect remains enabled: \(context)")
+        }
+    }
     private func expectPlainAlert(_ alert: CodeGramPlainAlertController, context: String) {
         alert.view.layoutIfNeeded()
         self.expect(alert.traitCollection.userInterfaceStyle == self.recordingStyle, "alert does not follow the recorded appearance: \(context)")
@@ -128,7 +134,17 @@ private final class HarnessController: UIViewController {
             return
         }
         self.expect(panel.isOpaque && (panel.backgroundColor?.resolvedColor(with: panel.traitCollection).cgColor.alpha ?? 0) > 0.999, "alert panel is not opaque: \(context)")
+        if let scroll = panel.subviews.compactMap({ $0 as? UIScrollView }).first {
+            self.expectPlainScroll(scroll, context: context)
+        } else { self.expect(false, "missing production dialog scroller: \(context)") }
         self.expect(self.descendants(panel).compactMap { $0 as? UIVisualEffectView }.allSatisfy { $0.effect == nil || !self.isVisible($0, within: panel) }, "alert contains a visible visual effect: \(context)")
+        let actionTitles = Set(alert.actions.compactMap { $0.title })
+        for button in self.descendants(panel).compactMap({ $0 as? UIButton }).filter({ actionTitles.contains($0.currentTitle ?? "") }) {
+            for contentRect in [CGRect.zero, CGRect(x: 0, y: 0, width: 1, height: 1), CGRect(x: 0, y: 0, width: 24, height: 24), CGRect(x: 0, y: 0, width: 25, height: 48), CGRect.null, CGRect.infinite] {
+                let rect = button.titleRect(forContentRect: contentRect)
+                self.expect(rect.minX.isFinite && rect.minY.isFinite && rect.width.isFinite && rect.height.isFinite && rect.width >= 0 && rect.height >= 0, "dialog button returned invalid title geometry: \(context)")
+            }
+        }
         for label in self.descendants(panel).compactMap({ $0 as? UILabel }).filter({ !($0.text ?? "").isEmpty }) {
             let rect = label.convert(label.bounds, to: panel)
             var ancestor = label.superview
@@ -193,6 +209,8 @@ private final class HarnessController: UIViewController {
     }
     private func runChecks() {
         self.checkClassicStartup()
+        self.expectPlainScroll(self.table.table, context: "settings table")
+        self.expectPlainScroll(self.dashboard, context: "dashboard")
         for width in [320.0, 375.0, 440.0, 768.0] {
             for category in [UIContentSizeCategory.large, .extraExtraExtraLarge, .accessibilityExtraExtraExtraLarge] {
                 for style in [UIUserInterfaceStyle.dark, .light] {
@@ -492,6 +510,7 @@ private final class HarnessController: UIViewController {
         let picker = CodeGramIconPickerView(currentName: "CGRift")
         picker.frame = CGRect(x: 0,y: 0,width: self.view.bounds.width,height: 1000)
         picker.layoutIfNeeded()
+        self.expectPlainScroll(picker.scrollView, context: "icon carousel")
         self.expect(picker.selectedIndex == 4,"Picker must open on the actually installed alternate icon")
         var applied = 0
         picker.onApply = { _ in applied += 1 }

@@ -12,7 +12,14 @@ private final class CodeGramPlainAlertButton: UIButton {
     }
 
     override func titleRect(forContentRect contentRect: CGRect) -> CGRect {
-        let rect = contentRect.insetBy(dx: 12, dy: 12)
+        // UIButton asks for title geometry before Auto Layout has given it a
+        // size. Insetting that zero/tiny rectangle produces CGRect.null,
+        // whose infinite origin must never reach a label's layer.
+        guard contentRect.minX.isFinite, contentRect.minY.isFinite,
+            contentRect.width.isFinite, contentRect.height.isFinite,
+            contentRect.width > 24, contentRect.height > 24 else { return .zero }
+        let rect = CGRect(x: contentRect.minX + 12, y: contentRect.minY + 12,
+            width: contentRect.width - 24, height: contentRect.height - 24)
         let fitted = self.titleLabel?.sizeThatFits(CGSize(width: max(1, rect.width), height: .greatestFiniteMagnitude)) ?? rect.size
         return CGRect(x: rect.minX, y: contentRect.midY - min(rect.height, fitted.height) * 0.5, width: rect.width, height: min(rect.height, fitted.height))
     }
@@ -108,6 +115,12 @@ public final class CodeGramPlainAlertController: UIViewController {
         self.view.addSubview(self.panel)
         self.scrollView.alwaysBounceVertical = false
         self.scrollView.keyboardDismissMode = .interactive
+        if #available(iOS 26.0, *) {
+            self.scrollView.topEdgeEffect.isHidden = true
+            self.scrollView.bottomEdgeEffect.isHidden = true
+            self.scrollView.leftEdgeEffect.isHidden = true
+            self.scrollView.rightEdgeEffect.isHidden = true
+        }
         self.panel.addSubview(self.scrollView)
         self.contentStack.axis = .vertical
         self.contentStack.alignment = .fill
@@ -187,24 +200,35 @@ public final class CodeGramPlainAlertController: UIViewController {
         self.dimView.frame = self.view.bounds
         let safe = self.view.bounds.inset(by: self.view.safeAreaInsets)
         var bottom = safe.maxY
-        if let keyboardFrame = self.keyboardFrame, keyboardFrame.intersects(self.view.bounds), keyboardFrame.width > 0 {
+        if let keyboardFrame = self.keyboardFrame, keyboardFrame.minY.isFinite,
+            keyboardFrame.intersects(self.view.bounds), keyboardFrame.width > 0 {
             bottom = min(bottom, keyboardFrame.minY)
         }
         let availableHeight = max(1, bottom - safe.minY - 16)
         let width = max(1, min(420, safe.width - 32))
         let contentWidth = max(1, width - 40)
-        self.titleLabel.preferredMaxLayoutWidth = contentWidth
-        self.messageLabel.preferredMaxLayoutWidth = contentWidth
+        for label in [self.titleLabel, self.messageLabel] {
+            if abs(label.preferredMaxLayoutWidth - contentWidth) > 0.25 {
+                label.preferredMaxLayoutWidth = contentWidth
+            }
+        }
         for case let button as CodeGramPlainAlertButton in self.contentStack.arrangedSubviews {
             button.measurementWidth = contentWidth
         }
-        self.scrollView.frame = CGRect(x: 20, y: 20, width: contentWidth, height: max(1, availableHeight - 40))
-        self.scrollView.layoutIfNeeded()
+        // Measure at the final width while retaining the current height.
+        // Expanding to the maximum height and shrinking again on every pass
+        // continually invalidates UIScrollView's guides during presentation.
+        if abs(self.scrollView.bounds.width - contentWidth) > 0.25 {
+            self.scrollView.frame = CGRect(x: 20, y: 20, width: contentWidth, height: max(1, self.scrollView.bounds.height))
+            self.scrollView.layoutIfNeeded()
+        }
         let fitting = self.contentStack.systemLayoutSizeFitting(CGSize(width: contentWidth, height: UIView.layoutFittingCompressedSize.height), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
-        let height = min(availableHeight, max(40, fitting.height + 40))
+        let height = min(availableHeight, fitting.height.isFinite ? max(40, fitting.height + 40) : availableHeight)
         let y = self.preferredStyle == .actionSheet ? bottom - height - 8 : safe.minY + (bottom - safe.minY - height) * 0.5
-        self.panel.frame = CGRect(x: safe.midX - width * 0.5, y: max(safe.minY + 8, y), width: width, height: height)
-        self.scrollView.frame.size.height = max(1, height - 40)
+        let panelFrame = CGRect(x: safe.midX - width * 0.5, y: max(safe.minY + 8, y), width: width, height: height)
+        if self.panel.frame != panelFrame { self.panel.frame = panelFrame }
+        let scrollFrame = CGRect(x: 20, y: 20, width: contentWidth, height: max(1, height - 40))
+        if self.scrollView.frame != scrollFrame { self.scrollView.frame = scrollFrame }
     }
 
     @objc private func actionPressed(_ button: UIButton) {

@@ -37,6 +37,7 @@ final class CodeGramIconPickerController: ViewController {
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
+        CodeGramSettingsTheme.disableScrollEdgeEffects(self.scroll)
         self.displayNode.view.addSubview(self.scroll)
         self.scroll.addSubview(self.picker)
         self.statusBar.statusBarStyle = CodeGramAppIconChoice.all[self.picker.selectedIndex].light ? .Black : .White

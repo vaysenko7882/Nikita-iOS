@@ -44,6 +44,7 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
         super.init(frame: .zero)
         self.backgroundColor = CodeGramAppIconChoice.all[self.selectedIndex].background
         self.accessibilityIdentifier = "CodeGram.iconPicker"
+        CodeGramSettingsTheme.disableScrollEdgeEffects(self.scrollView)
         self.scrollView.delegate = self
         self.scrollView.showsHorizontalScrollIndicator = false
         self.scrollView.decelerationRate = .fast
