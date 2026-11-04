@@ -51,6 +51,10 @@ private final class VideoStatusHarnessController: UIViewController {
             self.editor.bottomAnchor.constraint(equalTo: self.view.keyboardLayoutGuide.topAnchor, constant: -12),
             height
         ])
+        self.banner.layoutChanged = { [weak self] in
+            self?.view.setNeedsLayout()
+            self?.view.layoutIfNeeded()
+        }
         self.banner.primaryAction = { [weak self] in self?.primaryCalls += 1 }
         self.banner.copyAction = { [weak self] in self?.copyCalls += 1 }
         self.banner.dismissAction = { [weak self] in self?.dismissCalls += 1 }
@@ -134,7 +138,7 @@ private final class VideoStatusHarnessController: UIViewController {
             self.expect(banner.bounds.insetBy(dx: -1, dy: -1).contains(action.convert(action.bounds, to: banner)), "status action outside banner: \(context)")
             self.expect(action.bounds.width >= 44 && action.bounds.height >= 44, "status action has a small touch target: \(context)")
             if let label = action.titleLabel, !(label.text ?? "").isEmpty {
-                let needed = label.sizeThatFits(CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
+                let needed = label.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
                 self.expect(label.bounds.width + 1 >= needed.width && label.bounds.height + 1 >= needed.height, "Dynamic Type action title clipped: \(label.text ?? "") \(context)")
             }
             let point = action.convert(CGPoint(x: action.bounds.midX, y: action.bounds.midY), to: banner)
@@ -239,6 +243,11 @@ private final class VideoStatusHarnessController: UIViewController {
             if !UIAccessibility.isReduceMotionEnabled && UIApplication.shared.applicationState == .active { self.expect(spinner.isAnimating, "active preparing spinner is not running") }
             NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
             self.expect(!spinner.isAnimating, "spinner continued in the background")
+            self.show(.preparing, target: fixture)
+            fixture.isHidden = true
+            self.expect(!spinner.isAnimating, "hidden status retained spinner animation")
+            fixture.isHidden = false
+            if !UIAccessibility.isReduceMotionEnabled && UIApplication.shared.applicationState == .active { self.expect(spinner.isAnimating, "visible preparing status did not restart its spinner") }
             fixture.removeFromSuperview()
             self.expect(!spinner.isAnimating, "offscreen status retained spinner animation")
         } else { self.expect(false, "missing production preparing spinner"); fixture.removeFromSuperview() }
@@ -329,17 +338,21 @@ private final class VideoStatusHarnessController: UIViewController {
         self.editorHeight?.constant = 100
         self.show(.failed)
         self.view.setNeedsLayout(); self.view.layoutIfNeeded()
-        self.expectBanner(self.banner, mode: .failed, context: "recorded accessibility")
-        self.expectTyping()
-        self.phase("accessibility") {
-            self.button("CodeGram.videoSendDismiss", in: self.banner)?.sendActions(for: .touchUpInside)
-            self.banner.isHidden = true
-            self.expect(self.dismissCalls > 0, "dismiss action did not run")
+        // Production font changes notify their parent on the next main turn.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            self.view.setNeedsLayout(); self.view.layoutIfNeeded()
+            self.expectBanner(self.banner, mode: .failed, context: "recorded accessibility")
             self.expectTyping()
-            self.phase("dismissed") {
-                self.banner.isHidden = false
-                if self.recordingStyle == .dark { self.record(style: .light) }
-                else { self.finish() }
+            self.phase("accessibility") {
+                self.button("CodeGram.videoSendDismiss", in: self.banner)?.sendActions(for: .touchUpInside)
+                self.banner.isHidden = true
+                self.expect(self.dismissCalls > 0, "dismiss action did not run")
+                self.expectTyping()
+                self.phase("dismissed") {
+                    self.banner.isHidden = false
+                    if self.recordingStyle == .dark { self.record(style: .light) }
+                    else { self.finish() }
+                }
             }
         }
     }

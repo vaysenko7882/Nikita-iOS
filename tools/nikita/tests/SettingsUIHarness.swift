@@ -276,13 +276,15 @@ private final class HarnessController: UIViewController {
         var y = startY
         for (groupIndex, group) in groups.enumerated() {
             for (index, row) in group.enumerated() {
+                // In production the controls inherit their host traits before
+                // layoutContent measures them. Match that order in AX fixtures.
+                host.addSubview(row)
                 let height: CGFloat
-                if let quick = row as? CodeGramQuickCard { height = quick.preferredHeight(width: width) }
-                else if let tile = row as? CodeGramDashboardTile { height = tile.preferredHeight(width: width) }
-                else if let simple = row as? CodeGramDashboardRow { height = simple.preferredHeight(width: width) }
+                if let quick = row as? CodeGramQuickCard { quick.refreshFonts(); height = quick.preferredHeight(width: width) }
+                else if let tile = row as? CodeGramDashboardTile { tile.refreshFonts(); height = tile.preferredHeight(width: width) }
+                else if let simple = row as? CodeGramDashboardRow { simple.refreshFonts(); height = simple.preferredHeight(width: width) }
                 else { height = 64; self.expect(false, "unknown production dashboard row") }
                 row.setSectionPosition(CodeGramSectionPosition(row: index, count: group.count), separatorInset: groupIndex == 1 ? 92 : groupIndex == 2 ? 63 : 60)
-                host.addSubview(row)
                 row.frame = CGRect(x: x, y: y, width: width, height: height)
                 row.layoutIfNeeded()
                 y += height
@@ -306,7 +308,7 @@ private final class HarnessController: UIViewController {
                 let labels = self.descendants(row.contentView).compactMap { $0 as? UILabel }.filter { !($0.text ?? "").isEmpty }
                 for label in labels {
                     let rect = label.convert(label.bounds, to: row.contentView)
-                    self.expect(row.contentView.bounds.insetBy(dx: -1, dy: -1).contains(rect), "dashboard label escaped group: \(label.text ?? "") \(context)")
+                    self.expect(row.contentView.bounds.insetBy(dx: -1, dy: -1).contains(rect), "dashboard label escaped group: \(label.text ?? "") \(context) rect=\(rect) host=\(row.contentView.bounds)")
                     let needed = label.sizeThatFits(CGSize(width: label.bounds.width, height: .greatestFiniteMagnitude)).height
                     self.expect(label.bounds.height + 1 >= needed, "dashboard Dynamic Type text clipped: \(context)")
                     if let color = label.textColor, let background = row.backgroundColor {
