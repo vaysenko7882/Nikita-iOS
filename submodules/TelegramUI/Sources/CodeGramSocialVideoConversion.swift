@@ -4,7 +4,6 @@ import ChatInterfaceState
 import ChatTextInputPanelNode
 import Display
 import Foundation
-import Postbox
 import SwiftSignalKit
 import TelegramCore
 import UIKit
@@ -88,7 +87,7 @@ final class CodeGramSocialVideoConversion {
 
 private final class CodeGramSocialVideoSendEntry {
     var state: CodeGramSocialVideoSendState
-    let peerId: PeerId
+    let peerId: EnginePeer.Id
     let threadId: Int64?
     let template: EnqueueMessage
     let correlationId: Int64
@@ -96,7 +95,7 @@ private final class CodeGramSocialVideoSendEntry {
     var diagnostic = ""
     var temporary: URL?
     let disposable = MetaDisposable()
-    init(session: String, peerId: PeerId, threadId: Int64?, sourceURL: URL, template: EnqueueMessage, correlationId: Int64) {
+    init(session: String, peerId: EnginePeer.Id, threadId: Int64?, sourceURL: URL, template: EnqueueMessage, correlationId: Int64) {
         self.state = CodeGramSocialVideoSendState(accountSession: session, destination: "\(peerId.toInt64()):\(threadId.map(String.init) ?? "-")", sourceURL: sourceURL)
         self.peerId = peerId; self.threadId = threadId; self.template = template; self.correlationId = correlationId
     }
@@ -109,7 +108,7 @@ private final class CodeGramSocialVideoPreparation {
     var participants: [UUID: Int] = [:]
     var source: URL?
     var metadata: CodeGramSocialVideoFileCache.Metadata?
-    var copying = Set<UUID>()
+    var copying = CodeGramSocialVideoCopyClaims()
     deinit { self.operation?.cancel(); if let source = self.source { try? FileManager.default.removeItem(at: source) } }
 }
 
@@ -186,7 +185,7 @@ private final class CodeGramSocialVideoAccountQueue {
         }
     }
     var canAccept: Bool { !self.closed && self.entries.filter { $0.state.phase == .preparing || $0.state.phase == .enqueueing }.count < 8 }
-    func submit(peerId: PeerId, threadId: Int64?, url: URL, template: EnqueueMessage, correlationId: Int64) {
+    func submit(peerId: EnginePeer.Id, threadId: Int64?, url: URL, template: EnqueueMessage, correlationId: Int64) {
         guard self.canAccept else { return }
         // Keep failed/cancelled intents, but bound session memory.
         while self.entries.count >= 20, let index = self.entries.firstIndex(where: { $0.state.phase == .failed || $0.state.phase == .cancelled }) {
@@ -196,8 +195,10 @@ private final class CodeGramSocialVideoAccountQueue {
         self.entries.append(entry); self.notify()
         self.prepare(entry)
     }
-    func visible(peerId: PeerId, threadId: Int64?) -> [CodeGramSocialVideoSendEntry] {
-        return self.entries.filter { $0.peerId == peerId && $0.threadId == threadId && $0.state.phase != .enqueued }
+    func visible(peerId: EnginePeer.Id, threadId: Int64?) -> [CodeGramSocialVideoSendEntry] {
+        let matching = self.entries.filter { $0.peerId == peerId && $0.threadId == threadId && $0.state.phase != .enqueued }
+        let active = matching.filter { $0.state.phase == .preparing || $0.state.phase == .enqueueing }
+        return active + matching.filter { $0.state.phase == .failed || $0.state.phase == .cancelled }
     }
     func cancel(_ entry: CodeGramSocialVideoSendEntry) {
         guard entry.state.cancel() else { return }
@@ -292,8 +293,7 @@ private final class CodeGramSocialVideoAccountQueue {
         group.operation?.start(url: entry.state.sourceURL)
     }
     private func clonePrepared(_ entry: CodeGramSocialVideoSendEntry, attempt: Int, group: CodeGramSocialVideoPreparation, metadata: CodeGramSocialVideoFileCache.Metadata, url: URL) {
-        guard !group.copying.contains(entry.state.id) else { return }
-        group.copying.insert(entry.state.id)
+        guard group.copying.claim(id: entry.state.id, attempt: attempt) else { return }
         let key = entry.state.sourceURL.absoluteString
         // Keep the master alive until all copies complete, even if another intent is cancelled.
         DispatchQueue.global(qos: .utility).async { [group] in
@@ -304,6 +304,7 @@ private final class CodeGramSocialVideoAccountQueue {
             }
             let copied = success
             DispatchQueue.main.async { [weak self, weak entry, group] in
+                if let entry { group.copying.release(id: entry.state.id, attempt: attempt) }
                 guard let self, let entry, self.valid(entry, attempt), self.preparations[key] === group else { try? FileManager.default.removeItem(at: copy); return }
                 if copied { self.handoffFile(entry, attempt: attempt, metadata: metadata, url: copy) }
                 else { self.fail(entry, attempt: attempt, message: "Не удалось сохранить видео на iPhone. Освободи место и повтори.") }
@@ -328,6 +329,10 @@ private final class CodeGramSocialVideoAccountQueue {
             if let channel = peer._asPeer() as? TelegramChannel, channel.hasBannedPermission(.banSendVideos) != nil {
                 if let temporary { try? FileManager.default.removeItem(at: temporary) }
                 self.fail(entry, attempt: attempt, message: "В этом чате запрещена отправка видео."); return
+            }
+            if let group = peer._asPeer() as? TelegramGroup, group.membership != .Member {
+                if let temporary { try? FileManager.default.removeItem(at: temporary) }
+                self.fail(entry, attempt: attempt, message: "Ты больше не участник этой группы."); return
             }
             if let group = peer._asPeer() as? TelegramGroup, group.hasBannedPermission(.banSendVideos) {
                 if let temporary { try? FileManager.default.removeItem(at: temporary) }
@@ -387,6 +392,7 @@ final class CodeGramSocialVideoChatStatus {
     private var observer: UUID?
     private var width: CGFloat = 0
     private var top: CGFloat = 0
+    private var maximumHeight: CGFloat = 0
     init(node: ChatControllerNode) {
         self.node = node; self.queue = CodeGramSocialVideoAccountQueue.get(node.context)
         node.view.addSubview(self.view)
@@ -394,14 +400,14 @@ final class CodeGramSocialVideoChatStatus {
         self.refresh()
     }
     deinit { if let observer { self.queue.detach(observer) }; self.view.removeFromSuperview() }
-    func layout(width: CGFloat, top: CGFloat) {
-        self.width = width; self.top = top; self.refresh()
+    func layout(width: CGFloat, top: CGFloat, maximumHeight: CGFloat) {
+        self.width = width; self.top = top; self.maximumHeight = max(0, maximumHeight); self.refresh()
     }
     func showQueueFullNotice() { self.view.showQueueFullNotice() }
     private func refresh() {
         guard let node = self.node, let peerId = node.chatLocation.peerId else { self.view.isHidden = true; return }
         let entries = self.queue.visible(peerId: peerId, threadId: node.chatLocation.threadId)
-        guard let entry = entries.first else { self.view.isHidden = true; return }
+        guard let entry = entries.first, self.maximumHeight > 0, self.width > 68 else { self.view.isHidden = true; return }
         self.view.isHidden = false
         let mode: CodeGramSocialVideoStatusView.Mode
         switch entry.state.phase {
@@ -420,7 +426,7 @@ final class CodeGramSocialVideoChatStatus {
         self.view.copyLinkAction = { [weak entry] in UIPasteboard.general.string = entry?.state.sourceURL.absoluteString }
         self.view.dismissAction = { [weak self, weak entry] in if let self, let entry { self.queue.dismiss(entry) } }
         let availableWidth = max(0, self.width - 24)
-        self.view.frame = CGRect(x: 12, y: self.top + 8, width: availableWidth, height: self.view.preferredHeight(width: availableWidth))
+        self.view.frame = CGRect(x: 12, y: self.top + 8, width: availableWidth, height: min(self.maximumHeight, self.view.preferredHeight(width: availableWidth)))
         node.view.bringSubviewToFront(self.view)
     }
 }

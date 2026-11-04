@@ -38,3 +38,21 @@ public struct CodeGramSocialVideoSendState {
         return true
     }
 }
+
+
+/// Ready preparations may serve several intents. A cancelled intent can retry
+/// while another subscriber still owns the same preparation.
+public struct CodeGramSocialVideoCopyClaims {
+    private var attempts: [UUID: Int] = [:]
+    public init() {}
+    public mutating func claim(id: UUID, attempt: Int) -> Bool {
+        if let current = self.attempts[id], current >= attempt { return false }
+        self.attempts[id] = attempt
+        return true
+    }
+    @discardableResult public mutating func release(id: UUID, attempt: Int) -> Bool {
+        guard self.attempts[id] == attempt else { return false }
+        self.attempts.removeValue(forKey: id)
+        return true
+    }
+}

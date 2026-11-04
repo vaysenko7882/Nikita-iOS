@@ -9,7 +9,8 @@ description = "Private Telegram revision archive for the Nikita iPhone client"
 requires-python = ">=3.10"
 dependencies = [
     "Telethon==1.45.0",
-    "curl_cffi==0.17.0",
+    "curl_cffi==0.17.0; python_version >= '3.11'",
+    "curl_cffi==0.16.0; python_version < '3.11'",
     "yt-dlp==2026.10.26; python_version >= '3.11'",
     "yt-dlp==2026.10.21; python_version < '3.11'",
 ]

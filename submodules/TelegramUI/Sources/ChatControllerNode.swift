@@ -1037,8 +1037,15 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                             } else {
                                 count = Int32(ceil(CGFloat(self.chatPresentationInterfaceState.interfaceState.effectiveInputState.inputText.length) / 4096.0))
                             }
+                            let capturedPeer = self.chatLocation.peerId
+                            let capturedThread = self.chatLocation.threadId
+                            let capturedReply = self.chatPresentationInterfaceState.interfaceState.replyMessageSubject
+                            let capturedText = (self.inputPanelNode as? ChatTextInputPanelNode)?.inputTextState.inputText.string
                             controller.presentPaidMessageAlertIfNeeded(count: count, completion: { [weak self] postpone in
-                                self?.sendCurrentMessage(postpone: postpone, codegramPaidMessageAuthorized: true)
+                                guard let self, self.chatLocation.peerId == capturedPeer, self.chatLocation.threadId == capturedThread,
+                                    self.chatPresentationInterfaceState.interfaceState.replyMessageSubject == capturedReply,
+                                    (self.inputPanelNode as? ChatTextInputPanelNode)?.inputTextState.inputText.string == capturedText else { return }
+                                self.sendCurrentMessage(postpone: postpone, codegramPaidMessageAuthorized: true)
                             })
                         } else {
                             self.sendCurrentMessage()
@@ -1224,7 +1231,6 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     }
     
     func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition protoTransition: ContainedViewLayoutTransition, listViewTransaction: (ListViewUpdateSizeAndInsets, CGFloat, Bool, @escaping () -> Void) -> Void, updateExtraNavigationBarBackgroundHeight: (CGFloat, CGFloat, ContainedViewLayoutTransition) -> Void) {
-        self.codegramVideoStatus?.layout(width: layout.size.width, top: navigationBarHeight)
         let transition: ContainedViewLayoutTransition
         if let _ = self.scheduledAnimateInAsOverlayFromNode {
             transition = .immediate
@@ -3664,6 +3670,10 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
         
         transition.updateAlpha(node: self.navigateButtons, alpha: showNavigateButtons ? 1.0 : 0.0)
+
+        // The sender-only status is bounded above the final composer/keyboard frame.
+        let videoStatusBottom = min(apparentInputBackgroundFrame.minY, apparentInputPanelFrame?.minY ?? layout.size.height)
+        self.codegramVideoStatus?.layout(width: layout.size.width, top: navigationBarHeight, maximumHeight: max(0, videoStatusBottom - navigationBarHeight - 16))
 
         let listBottomInset = self.historyNode.insets.top
         if let previousListBottomInset = previousListBottomInset, listBottomInset != previousListBottomInset {

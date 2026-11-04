@@ -13,6 +13,7 @@ final class CodeGramSocialVideoStatusView: UIView {
     var copyAction: (() -> Void)?
     var copyLinkAction: (() -> Void)?
     var dismissAction: (() -> Void)?
+    private let contentView = UIScrollView()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let titleLabel = UILabel()
     private let detailLabel = UILabel()
@@ -21,6 +22,7 @@ final class CodeGramSocialVideoStatusView: UIView {
     private let closeButton = UIButton(type: .system)
     private var presentation = Presentation(mode: .preparing, title: "Видео", detail: "Подготовка…", count: 1)
     private var observers: [NSObjectProtocol] = []
+    override var isHidden: Bool { didSet { self.updateSpinner() } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -29,20 +31,31 @@ final class CodeGramSocialVideoStatusView: UIView {
         self.layer.cornerRadius = 18
         self.layer.cornerCurve = .continuous
         self.clipsToBounds = true
+        self.contentView.delaysContentTouches = false
+        self.contentView.alwaysBounceVertical = false
+        self.contentView.accessibilityIdentifier = "CodeGram.videoSendScroll"
+        if #available(iOS 26.0, *) {
+            self.contentView.topEdgeEffect.isHidden = true
+            self.contentView.bottomEdgeEffect.isHidden = true
+            self.contentView.leftEdgeEffect.isHidden = true
+            self.contentView.rightEdgeEffect.isHidden = true
+        }
+
+        self.addSubview(self.contentView)
+
         self.titleLabel.font = .preferredFont(forTextStyle: .footnote)
         self.titleLabel.numberOfLines = 2
         self.detailLabel.font = .preferredFont(forTextStyle: .caption1)
         self.detailLabel.numberOfLines = 2
         for label in [self.titleLabel, self.detailLabel] {
             label.adjustsFontForContentSizeCategory = true
-            self.addSubview(label)
+            self.contentView.addSubview(label)
         }
-        self.addSubview(self.spinner)
+        self.contentView.addSubview(self.spinner)
         for button in [self.primaryButton, self.copyButton, self.closeButton] {
-            button.configuration = nil
             button.titleLabel?.font = .preferredFont(forTextStyle: .caption1)
             button.titleLabel?.adjustsFontForContentSizeCategory = true
-            self.addSubview(button)
+            self.contentView.addSubview(button)
         }
         self.primaryButton.accessibilityIdentifier = "CodeGram.videoSendPrimary"
         self.copyButton.accessibilityIdentifier = "CodeGram.videoSendCopy"
@@ -87,38 +100,77 @@ final class CodeGramSocialVideoStatusView: UIView {
     func showQueueFullNotice() {
         self.detailLabel.text = "Очередь заполнена. Ссылка осталась в поле."
     }
-    private var usesSecondRow: Bool {
-        (self.presentation.mode == .failed || self.presentation.mode == .cancelled) &&
-        (self.bounds.width < 380 || self.traitCollection.preferredContentSizeCategory.isAccessibilityCategory)
+    private struct ActionLayout {
+        let below: Bool
+        let rowHeight: CGFloat
+        let rows: [[(UIButton, CGFloat)]]
+        var width: CGFloat { self.rows.first?.reduce(0, { $0 + $1.1 }) ?? 0 }
+    }
+    private func actionLayout(width: CGFloat) -> ActionLayout {
+        let buttons = [self.primaryButton, self.copyButton, self.closeButton].filter { !$0.isHidden }
+        let available = max(44, width - 16)
+        var rowHeight: CGFloat = 44
+        let measured: [(UIButton, CGFloat)] = buttons.map { button in
+            let textSize = button.titleLabel?.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)) ?? .zero
+            rowHeight = max(rowHeight, ceil(textSize.height + 16))
+            return (button, min(available, max(44, ceil(textSize.width + 20))))
+        }
+        let total = measured.reduce(CGFloat(0), { $0 + $1.1 })
+        let below = !buttons.isEmpty && (self.traitCollection.preferredContentSizeCategory.isAccessibilityCategory || width - 50 - total < 140)
+        if !below { return ActionLayout(below: false, rowHeight: rowHeight, rows: measured.isEmpty ? [] : [measured]) }
+        var rows: [[(UIButton, CGFloat)]] = []
+        var row: [(UIButton, CGFloat)] = []
+        var used: CGFloat = 0
+        for item in measured {
+            if !row.isEmpty && used + item.1 > available { rows.append(row); row = []; used = 0 }
+            row.append(item); used += item.1
+        }
+        if !row.isEmpty { rows.append(row) }
+        return ActionLayout(below: true, rowHeight: rowHeight, rows: rows)
     }
     func preferredHeight(width: CGFloat) -> CGFloat {
-        let failed = self.presentation.mode == .failed || self.presentation.mode == .cancelled
-        let secondRow = failed && (width < 380 || self.traitCollection.preferredContentSizeCategory.isAccessibilityCategory)
-        let controls: CGFloat = secondRow ? 0 : failed ? 188 : self.presentation.mode == .enqueueing ? 8 : 88
-        let labelsWidth = max(48, width - 48 - controls)
+        let actions = self.actionLayout(width: width)
+        let labelsWidth = max(44, width - 50 - (actions.below ? 0 : actions.width + 8))
         let title = self.titleLabel.sizeThatFits(CGSize(width: labelsWidth, height: .greatestFiniteMagnitude)).height
         let detail = self.detailLabel.sizeThatFits(CGSize(width: labelsWidth, height: .greatestFiniteMagnitude)).height
-        return max(58, ceil(title + detail + 23)) + (secondRow ? 36 : 0)
+        let labelsHeight = max(58, ceil(title + detail + 23))
+        return labelsHeight + (actions.below ? CGFloat(actions.rows.count) * actions.rowHeight + 6 : 0)
     }
     override func layoutSubviews() {
         super.layoutSubviews()
-        let size = self.bounds.size
-        let secondRow = self.usesSecondRow
-        let controlsY = secondRow ? size.height - 36 : (size.height - 44) * 0.5
-        var x = size.width - 8
-        if !self.closeButton.isHidden { x -= 30; self.closeButton.frame = CGRect(x: x, y: controlsY, width: 30, height: secondRow ? 32 : 44) }
-        if !self.copyButton.isHidden { x -= 61; self.copyButton.frame = CGRect(x: x, y: controlsY, width: 61, height: secondRow ? 32 : 44) }
-        if !self.primaryButton.isHidden { x -= 79; self.primaryButton.frame = CGRect(x: x, y: controlsY, width: 79, height: secondRow ? 32 : 44) }
-        let labelsWidth = max(1, (secondRow ? size.width - 12 : x - 8) - 38)
+        self.contentView.frame = self.bounds
+        let naturalHeight = self.preferredHeight(width: self.bounds.width)
+        let size = CGSize(width: self.bounds.width, height: max(self.bounds.height, naturalHeight))
+        self.contentView.contentSize = size
+        self.contentView.isScrollEnabled = naturalHeight > self.bounds.height + 0.5
+        self.contentView.showsVerticalScrollIndicator = self.contentView.isScrollEnabled
+        let actions = self.actionLayout(width: size.width)
+        let controlsHeight = CGFloat(actions.rows.count) * actions.rowHeight
+        var y = actions.below ? size.height - controlsHeight - 6 : (size.height - actions.rowHeight) * 0.5
+        for row in actions.rows {
+            var x = size.width - 8 - row.reduce(0, { $0 + $1.1 })
+            for (button, width) in row {
+                button.frame = CGRect(x: x, y: y, width: width, height: actions.rowHeight)
+                x += width
+            }
+            y += actions.rowHeight
+        }
+        let labelsWidth = max(1, size.width - 50 - (actions.below ? 0 : actions.width + 8))
         let titleHeight = self.titleLabel.sizeThatFits(CGSize(width: labelsWidth, height: .greatestFiniteMagnitude)).height
         let detailHeight = self.detailLabel.sizeThatFits(CGSize(width: labelsWidth, height: .greatestFiniteMagnitude)).height
         self.titleLabel.frame = CGRect(x: 38, y: 9, width: labelsWidth, height: titleHeight)
         self.detailLabel.frame = CGRect(x: 38, y: 12 + titleHeight, width: labelsWidth, height: detailHeight)
         self.spinner.frame = CGRect(x: 12, y: 13, width: 18, height: 18)
     }
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.preferredContentSizeCategory != self.traitCollection.preferredContentSizeCategory {
+            self.setNeedsLayout()
+        }
+    }
     override func didMoveToWindow() { super.didMoveToWindow(); self.updateSpinner() }
     private func updateSpinner() {
-        let spinning = self.window != nil && UIApplication.shared.applicationState == .active && !UIAccessibility.isReduceMotionEnabled &&
+        let spinning = !self.isHidden && self.window != nil && UIApplication.shared.applicationState == .active && !UIAccessibility.isReduceMotionEnabled &&
             (self.presentation.mode == .preparing || self.presentation.mode == .enqueueing)
         if spinning { self.spinner.startAnimating() } else { self.spinner.stopAnimating() }
         self.spinner.isHidden = !spinning

@@ -181,5 +181,23 @@ final class CodeGramSocialVideoTests: XCTestCase {
         wait(for: [rejected], timeout: 5)
     }
 
+    func testCancelledCopyCanRetryWhileAnotherSameLinkSendKeepsPreparationAlive() {
+        let url = URL(string: "https://vt.tiktok.com/Ab123/")!
+        var first = CodeGramSocialVideoSendState(accountSession: "one", destination: "peer-a", sourceURL: url)
+        let second = CodeGramSocialVideoSendState(accountSession: "one", destination: "peer-b", sourceURL: url)
+        var copies = CodeGramSocialVideoCopyClaims()
+        XCTAssertTrue(copies.claim(id: first.id, attempt: 0))
+        XCTAssertTrue(copies.claim(id: second.id, attempt: 0))
+        XCTAssertTrue(first.cancel())
+        XCTAssertEqual(first.retry(), 1)
+        XCTAssertTrue(copies.claim(id: first.id, attempt: 1))
+        XCTAssertFalse(copies.release(id: first.id, attempt: 0)) // Late cancelled copy cannot clear its retry.
+        XCTAssertFalse(copies.claim(id: first.id, attempt: 1)) // One clone per current attempt.
+        XCTAssertFalse(first.claimHandoff(attempt: 0, accountSession: "one"))
+        XCTAssertTrue(copies.release(id: first.id, attempt: 1))
+        XCTAssertTrue(first.claimHandoff(attempt: 1, accountSession: "one"))
+        XCTAssertTrue(copies.release(id: second.id, attempt: 0))
+    }
+
 }
 
