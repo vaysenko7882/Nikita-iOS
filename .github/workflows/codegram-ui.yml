@@ -31,6 +31,7 @@ jobs:
       - name: Check automatic profile history updates without manual refresh
         run: bash tools/nikita/check_profile_history_ui.sh "$RUNNER_TEMP/codegram-profile-ui"
       - name: Check and record production UIKit settings controls
+        if: ${{ !cancelled() }}
         run: |
           python3 -m pip install --disable-pip-version-check Pillow==11.3.0
           python3 tools/nikita/generate_icon.py

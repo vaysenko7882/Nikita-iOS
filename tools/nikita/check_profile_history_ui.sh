@@ -23,13 +23,6 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-python3 tools/nikita/profile_history_fixture.py --port-file "$CODEGRAM_HISTORY_OUT/port.txt" > "$CODEGRAM_HISTORY_OUT/http.log" 2>&1 &
-CODEGRAM_HISTORY_SERVER=$!
-for _ in $(seq 1 100); do
-    if [ -s "$CODEGRAM_HISTORY_OUT/port.txt" ]; then break; fi
-    sleep 0.1
-done
-test -s "$CODEGRAM_HISTORY_OUT/port.txt"
 xcrun simctl list runtimes --json > "$CODEGRAM_HISTORY_OUT/runtimes.json"
 CODEGRAM_HISTORY_RUNTIME=$(python3 - "$CODEGRAM_HISTORY_OUT/runtimes.json" <<'PY'
 import json, sys
@@ -58,7 +51,6 @@ import json, pathlib, plistlib, sys
 app, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 plist = dict(CFBundleIdentifier='com.codegram.ProfileHistoryRegression', CFBundleExecutable='ProfileHistoryHarness', CFBundleName='History HTTP fixtures', CFBundlePackageType='APPL', CFBundleVersion='1', CFBundleShortVersionString='1.0', MinimumOSVersion='26.0', UIDeviceFamily=[1, 2], UILaunchScreen={}, UIDesignRequiresCompatibility=True, NSAppTransportSecurity={'NSAllowsLocalNetworking': True, 'NSAllowsArbitraryLoads': True}, UIApplicationSceneManifest={'UIApplicationSupportsMultipleScenes': False})
 (app / 'Info.plist').write_bytes(plistlib.dumps(plist))
-(app / 'fixture.json').write_text(json.dumps({'url': 'http://127.0.0.1:' + (out / 'port.txt').read_text().strip() + '/'}))
 (out / 'expected-frames.txt').write_text('''The running code is the production CodeGramProfileHistoryFeed, CodeGramProfileHistoryScrollAnchor and self-sizing CodeGramTextCell, with a loopback HTTP archive and a native UITableView reproducing the production manual navigation inset (120 pt, initial offset zero). Row descriptions vary in length to exercise real estimated-to-measured geometry.
 01 -> 02: a story published over HTTP appears automatically in the first visible history row, with no Refresh button or manual feed refresh. Offset remains zero; no inset condition can disable polling.
 03 -> 04 -> 05: an older visible record stays at the same screen Y after a story and an 80-event burst are inserted above it. Another newly published story reaches the head while the old gap is still being backfilled. Older pages remain loaded and the burst is fetched without a pagination gap. No unexpected scroll jump or duplicate row.
@@ -69,13 +61,48 @@ plist = dict(CFBundleIdentifier='com.codegram.ProfileHistoryRegression', CFBundl
 No custom animation is added: native table updates preserve their reading position. The recording tests the live reader and UIKit anchoring, not Telegram's delivery of a real account's stories or device temperature.
 ''')
 PY
-xcrun --sdk iphonesimulator swiftc -parse-as-library -warnings-as-errors \
+printf '%s\n' 'Compiling production history feed and native fixture before HTTP startup'
+if ! xcrun --sdk iphonesimulator swiftc -parse-as-library -warnings-as-errors \
     -target "$(uname -m)-apple-ios26.0-simulator" \
     -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
     submodules/SettingsUI/Sources/CodeGramSettingsTheme.swift \
     submodules/SettingsUI/Sources/CodeGramSettingsCells.swift \
     submodules/SettingsUI/Sources/CodeGramProfileHistoryFeed.swift \
-    tools/nikita/tests/ProfileHistoryUIHarness.swift -o "$CODEGRAM_HISTORY_APP/ProfileHistoryHarness"
+    tools/nikita/tests/ProfileHistoryUIHarness.swift -o "$CODEGRAM_HISTORY_APP/ProfileHistoryHarness" > "$CODEGRAM_HISTORY_OUT/swift-build.log" 2>&1; then
+    cat "$CODEGRAM_HISTORY_OUT/swift-build.log" >&2
+    exit 1
+fi
+printf '%s\n' 'Native history fixture compiled; starting loopback HTTP server'
+python3 -u tools/nikita/profile_history_fixture.py --port-file "$CODEGRAM_HISTORY_OUT/port.txt" > "$CODEGRAM_HISTORY_OUT/http.log" 2>&1 &
+CODEGRAM_HISTORY_SERVER=$!
+CODEGRAM_HISTORY_DEADLINE=$((SECONDS + 30))
+while [ "$SECONDS" -lt "$CODEGRAM_HISTORY_DEADLINE" ]; do
+    if [ -s "$CODEGRAM_HISTORY_OUT/port.txt" ]; then break; fi
+    if ! kill -0 "$CODEGRAM_HISTORY_SERVER" 2>/dev/null; then
+        CODEGRAM_HISTORY_STATUS=0
+        wait "$CODEGRAM_HISTORY_SERVER" || CODEGRAM_HISTORY_STATUS=$?
+        printf 'Profile HTTP fixture exited before readiness (status %s)\n' "$CODEGRAM_HISTORY_STATUS" >&2
+        cat "$CODEGRAM_HISTORY_OUT/http.log" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+if [ ! -s "$CODEGRAM_HISTORY_OUT/port.txt" ]; then
+    printf 'Profile HTTP fixture did not become ready within 30 seconds (pid %s)\n' "$CODEGRAM_HISTORY_SERVER" >&2
+    ps -p "$CODEGRAM_HISTORY_SERVER" -o pid=,stat=,etime=,command= >&2 || true
+    cat "$CODEGRAM_HISTORY_OUT/http.log" >&2
+    exit 1
+fi
+cat "$CODEGRAM_HISTORY_OUT/http.log"
+python3 - "$CODEGRAM_HISTORY_APP" "$CODEGRAM_HISTORY_OUT/port.txt" <<'PY'
+import json, pathlib, sys, urllib.request
+app, port_file = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+base = 'http://127.0.0.1:' + port_file.read_text().strip() + '/'
+with urllib.request.urlopen(base + 'stats', timeout=5) as response:
+    json.load(response)
+(app / 'fixture.json').write_text(json.dumps({'url': base}))
+print('Profile HTTP fixture readiness probe passed')
+PY
 codesign --force --sign - "$CODEGRAM_HISTORY_APP"
 CODEGRAM_HISTORY_SIM=$(xcrun simctl create "CodeGram History ${GITHUB_RUN_ID:-local}" "$CODEGRAM_HISTORY_DEVICE" "$CODEGRAM_HISTORY_RUNTIME")
 xcrun simctl boot "$CODEGRAM_HISTORY_SIM"

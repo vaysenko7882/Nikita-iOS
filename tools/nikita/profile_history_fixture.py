@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
 """Loopback-only HTTP fixture for the native production history-feed check."""
 import argparse
+import faulthandler
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 import threading
 import time
 from urllib.parse import parse_qs, urlsplit
+
+
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind normally calls socket.getfqdn(). A loopback
+        # test needs no DNS and macOS runners can stall in that reverse lookup.
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port-file", required=True)
     args = parser.parse_args()
+    print("Profile HTTP fixture: starting", flush=True)
+    faulthandler.dump_traceback_later(25)
     lock = threading.Lock()
     state = {"events": [{"seq": i, "kind": "profile.changed", "observed_at": 1700000000+i,
                          "payload": {"field": "first_name", "after": "Record " + str(i)}} for i in range(1, 61)],
@@ -87,8 +100,12 @@ def main():
                 value = {"latest": state["events"][-1]["seq"]}
             self.reply(value)
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    print("Profile HTTP fixture: binding 127.0.0.1 on an ephemeral port (no DNS)", flush=True)
+    server = LoopbackHTTPServer(("127.0.0.1", 0), Handler)
+    print("Profile HTTP fixture: bound port " + str(server.server_port), flush=True)
     Path(args.port_file).write_text(str(server.server_port))
+    faulthandler.cancel_dump_traceback_later()
+    print("Profile HTTP fixture: readiness file written; serving requests", flush=True)
     server.serve_forever()
 
 
