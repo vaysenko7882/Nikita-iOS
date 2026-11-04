@@ -58,7 +58,7 @@
 Вставить под root одну строку целиком. При другом домене заменить archive.mavasyaa.best своим:
 
 ```bash
-apt-get update && apt-get install -y git ca-certificates && cg_dir=$(mktemp -d /tmp/codegram-v5.2.XXXXXX) && git clone --depth 1 --filter=blob:none --sparse --branch codex/codegram-14.4-links-profile-icons https://github.com/vaysenko7882/Nikita-iOS.git "$cg_dir" && git -C "$cg_dir" sparse-checkout set server && bash "$cg_dir/server/install.sh" --domain archive.mavasyaa.best --reuse-session && /opt/nikita-archive/venv/bin/pip show nikita-archive && systemctl is-active nikita-archive
+apt-get update && apt-get install -y git ca-certificates && cg_dir=$(mktemp -d /tmp/codegram-v5.2.XXXXXX) && git clone --depth 1 --filter=blob:none --sparse --branch codex/codegram-14.4-links-profile-icons https://github.com/vaysenko7882/Nikita-iOS.git "$cg_dir" && git -C "$cg_dir" fetch --depth 1 origin 113e551e23e6b85d0aeb18aed807f67df041fc43 && git -C "$cg_dir" checkout --detach FETCH_HEAD && git -C "$cg_dir" sparse-checkout set server && bash "$cg_dir/server/install.sh" --domain archive.mavasyaa.best --reuse-session && /opt/nikita-archive/venv/bin/pip show nikita-archive && systemctl is-active nikita-archive
 ```
 
 Ожидаются Version: 5.2.0 и active. Прежние сессия, ключ и база сохраняются.

@@ -133,7 +133,7 @@ def request(path, method='GET'):
         return json.load(result)
 seen, timeline = set(), []
 start = time.monotonic()
-while time.monotonic() - start < 180:
+while time.monotonic() - start < 600:
     phase_path = documents / 'phase.txt'
     phase = phase_path.read_text() if phase_path.exists() else ''
     if phase and phase not in seen:

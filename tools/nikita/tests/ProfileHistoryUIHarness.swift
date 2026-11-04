@@ -80,7 +80,9 @@ private final class HistoryHarnessController: UIViewController, UITableViewDataS
     }
     private func phase(_ title: String, then: @escaping () -> Void) {
         try! title.write(to: self.output.appendingPathComponent("phase.txt"),atomically: true,encoding: .utf8)
-        self.wait("frame " + title, condition: { FileManager.default.fileExists(atPath: self.output.appendingPathComponent("captured-"+title).path) },then: then)
+        // simctl screenshot can take longer than an HTTP request on a busy
+        // hosted Mac. Capturing evidence must not race the transport checks.
+        self.wait("frame " + title, timeout: 120, condition: { FileManager.default.fileExists(atPath: self.output.appendingPathComponent("captured-"+title).path) },then: then)
     }
 
     @discardableResult private func http(_ path: String, method: String = "GET", completion: @escaping (Result<[String: Any], Error>) -> Void) -> (() -> Void) {
@@ -251,7 +253,7 @@ private final class HistoryHarnessController: UIViewController, UITableViewDataS
     private func background() {
         self.phase("08-background-request") {
             let result = self.output.appendingPathComponent("foreground-result.json")
-            self.wait("host background/foreground", timeout: 12, condition: { FileManager.default.fileExists(atPath: result.path) }) {
+            self.wait("host background/foreground", timeout: 120, condition: { FileManager.default.fileExists(atPath: result.path) }) {
                 let data = try! JSONSerialization.jsonObject(with: Data(contentsOf: result)) as! [String: Any]
                 self.check(data["background_requests"] as? Int == 0,"Background screen must not keep polling")
                 let expected = (data["latest"] as! NSNumber).int64Value

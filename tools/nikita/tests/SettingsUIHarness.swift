@@ -4,6 +4,13 @@ private let appearanceInfo = "Liquid Glass отключён во всём при
 private let badgeInfo = "Показывает капсулу CODEGRAM у выреза экрана. Выключите, чтобы её скрыть."
 private let phoneInfo = "Скрывает ваш номер только на экране настроек этого приложения. Настройки видимости номера для других пользователей не меняются."
 
+private func preserveHarnessException(_ exception: NSException) {
+    let text = "\(exception.name.rawValue): \(exception.reason ?? "")\n" + exception.callStackSymbols.joined(separator: "\n")
+    let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    try? text.write(to: output.appendingPathComponent("uncaught-exception.txt"), atomically: true, encoding: .utf8)
+    FileHandle.standardError.write(Data((text + "\n").utf8))
+}
+
 private func toggle(_ value: Bool = true) -> CodeGramValueSwitch {
     let control = CodeGramValueSwitch(); control.isOn = value; return control
 }
@@ -67,6 +74,13 @@ private final class HarnessController: UIViewController {
     private func expect(_ value: Bool, _ message: String) {
         self.checks += 1
         if !value { self.failures.append(message); print("UI REGRESSION: \(message)") }
+    }
+    private func stage(_ value: String) {
+        let report: [String: Any] = ["stage": value, "checks": self.checks, "failures": self.failures]
+        if let bytes = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? bytes.write(to: self.output.appendingPathComponent("runtime-progress.json"), options: .atomic)
+        }
+        FileHandle.standardError.write(Data(("UI HARNESS STAGE: " + value + "\n").utf8))
     }
     private func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap { self.descendants($0) } }
     private func isVisible(_ view: UIView, within root: UIView) -> Bool {
@@ -277,6 +291,7 @@ private final class HarnessController: UIViewController {
     }
     private func phase(_ baseName: String, after seconds: TimeInterval = 3, next: @escaping () -> Void) {
         let name = baseName + (self.recordingStyle == .dark ? "-dark" : "-light")
+        self.stage(name)
         try? name.write(to: self.output.appendingPathComponent("phase.txt"), atomically: true, encoding: .utf8)
         let started = Date()
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
@@ -309,6 +324,7 @@ private final class HarnessController: UIViewController {
         self.phase("voice") { self.showTextEntry() }
     }
     private func showTextEntry() {
+        self.stage("text-entry-create")
         let alert = CodeGramPlainAlertController(title: "Свой голос", message: "Название сохранённого пресета", preferredStyle: .alert)
         alert.addTextField { field in
             field.placeholder = "Название"
@@ -329,9 +345,12 @@ private final class HarnessController: UIViewController {
             next()
         }))
         alert.addAction(CodeGramPlainAlertAction(title: "Отмена", style: .cancel))
+        self.stage("text-entry-present")
         self.present(alert, animated: true) {
+            self.stage("text-entry-presented")
             alert.textFields?.first?.becomeFirstResponder()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.stage("text-entry-check")
                 self.expectPlainAlert(alert, context: "text entry")
                 self.expect(alert.textFields?.first?.isFirstResponder == true, "plain dialog field could not receive focus")
                 self.phase("text-entry", after: 1) {
@@ -355,6 +374,7 @@ private final class HarnessController: UIViewController {
         }
     }
     private func showVideoError() {
+        self.stage("video-error-create")
         let message = "VPS не смог определить адрес сервера видео. Проверь DNS на VPS.\n\nКод: video_dns_error · VPS: 5.2.0 · Этап: ссылка и DNS · Процесс: 1 · Класс: TransportError\n\nСсылка сохранена в черновике."
         let alert = CodeGramPlainAlertController(title: "Видео не отправлено", message: message, preferredStyle: .alert)
         var copies = 0
@@ -551,6 +571,7 @@ private final class HarnessSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
+        NSSetUncaughtExceptionHandler(preserveHarnessException)
         ClassicDesign.installOpaqueSystemAppearance()
         let window = UIWindow(windowScene: scene)
         let controller = HarnessController()

@@ -6,6 +6,7 @@ CODEGRAM_UI_OUT="${1:-$RUNNER_TEMP/codegram-ui}"
 mkdir -p "$CODEGRAM_UI_OUT"
 CODEGRAM_UI_SIM=""
 CODEGRAM_UI_REC=""
+CODEGRAM_UI_DATA=""
 cleanup() {
     if [ -n "$CODEGRAM_UI_REC" ]; then
         kill -INT "$CODEGRAM_UI_REC" 2>/dev/null || true
@@ -13,6 +14,25 @@ cleanup() {
     fi
     if [ -n "$CODEGRAM_UI_SIM" ]; then
         xcrun simctl shutdown "$CODEGRAM_UI_SIM" 2>/dev/null || true
+        python3 - "$CODEGRAM_UI_OUT" "$CODEGRAM_UI_DATA" "$CODEGRAM_UI_SIM" <<'PY'
+import os, pathlib, shutil, sys
+output, data, sim = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+if data:
+    documents = pathlib.Path(data) / 'Documents'
+    for name in ('phase.txt', 'runtime-progress.json', 'uncaught-exception.txt', 'result.json'):
+        source = documents / name
+        if source.is_file():
+            shutil.copyfile(source, output / name)
+home = pathlib.Path(os.environ['HOME'])
+roots = [home / 'Library/Logs/DiagnosticReports', home / 'Library/Developer/CoreSimulator/Devices' / sim / 'data/Library/Logs/CrashReporter']
+crashes = output / 'crash-reports'
+for root in roots:
+    if root.is_dir():
+        for source in root.rglob('SettingsHarness*'):
+            if source.is_file():
+                crashes.mkdir(exist_ok=True)
+                shutil.copyfile(source, crashes / source.name)
+PY
         xcrun simctl delete "$CODEGRAM_UI_SIM" 2>/dev/null || true
     fi
 }
@@ -109,13 +129,31 @@ for _ in range(100):
     time.sleep(.1)
 else: raise SystemExit('Simulator recording did not start')
 PY
-xcrun simctl launch --stdout="$CODEGRAM_UI_OUT/console.log" --stderr="$CODEGRAM_UI_OUT/stderr.log" "$CODEGRAM_UI_SIM" com.codegram.UIRegression
-python3 - "$CODEGRAM_UI_SIM" "$CODEGRAM_UI_DATA/Documents" "$CODEGRAM_UI_OUT" <<'PY'
-import json, pathlib, shutil, subprocess, sys, time
+CODEGRAM_UI_LAUNCH=$(xcrun simctl launch --stdout="$CODEGRAM_UI_OUT/console.log" --stderr="$CODEGRAM_UI_OUT/stderr.log" "$CODEGRAM_UI_SIM" com.codegram.UIRegression)
+printf '%s\n' "$CODEGRAM_UI_LAUNCH"
+python3 - "$CODEGRAM_UI_SIM" "$CODEGRAM_UI_DATA/Documents" "$CODEGRAM_UI_OUT" "$CODEGRAM_UI_LAUNCH" <<'PY'
+import json, os, pathlib, re, shutil, subprocess, sys, time
 sim, documents, output = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+match = re.search(r':\s*(\d+)\s*$', sys.argv[4])
+if not match:
+    raise SystemExit('Simulator launch did not return the native harness PID: ' + sys.argv[4])
+pid = int(match.group(1))
 seen, timeline = set(), []
 start = time.monotonic()
 while time.monotonic() - start < 600:
+    for name in ('runtime-progress.json', 'uncaught-exception.txt'):
+        source = documents / name
+        if source.is_file():
+            shutil.copyfile(source, output / name)
+    exception = documents / 'uncaught-exception.txt'
+    if exception.is_file():
+        raise SystemExit('Native settings harness exception:\n' + exception.read_text())
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        progress = documents / 'runtime-progress.json'
+        detail = progress.read_text() if progress.is_file() else 'No runtime breadcrumb was written.'
+        raise SystemExit('Native settings harness exited before result.json. Last progress:\n' + detail)
     phase_path = documents / 'phase.txt'
     phase = phase_path.read_text() if phase_path.exists() else ''
     if phase and phase not in seen:
