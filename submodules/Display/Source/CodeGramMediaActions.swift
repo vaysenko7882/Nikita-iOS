@@ -13,6 +13,7 @@ private final class CodeGramPlainAlertButton: UIButton {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        self.layer.cornerRadius = min(28, self.bounds.height * 0.5)
         guard let label = self.titleLabel else { return }
         label.frame = self.titleFrame(in: self.bounds)
     }
@@ -95,7 +96,8 @@ public final class CodeGramPlainAlertController: UIViewController {
         field.borderStyle = .none
         field.backgroundColor = .tertiarySystemGroupedBackground
         field.textColor = .label
-        field.layer.cornerRadius = 8
+        field.layer.cornerRadius = 14
+        field.layer.cornerCurve = .continuous
         field.clipsToBounds = true
         field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: 1))
         field.leftViewMode = .always
@@ -116,7 +118,8 @@ public final class CodeGramPlainAlertController: UIViewController {
         self.panel.accessibilityIdentifier = "CodeGram.alert.panel"
         self.panel.backgroundColor = .secondarySystemBackground
         self.panel.isOpaque = true
-        self.panel.layer.cornerRadius = 14
+        self.panel.layer.cornerRadius = 32
+        self.panel.layer.cornerCurve = .continuous
         self.panel.clipsToBounds = true
         self.view.addSubview(self.panel)
         self.scrollView.alwaysBounceVertical = false
@@ -130,7 +133,7 @@ public final class CodeGramPlainAlertController: UIViewController {
         self.panel.addSubview(self.scrollView)
         self.contentStack.axis = .vertical
         self.contentStack.alignment = .fill
-        self.contentStack.spacing = 12
+        self.contentStack.spacing = 14
         self.contentStack.translatesAutoresizingMaskIntoConstraints = false
         self.scrollView.addSubview(self.contentStack)
         NSLayoutConstraint.activate([
@@ -163,16 +166,19 @@ public final class CodeGramPlainAlertController: UIViewController {
     }
 
     public override func viewWillAppear(_ animated: Bool) {
-        if self.overrideUserInterfaceStyle == .unspecified {
-            // An over-fullscreen modal can otherwise use the window's system
-            // appearance even when the visible app screen overrides it.
-            var source = self.presentingViewController
-            if let tabs = source as? UITabBarController { source = tabs.selectedViewController }
-            if let navigation = source as? UINavigationController { source = navigation.topViewController }
-            if let style = source?.traitCollection.userInterfaceStyle, style != .unspecified {
-                self.overrideUserInterfaceStyle = style
+        // Resolve the visible presenter so app-selected appearance and accent
+        // also apply to this opaque, modern rounded surface.
+        var source = self.presentingViewController
+        if let tabs = source as? UITabBarController { source = tabs.selectedViewController }
+        if let navigation = source as? UINavigationController { source = navigation.topViewController }
+        if let source {
+            self.view.tintColor = source.view.tintColor
+            if self.overrideUserInterfaceStyle == .unspecified,
+                source.traitCollection.userInterfaceStyle != .unspecified {
+                self.overrideUserInterfaceStyle = source.traitCollection.userInterfaceStyle
             }
         }
+        self.updateContents()
         super.viewWillAppear(animated)
     }
 
@@ -196,7 +202,8 @@ public final class CodeGramPlainAlertController: UIViewController {
             let button = CodeGramPlainAlertButton(frame: .zero)
             if #available(iOS 15.0, *) { button.configuration = nil }
             button.backgroundColor = .tertiarySystemGroupedBackground
-            button.layer.cornerRadius = 10
+            button.layer.cornerRadius = 24
+            button.layer.cornerCurve = .continuous
             button.clipsToBounds = true
             button.titleLabel?.font = .preferredFont(forTextStyle: action.style == .cancel ? .headline : .body)
             button.titleLabel?.adjustsFontForContentSizeCategory = true
@@ -225,7 +232,8 @@ public final class CodeGramPlainAlertController: UIViewController {
             bottom = min(bottom, keyboardFrame.minY)
         }
         let availableHeight = max(1, bottom - safe.minY - 16)
-        let width = max(1, min(420, safe.width - 32))
+        let maximumWidth: CGFloat = self.preferredStyle == .alert ? 340 : 520
+        let width = max(1, min(maximumWidth, safe.width - 32))
         let contentWidth = max(1, width - 40)
         for label in [self.titleLabel, self.messageLabel] {
             if abs(label.preferredMaxLayoutWidth - contentWidth) > 0.25 {

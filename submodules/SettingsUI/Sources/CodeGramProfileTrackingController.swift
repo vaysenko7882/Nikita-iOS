@@ -31,6 +31,11 @@ private func profileEventTitle(_ event: [String: Any]) -> String {
     case "stories.no_longer_visible": return "Сторис больше не доступна в списке"
     case "availability.added": return "Исходная доступность профиля"
     case "availability.changed": return "Изменилась доступность профиля"
+    case "block_signals.possible_restriction": return "Возможная блокировка · косвенные признаки"
+    case "block_signals.visibility_restored": return "Доступность профиля восстановилась"
+    case "block_signals.inconclusive": return "Признаки ограничения стали неоднозначны"
+    case "own_blocklist.blocked": return "Вы добавили пользователя в ЧС"
+    case "own_blocklist.unblocked": return "Вы убрали пользователя из ЧС"
     case "notifications.added", "notifications.changed": return "Telegram сообщил об изменении профиля"
     default: return "Изменение профиля"
     }
@@ -46,8 +51,32 @@ private func profileDate(_ value: Any?) -> String {
     return DateFormatter.localizedString(from: Date(timeIntervalSince1970: timestamp.doubleValue), dateStyle: .medium, timeStyle: .medium)
 }
 
+private func profileBlockSummary(_ value: [String: Any]?) -> String {
+    switch value?["state"] as? String {
+    case "possible_restriction": return "Возможен ЧС или изменение приватности · не подтверждено"
+    case "visibility_restored": return "Доступность восстановилась · это не подтверждение снятия ЧС"
+    case "visibility_available": return "Статус и фото доступны · чужой ЧС не раскрывается"
+    default: return "Недостаточно признаков · точный статус не раскрывается"
+    }
+}
+
+private func profileBlockDetails(_ value: [String: Any]?) -> String {
+    var lines = [profileBlockSummary(value)]
+    if value?["state"] as? String == "possible_restriction" {
+        lines.append("В течение короткого времени после доступного статуса и фото оба признака исчезли. Это может быть ЧС, но те же данные могут измениться из-за приватности или неактивности.")
+    } else if value?["state"] as? String == "visibility_restored" {
+        lines.append("Telegram снова передал доступный статус или фото. Отдельного события «вас разблокировали» он не передаёт.")
+    }
+    if let observed = value?["observed_at"] as? NSNumber { lines.append("Получено на VPS: \(profileDate(observed))") }
+    lines.append("Подарки не используются как доказательство ЧС. Ваша собственная блокировка записывается отдельно. Это оценка по полученным данным, а не доступ к чужому чёрному списку.")
+    return lines.joined(separator: "\n\n")
+}
+
 private func profileReadable(_ value: Any?) -> String {
     guard let object = value as? [String: Any] else { return profileJSON(value) }
+    if object["state"] != nil && object["certainty"] != nil && object["blocked_by_target"] != nil {
+        return profileBlockDetails(object)
+    }
     if let gift = object["gift"] as? [String: Any] {
         let title = gift["title"] as? String ?? gift["slug"] as? String ?? "Подарок \(gift["id"].map { String(describing: $0) } ?? "")"
         let sender = object["sender"] as? [String: Any]
@@ -118,6 +147,7 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
     private var lastCheck: Any?
     private var lastStoryCheck: Any?
     private var storyPollingInterval: Double?
+    private var blockAssessment: [String: Any]?
     private var renderedHistory = CodeGramProfileHistorySnapshot()
     private var events: [[String: Any]] { self.renderedHistory.events }
     private var historyScreenVisible = false
@@ -201,6 +231,7 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
         self.loaded = true
         self.lastCheck = item["last_check"]
         self.lastStoryCheck = item["last_story_check"]
+        self.blockAssessment = item["block_assessment"] as? [String: Any]
         if let interval = (value["story_poll_interval"] as? NSNumber)?.doubleValue, interval.isFinite, interval >= 1, interval <= 3600 {
             self.storyPollingInterval = interval
         } else {
@@ -245,10 +276,14 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
     }
     override func makeSections() -> [CodeGramSettingsSection] {
         let storyTiming = self.storyPollingInterval.map { "Сторис проверяются отдельной очередью от \(Int($0)) секунд." } ?? "Отдельная быстрая проверка сторис требует обновления службы VPS до 5.2.0."
-        var sections = [CodeGramSettingsSection(title: self.peerTitle, footer: "Полученные события профиля и сторис записываются сразу. \(storyTiming) Профиль — от 15 секунд, подарки — от минуты. Это минимальные интервалы: очередь профилей, сеть и лимиты Telegram могут увеличить задержку. Удалённую до получения события и файла сторис восстановить нельзя. Telegram не раскрывает чужой статус ЧС.", rows: [
+        var sections = [CodeGramSettingsSection(title: self.peerTitle, footer: "Полученные события профиля и сторис записываются сразу. \(storyTiming) Профиль — от 15 секунд, подарки — от минуты. Полученные изменения видимости обрабатываются сразу; ожидание нового события Telegram не имеет гарантированного срока. Очередь профилей, сеть и лимиты могут увеличить задержку. Удалённую до получения события и файла сторис восстановить нельзя.", rows: [
             self.switchRow("Отслеживание профиля",value: self.enabled,detail: self.message,icon: "person.crop.circle.badge.clock",enabled: self.loaded && !self.busy && !self.feed.isUserLoading,changed: { [weak self] in self?.setEnabled($0) }),
             self.textRow("Последняя успешная проверка",detail: (self.lastCheck as? NSNumber)?.int64Value == 0 ? "Ещё не проверен" : profileDate(self.lastCheck),icon: "clock"),
             self.textRow("Последняя успешная проверка сторис",detail: ((self.lastStoryCheck as? NSNumber)?.int64Value ?? 0) == 0 ? "Ещё не проверены" : profileDate(self.lastStoryCheck),icon: "clock.arrow.circlepath"),
+            self.textRow("ЧС у человека: косвенные признаки",detail: profileBlockSummary(self.blockAssessment),icon: "person.crop.circle.badge.questionmark",action: { [weak self] in
+                guard let self else { return }
+                self.notice(profileBlockDetails(self.blockAssessment))
+            }),
             self.textRow(self.busy || self.feed.isUserLoading ? "Обновляю…" : "Обновить историю",icon: "arrow.clockwise",action: { [weak self] in self?.load(reset: true) })])]
         let rendered = self.renderedHistory
         var rows = rendered.events.enumerated().map { index, event in

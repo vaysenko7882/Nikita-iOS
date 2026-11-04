@@ -47,7 +47,7 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
         self.tableView.contentInsetAdjustmentBehavior = .never
         self.tableView.keyboardDismissMode = .interactive
         self.tableView.rowHeight = UITableView.automaticDimension
-        self.tableView.estimatedRowHeight = 88
+        self.tableView.estimatedRowHeight = 64
         self.tableView.dataSource = self; self.tableView.delegate = self
         self.displayNode.view.addSubview(self.tableView)
         self.reloadContent()
@@ -71,7 +71,10 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { self.sections[section].title }
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? { self.sections[section].footer }
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        self.sections[indexPath.section].rows[indexPath.row].cell()
+        let section = self.sections[indexPath.section]
+        let cell = section.rows[indexPath.row].cell()
+        (cell as? CodeGramSurfaceCell)?.configureSection(row: indexPath.row, count: section.rows.count)
+        return cell
     }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { tableView.deselectRow(at: indexPath, animated: true); self.sections[indexPath.section].rows[indexPath.row].action?() }
     func textRow(_ title: String, detail: String? = nil, icon: String, action: (() -> Void)? = nil) -> CodeGramSettingsRow {

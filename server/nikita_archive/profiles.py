@@ -39,6 +39,7 @@ class ProfileStore:
     POLL_INTERVAL = 15
     GIFT_INTERVAL = 60
     STORY_INTERVAL = 2
+    RESTRICTION_EVIDENCE_WINDOW = 120
 
     def __init__(self, archive):
         self.archive = archive
@@ -102,6 +103,10 @@ class ProfileStore:
             elif previous:
                 db.execute("UPDATE tracked_profiles SET enabled=0 WHERE peer_id=?", (peer_id,))
             if previous is None and enabled or previous is not None and bool(previous[0]) != enabled:
+                # A period without observations cannot establish either a new
+                # restriction or restored visibility. Keep history, reset only
+                # the private correlation state when monitoring changes.
+                db.execute("DELETE FROM profile_items WHERE peer_id=? AND section='availability' AND item_id='_block_state'", (peer_id,))
                 self._event(db, peer_id, "tracking.enabled" if enabled else "tracking.disabled", {"enabled": enabled})
         return self.status(peer_id)
 
@@ -126,9 +131,121 @@ class ProfileStore:
                 event_count,last_event = db.execute("SELECT COUNT(*),MAX(observed_at) FROM profile_events WHERE peer_id=?", (int(item["peer_id"]),)).fetchone()
                 item["event_count"] = event_count
                 item["last_event_at"] = last_event or 0
+                signal = db.execute("SELECT payload FROM profile_items WHERE peer_id=? AND section='availability' AND item_id='_block_state'", (int(item["peer_id"]),)).fetchone()
+                item["block_assessment"] = json.loads(signal[0]).get("assessment") if signal else None
         return {"profiles": profiles, "poll_interval": self.POLL_INTERVAL, "gift_interval": self.GIFT_INTERVAL,
                 "story_poll_interval": self.STORY_INTERVAL,
                 "push_updates": True, "target_block_status": "not_exposed_by_telegram"}
+
+
+    def observe_availability(self, peer_id, values, *, source="profile_poll", record_general=True):
+        """Record evidence, never invent the target's private blocklist state.
+
+        Only a recent transition from visible status AND photo to both missing
+        can raise an inference. Initial missing data, a lone old status, gifts,
+        request errors, our own blocklist and account deletion are not proof.
+        The receipt time describes our observation, not the target's action.
+        """
+        now = int(time.time())
+        values = public_value(values)
+        source = "telegram_update" if source == "telegram_update" else "profile_poll"
+        allowed = {"profile_request", "reason", "photo_visible", "about_visible",
+                   "last_seen_visibility", "status_hidden_by_me", "account_deleted",
+                   "blocked_by_me", "blocked_my_stories_from"}
+        values = {key:value for key,value in values.items() if key in allowed}
+        with self.archive.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM tracked_profiles WHERE peer_id=? AND enabled=1", (peer_id,)).fetchone():
+                return
+            row = db.execute("SELECT payload FROM profile_items WHERE peer_id=? AND section='availability' AND item_id='current'", (peer_id,)).fetchone()
+            previous = json.loads(row[0]) if row else {}
+            row = db.execute("SELECT payload FROM profile_items WHERE peer_id=? AND section='availability' AND item_id='_block_state'", (peer_id,)).fetchone()
+            state = json.loads(row[0]) if row else {}
+            old_assessment = state.get("assessment", {})
+            current = {**previous, **values, "blocked_by_target":"unknown_not_exposed_by_telegram"}
+            current["note"] = "Доступность фото и статуса может измениться из-за ЧС, приватности или неактивности; чужой ЧС не раскрывается."
+            if values.get("profile_request") == "ok":
+                current.pop("reason", None)
+            if "last_seen_visibility" in values:
+                state["status_at"] = now
+            if "photo_visible" in values:
+                state["photo_at"] = now
+            status = current.get("last_seen_visibility")
+            status_available = status in ("visible", "UserStatusRecently", "UserStatusLastWeek", "UserStatusLastMonth")
+            status_missing = status in ("UserStatusEmpty", "NoneType")
+            observations = {key:current[key] for key in ("profile_request", "photo_visible", "about_visible",
+                            "last_seen_visibility", "status_hidden_by_me", "account_deleted", "blocked_by_me") if key in current}
+            confounded = bool(current.get("account_deleted") or current.get("blocked_by_me"))
+            if confounded:
+                state["baseline_at"] = 0
+                state.pop("baseline", None)
+            elif (status_available and current.get("photo_visible") is True and current.get("profile_request") == "ok" and
+                  not current.get("status_hidden_by_me") and
+                  min(state.get("status_at", 0),state.get("photo_at", 0)) >= now-self.RESTRICTION_EVIDENCE_WINDOW):
+                state["baseline_at"] = min(state["status_at"],state["photo_at"])
+                state["baseline"] = observations
+            baseline_at = state.get("baseline_at", 0)
+            fresh_loss = (baseline_at > 0 and now-baseline_at <= self.RESTRICTION_EVIDENCE_WINDOW and
+                          min(state.get("status_at", 0),state.get("photo_at", 0)) >= baseline_at)
+            old_kind = old_assessment.get("state")
+            restored = (("photo_visible" in values and values["photo_visible"] is True) or
+                        ("last_seen_visibility" in values and status_available))
+            if confounded:
+                kind, certainty = "insufficient_evidence", "unknown"
+                reasons = ["account_deleted" if current.get("account_deleted") else "blocked_by_me"]
+            elif old_kind == "possible_restriction" and restored:
+                kind, certainty = "visibility_restored", "observation"
+                reasons = ["visible_data_returned"]
+                if not (status_available and current.get("photo_visible") is True):
+                    # Rearm only after both channels are visible again. A later
+                    # lone status change must not reuse the same lost photo.
+                    state["baseline_at"] = 0
+                    state.pop("baseline", None)
+            elif (status_missing and current.get("photo_visible") is False and
+                  not current.get("status_hidden_by_me") and current.get("profile_request") == "ok" and
+                  (fresh_loss or old_kind == "possible_restriction")):
+                kind, certainty = "possible_restriction", "inferred"
+                reasons = ["status_became_unavailable", "photo_became_unavailable"]
+            elif old_kind == "possible_restriction" and current.get("profile_request") == "unavailable":
+                # A failed refresh cannot prove either a block or an unblock.
+                kind, certainty = "possible_restriction", "inferred"
+                reasons = old_assessment.get("reasons", [])
+            elif old_kind == "visibility_restored" and (status_available or current.get("photo_visible") is True):
+                kind, certainty = "visibility_restored", "observation"
+                reasons = ["visible_data_returned"]
+            elif status_available and current.get("photo_visible") is True:
+                kind, certainty = "visibility_available", "observation"
+                reasons = ["visible_status_and_photo"]
+            else:
+                kind, certainty = "insufficient_evidence", "unknown"
+                reasons = ["no_recent_correlated_transition"]
+            assessment = dict(state=kind,certainty=certainty,blocked_by_target="unknown_not_exposed_by_telegram",
+                              reasons=reasons,observations=observations)
+            if kind == "possible_restriction":
+                assessment["possible_since"] = old_assessment.get("possible_since",now) if old_kind == kind else now
+                assessment["previously_visible_at"] = old_assessment.get("previously_visible_at",baseline_at) if old_kind == kind else baseline_at
+                assessment["before"] = old_assessment.get("before",state.get("baseline",{})) if old_kind == kind else state.get("baseline",{})
+            comparable = {key:value for key,value in old_assessment.items() if key not in ("observed_at","source")}
+            if assessment == comparable:
+                assessment = old_assessment
+            else:
+                assessment.update(observed_at=now,source=source)
+            if old_kind != kind:
+                event = {"possible_restriction":"block_signals.possible_restriction",
+                         "visibility_restored":"block_signals.visibility_restored"}.get(kind)
+                if old_kind == "possible_restriction" and confounded:
+                    event = "block_signals.inconclusive"
+                if event:
+                    self._event(db,peer_id,event,{"before":old_assessment or None,"after":assessment})
+            if "blocked_by_me" in values and "blocked_by_me" in previous and previous["blocked_by_me"] != values["blocked_by_me"]:
+                self._event(db,peer_id,"own_blocklist.blocked" if values["blocked_by_me"] else "own_blocklist.unblocked",
+                            {"before":previous.get("blocked_by_me"),"after":values["blocked_by_me"],"certainty":"confirmed","source":source})
+            if record_general and previous != current:
+                self._event(db,peer_id,"availability.changed" if previous else "availability.added",{"item_id":"current","before":previous or None,"after":current})
+            state["assessment"] = assessment
+            for key,value in (("current",current),("_block_state",state)):
+                db.execute("INSERT INTO profile_items VALUES(?,'availability',?,?,1) ON CONFLICT(peer_id,section,item_id) DO UPDATE SET payload=excluded.payload,active=1",
+                           (peer_id,key,json.dumps(value,ensure_ascii=False,sort_keys=True)))
 
     def due(self):
         with self.archive.connect() as db:

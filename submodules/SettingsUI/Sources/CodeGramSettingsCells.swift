@@ -13,11 +13,11 @@ class CodeGramSurfaceCell: UITableViewCell {
         self.surface.contentView.addSubview(self.bodyView)
         self.surface.translatesAutoresizingMaskIntoConstraints = false
         self.bodyView.translatesAutoresizingMaskIntoConstraints = false
-        let minimum = self.surface.heightAnchor.constraint(greaterThanOrEqualToConstant: 60)
+        let minimum = self.surface.heightAnchor.constraint(greaterThanOrEqualToConstant: 52)
         minimum.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            self.surface.topAnchor.constraint(equalTo: self.contentView.topAnchor, constant: 4),
-            self.surface.bottomAnchor.constraint(equalTo: self.contentView.bottomAnchor, constant: -4),
+            self.surface.topAnchor.constraint(equalTo: self.contentView.topAnchor),
+            self.surface.bottomAnchor.constraint(equalTo: self.contentView.bottomAnchor),
             self.surface.leadingAnchor.constraint(equalTo: self.contentView.leadingAnchor),
             self.surface.trailingAnchor.constraint(equalTo: self.contentView.trailingAnchor),
             self.bodyView.topAnchor.constraint(equalTo: self.surface.topAnchor),
@@ -44,6 +44,20 @@ class CodeGramSurfaceCell: UITableViewCell {
     override func layoutSubviews() {
         super.layoutSubviews()
         self.updateWrappingWidth(self.contentView.bounds.width)
+        // History and selection controllers also create these cells.
+        var ancestor = self.superview
+        while let view = ancestor {
+            if let table = view as? UITableView {
+                if let indexPath = table.indexPath(for: self) {
+                    self.configureSection(row: indexPath.row, count: table.numberOfRows(inSection: indexPath.section))
+                }
+                break
+            }
+            ancestor = view.superview
+        }
+    }
+    func configureSection(row: Int, count: Int) {
+        self.surface.setSectionPosition(CodeGramSectionPosition(row: row, count: count))
     }
     override func setHighlighted(_ highlighted: Bool, animated: Bool) {
         super.setHighlighted(highlighted, animated: animated)
@@ -62,8 +76,8 @@ class CodeGramSurfaceCell: UITableViewCell {
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: self.bodyView.leadingAnchor, constant: 16),
             view.trailingAnchor.constraint(equalTo: self.bodyView.trailingAnchor, constant: -16),
-            view.topAnchor.constraint(equalTo: self.bodyView.topAnchor, constant: 14),
-            view.bottomAnchor.constraint(equalTo: self.bodyView.bottomAnchor, constant: -14)
+            view.topAnchor.constraint(equalTo: self.bodyView.topAnchor, constant: 12),
+            view.bottomAnchor.constraint(equalTo: self.bodyView.bottomAnchor, constant: -12)
         ])
     }
 }
@@ -72,7 +86,7 @@ final class CodeGramValueSwitch: UISwitch {
     var changed: ((Bool) -> Void)?
     override init(frame: CGRect) {
         super.init(frame: frame)
-        self.onTintColor = .systemGray
+        self.onTintColor = CodeGramSettingsTheme.accent
         self.thumbTintColor = .white
         self.addTarget(self, action: #selector(self.updateValue), for: .valueChanged)
     }
@@ -85,7 +99,7 @@ final class CodeGramValueSlider: UISlider {
     private var thumbColor: UIColor?
     override init(frame: CGRect) {
         super.init(frame: frame)
-        self.minimumTrackTintColor = .label
+        self.minimumTrackTintColor = CodeGramSettingsTheme.accent
         self.maximumTrackTintColor = .systemGray3
         self.refreshThumb()
         if #available(iOS 17.0, *) {
@@ -95,11 +109,13 @@ final class CodeGramValueSlider: UISlider {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func layoutSubviews() { super.layoutSubviews(); self.refreshThumb() }
     private func refreshThumb() {
-        let color = UIColor.label.resolvedColor(with: self.traitCollection)
+        let color = UIColor.white
         guard color != self.thumbColor else { return }
         self.thumbColor = color
         let image = UIGraphicsImageRenderer(size: CGSize(width: 28, height: 28)).image { _ in
-            color.setFill(); UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: 24, height: 24)).fill()
+            let path = UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: 24, height: 24))
+            color.setFill(); path.fill()
+            UIColor(white: 0.82, alpha: 1).setStroke(); path.lineWidth = 0.5; path.stroke()
         }
         self.setThumbImage(image, for: .normal)
         self.setThumbImage(image, for: .highlighted)
@@ -140,7 +156,7 @@ final class CodeGramTextCell: CodeGramSurfaceCell {
             heading.addArrangedSubview(arrow)
         }
         let stack = UIStackView(arrangedSubviews: [heading])
-        stack.axis = .vertical; stack.spacing = 7
+        stack.axis = .vertical; stack.spacing = 4
         if let detail, !detail.isEmpty {
             let label = self.detailLabel
             label.text = detail; label.textColor = .secondaryLabel

@@ -1,5 +1,16 @@
 import UIKit
 
+enum CodeGramSectionPosition: Equatable {
+    case single, first, middle, last
+
+    init(row: Int, count: Int) {
+        if count <= 1 { self = .single }
+        else if row == 0 { self = .first }
+        else if row == count - 1 { self = .last }
+        else { self = .middle }
+    }
+}
+
 enum CodeGramSettingsTheme {
     private static let icons = NSCache<NSString, UIImage>()
     static var background: UIColor {
@@ -11,6 +22,10 @@ enum CodeGramSettingsTheme {
     static var selectedSurface: UIColor {
         UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.16, alpha: 1) : .systemGray5 }
     }
+    static var separator: UIColor {
+        UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.20, alpha: 1) : UIColor(white: 0.87, alpha: 1) }
+    }
+    static var accent: UIColor { .systemBlue }
     static func symbol(_ name: String) -> UIImage? {
         if let image = self.icons.object(forKey: name as NSString) { return image }
         guard let image = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular))?.withRenderingMode(.alwaysTemplate) else { return nil }
@@ -30,8 +45,10 @@ enum CodeGramSettingsTheme {
         table.backgroundColor = self.background
         table.separatorStyle = .none
         table.rowHeight = UITableView.automaticDimension
-        table.estimatedRowHeight = 88
+        table.estimatedRowHeight = 64
         table.sectionHeaderHeight = UITableView.automaticDimension
+        table.sectionFooterHeight = UITableView.automaticDimension
+        if #available(iOS 15.0, *) { table.sectionHeaderTopPadding = 8 }
         table.tintColor = .label
     }
     static func disableScrollEdgeEffects(_ scrollView: UIScrollView) {
@@ -47,7 +64,12 @@ enum CodeGramSettingsTheme {
 /// A solid, theme-aware content host. No blur, refraction or interactive material.
 class CodeGramSurfaceView: UIView {
     let contentView = UIView()
+    private let separator = UIView()
+    private let radius: CGFloat
+    private(set) var sectionPosition: CodeGramSectionPosition = .single
+    private var separatorInset: CGFloat = 60
     init(radius: CGFloat = 24) {
+        self.radius = radius
         super.init(frame: .zero)
         self.isOpaque = true
         self.backgroundColor = CodeGramSettingsTheme.surface
@@ -56,11 +78,34 @@ class CodeGramSurfaceView: UIView {
         self.clipsToBounds = true
         self.contentView.backgroundColor = .clear
         self.addSubview(self.contentView)
+        self.separator.backgroundColor = CodeGramSettingsTheme.separator
+        self.separator.isUserInteractionEnabled = false
+        self.separator.isAccessibilityElement = false
+        self.separator.isHidden = true
+        self.addSubview(self.separator)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func layoutSubviews() {
         super.layoutSubviews()
         self.contentView.frame = self.bounds
+        let pixel = 1 / max(1, self.traitCollection.displayScale)
+        self.separator.frame = CGRect(x: self.separatorInset, y: max(0, self.bounds.height - pixel), width: max(0, self.bounds.width - self.separatorInset), height: pixel)
+    }
+    func setSectionPosition(_ position: CodeGramSectionPosition, separatorInset: CGFloat = 60) {
+        guard self.sectionPosition != position || self.separatorInset != separatorInset else { return }
+        self.separatorInset = separatorInset
+        if self.sectionPosition != position {
+            self.sectionPosition = position
+            self.layer.cornerRadius = position == .middle ? 0 : self.radius
+            switch position {
+            case .single: self.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            case .first: self.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            case .middle: self.layer.maskedCorners = []
+            case .last: self.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            }
+        }
+        self.separator.isHidden = position == .single || position == .last
+        self.setNeedsLayout()
     }
 }
 

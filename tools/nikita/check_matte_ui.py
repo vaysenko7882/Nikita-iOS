@@ -2,8 +2,8 @@
 """Keep app-owned Liquid Glass out of the matte fork.
 
 The existing upstream renderer remains compiled for ABI/source compatibility,
-but the immutable ClassicDesign policy prevents creating its native/legacy glass
-branches. New direct glass or system-alert factories must not bypass that policy.
+but immutable GlassEffects prevents creating its native/legacy glass branches
+while ClassicDesign stays disabled, retaining modern layout and shape geometry. New direct glass or system-alert factories must not bypass that policy.
 OS-owned pickers and share extensions are outside this source guard's scope.
 """
 from pathlib import Path
@@ -21,8 +21,12 @@ def check(root=ROOT, overlay=None):
 
     problems = []
     policy = source("submodules/Display/Source/ClassicDesign.swift")
-    if not re.search(r"get\s*\{\s*return true\s*\}\s*set\s*\{\s*\}", policy):
-        problems.append("ClassicDesign must be immutable and enabled before any view is created")
+    if not re.search(r"get\s*\{\s*return false\s*\}\s*set\s*\{\s*\}", policy):
+        problems.append("ClassicDesign must stay disabled to preserve modern layout")
+    if not re.search(r"public enum GlassEffects\s*\{[\s\S]*?static var isEnabled:\s*Bool\s*\{\s*return false\s*\}", policy):
+        problems.append("GlassEffects must independently disable optical material")
+    if "configureWithOpaqueBackground()" in policy or "isTranslucent = false" in policy:
+        problems.append("Opaque material must not force legacy UIKit layout")
     bootstrap = source("submodules/TelegramUI/Sources/AppDelegate.swift")
     if "ClassicDesign.installOpaqueSystemAppearance()" not in bootstrap:
         problems.append("App bootstrap must install the opaque public UIKit appearances")
@@ -30,13 +34,13 @@ def check(root=ROOT, overlay=None):
     if "item.hidesSharedBackground = YES" not in item_proxy or "item.sharesBackground = NO" not in item_proxy or item_proxy.count("codeGramMakeBarButtonMatte(") < 6:
         problems.append("Native left/right/back bar items must suppress their shared glass background")
     glass = source(SHARED_GLASS)
-    if glass.count("if ClassicDesign.isEnabled {") < 3:
-        problems.append("Shared glass constructors/container must keep their classic branches")
+    if glass.count("if !GlassEffects.isEnabled {") < 3:
+        problems.append("Shared constructors/container must use their shape-preserving flat material")
 
     gates = {
-        "submodules/TelegramUI/Components/LiquidLens/Sources/LiquidLensView.swift": "#available(iOS 26.0, *), !ClassicDesign.isEnabled",
-        "submodules/TelegramUI/Components/LiquidGlassShapes/Sources/LiquidGlassShapesLayer.swift": "wantsGlass = !self.isFlat && !ClassicDesign.isEnabled",
-        "submodules/TelegramUI/Components/LensTransition/Sources/LiquidMorphTransition.swift": "return !ClassicDesign.isEnabled && LTTransitionDriver.isSupported()",
+        "submodules/TelegramUI/Components/LiquidLens/Sources/LiquidLensView.swift": "#available(iOS 26.0, *), GlassEffects.isEnabled",
+        "submodules/TelegramUI/Components/LiquidGlassShapes/Sources/LiquidGlassShapesLayer.swift": "wantsGlass = !self.isFlat && GlassEffects.isEnabled",
+        "submodules/TelegramUI/Components/LensTransition/Sources/LiquidMorphTransition.swift": "return GlassEffects.isEnabled && LTTransitionDriver.isSupported()",
     }
     for path, gate in gates.items():
         if gate not in source(path):

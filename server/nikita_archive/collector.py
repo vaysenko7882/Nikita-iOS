@@ -154,7 +154,7 @@ async def collect(config):
             profile_collector.user_update(update)
         except Exception:
             pass
-    profile_update_types = [getattr(types,name) for name in ("UpdateUser","UpdateUserName","UpdateUserPhoto","UpdateUserEmojiStatus","UpdatePeerBlocked") if hasattr(types,name)]
+    profile_update_types = [getattr(types,name) for name in ("UpdateUser","UpdateUserName","UpdateUserPhoto","UpdateUserEmojiStatus","UpdateUserStatus","UpdatePeerBlocked") if hasattr(types,name)]
     client.add_event_handler(profile_updated,events.Raw(profile_update_types))
 
     async def folders_changed(update):

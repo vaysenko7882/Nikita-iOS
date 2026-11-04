@@ -232,7 +232,7 @@ public final class LiquidGlassShapesLayer: SimpleLayer, MetalEngineSubject {
 
         var wantsGlass = false
         if #available(iOS 26.0, *) {
-            wantsGlass = !self.isFlat && !ClassicDesign.isEnabled
+            wantsGlass = !self.isFlat && GlassEffects.isEnabled
         }
         if wantsGlass {
             if self.backdropLayers == nil, let backdropLayers = LiquidGlassBackdropLayers(blurRadius: Constants.glassBlurRadius, scale: Constants.backdropScale) {

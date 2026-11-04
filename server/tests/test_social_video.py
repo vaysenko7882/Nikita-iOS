@@ -17,8 +17,8 @@ import unittest
 from unittest.mock import patch
 from nikita_archive.archive import Archive
 from nikita_archive.http_api import make_server
-from nikita_archive.social_video import MAX_VIDEO_BYTES, MAX_DIAGNOSTIC_BYTES, SocialVideoStore, VideoFailure, social_url, run_worker, worker_failure
-from nikita_archive.video_worker import VIDEO_FORMAT, download_video, failure_code, public_addresses, resolved_url
+from nikita_archive.social_video import MAX_VIDEO_BYTES, MAX_DIAGNOSTIC_BYTES, SocialVideoStore, VideoFailure, social_cache_key, social_url, run_worker, worker_failure
+from nikita_archive.video_worker import VIDEO_FORMAT, download_video, failure_code, progressive_mp4, public_addresses, resolved_url
 
 
 class SocialURLTests(unittest.TestCase):
@@ -58,6 +58,26 @@ class SocialURLTests(unittest.TestCase):
                 resolved_url(downloader,"https://vt.tiktok.com/Abcd12/")
             self.assertEqual(failure.exception.code,"video_unsupported_link")
             self.assertEqual(failure.exception.stage,"resolve")
+
+    def test_tiktok_share_resolver_uses_available_browser_target_object(self):
+        from unittest.mock import MagicMock
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        target = ImpersonateTarget()
+        downloader = MagicMock()
+        downloader._parse_impersonate_targets.return_value = (target,[target])
+        downloader.urlopen.return_value.__enter__.return_value.url = "https://www.tiktok.com/@owner/video/123456"
+        self.assertEqual(resolved_url(downloader,"https://vt.tiktok.com/ZSp8radxX/"),
+                         "https://www.tiktok.com/@owner/video/123456")
+        self.assertIs(downloader.urlopen.call_args.args[0].extensions["impersonate"],target)
+
+    def test_downloader_constructor_failure_never_reads_uninitialized_transport(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch("nikita_archive.video_worker.shutil.which",return_value="/fixture/tool"):
+                with patch("yt_dlp.YoutubeDL",side_effect=RuntimeError("constructor failure")):
+                    with self.assertRaises(VideoFailure) as failure:
+                        download_video("https://www.tiktok.com/@owner/video/123456",Path(folder))
+        self.assertEqual(failure.exception.code,"video_dependency_missing")
+        self.assertEqual(failure.exception.stage,"resolve")
 
     def test_shared_and_username_routes_are_normalized_to_supported_extractors(self):
         from yt_dlp.extractor.instagram import InstagramIE
@@ -113,7 +133,7 @@ class SocialURLTests(unittest.TestCase):
 
     def test_every_resolved_destination_must_be_public(self):
         def address(ip): return (socket.AF_INET,socket.SOCK_STREAM,6,"",(ip,443))
-        for ip in ["127.0.0.1","10.1.2.3","169.254.169.254","192.168.1.1","0.0.0.0"]:
+        for ip in ["127.0.0.1","10.1.2.3","169.254.169.254","192.168.1.1","0.0.0.0","224.0.0.1","ff02::1"]:
             with patch("nikita_archive.video_worker._getaddrinfo",return_value=[address(ip)]):
                 with self.assertRaises(OSError): public_addresses("example.com",443)
         with patch("nikita_archive.video_worker._getaddrinfo",return_value=[address("8.8.8.8"),address("127.0.0.1")]):
@@ -395,6 +415,9 @@ class VideoWorkerMediaTests(unittest.TestCase):
         # Generate genuine encoded packets, then prove the production pipeline copies them.
         subprocess.run(["ffmpeg","-nostdin","-v","error","-f","lavfi","-i","color=c=blue:s=64x96:r=10:d=0.4",
                         "-f","lavfi","-i","sine=frequency=440:duration=0.4","-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac","-shortest",str(cls.root/"combined.mp4")],check=True,capture_output=True,timeout=20)
+        subprocess.run(["ffmpeg","-nostdin","-v","error","-i",str(cls.root/"combined.mp4"),
+                        "-c","copy","-movflags","+faststart",str(cls.root/"faststart.mp4")],
+                       check=True,capture_output=True,timeout=20)
         for path, mapping in [("video.mp4","0:v:0"),("audio.m4a","0:a:0")]:
             subprocess.run(["ffmpeg","-nostdin","-v","error","-i",str(cls.root/"combined.mp4"),"-map",mapping,"-c","copy",str(cls.root/path)],check=True,capture_output=True,timeout=20)
         class QuietHandler(SimpleHTTPRequestHandler):
@@ -443,6 +466,35 @@ class VideoWorkerMediaTests(unittest.TestCase):
         output=self.pipeline([self.format("combined.mp4",vcodec="h264",acodec="aac",height=96)],self.root/"progressive")
         self.assert_playable_copy(output)
 
+    def test_already_progressive_mp4_skips_remux_and_keeps_exact_bytes(self):
+        real_run = subprocess.run
+        with patch("nikita_archive.video_worker.subprocess.run",wraps=real_run) as process:
+            output = self.pipeline([self.format("faststart.mp4",vcodec="h264",acodec="aac",height=96)],
+                                   self.root/"fast-reuse")
+            self.assertEqual([call.args[0][0] for call in process.call_args_list],["ffprobe"])
+        self.assertEqual(output.read_bytes(),(self.root/"faststart.mp4").read_bytes())
+        self.assert_playable_copy(output)
+        result = json.loads((output.parent/"result.json").read_text())
+        self.assertTrue(result["reused_container"])
+        self.assertEqual(result["cache_key"],social_cache_key("https://instagram.com/reel/test/"))
+
+    def test_atom_scanner_requires_real_unfragmented_index_before_media(self):
+        import struct
+        def atom(kind,payload=b""):
+            return struct.pack(">I4s",8+len(payload),kind)+payload
+        ftyp = atom(b"ftyp",b"isom"+b"\0"*4+b"mp42")
+        moov = atom(b"moov",atom(b"free"))
+        cases = [(ftyp+moov+atom(b"mdat",b"payload"),True),
+                 (ftyp+atom(b"mdat",b"payload")+moov,False),
+                 (ftyp+atom(b"moov",atom(b"mvex"))+atom(b"mdat"),False),
+                 (ftyp+moov+atom(b"moof")+atom(b"mdat"),False),
+                 (ftyp+struct.pack(">I4s",999999,b"moov"),False),
+                 (b"not an MP4",False)]
+        for index,(data,expected) in enumerate(cases):
+            path = self.root/f"atoms-{index}.mp4"
+            path.write_bytes(data)
+            self.assertEqual(progressive_mp4(path),expected)
+
     def test_public_http_h264_and_aac_are_merged_without_reencoding(self):
         formats=[self.format("audio.m4a",vcodec="none",acodec="mp4a.40.2"),
                  self.format("video.mp4",vcodec="avc1.640028",acodec="none",height=96)]
@@ -470,3 +522,160 @@ class VideoWorkerMediaTests(unittest.TestCase):
                 download_video("https://instagram.com/reel/test/",folder)
         self.assertEqual(failure.exception.code,"video_too_large")
 
+
+
+class PersistentVideoCacheTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.config = {"database_path":str(self.root/"archive.sqlite3"),"video_cache_max_entries":4}
+        self.archive = Archive(self.config["database_path"])
+        self.archive.set_account(123)
+        self.disk = patch("nikita_archive.social_video.shutil.disk_usage")
+        self.disk.start().return_value.free = 20*1024**3
+        self.store = SocialVideoStore(self.config)
+
+    def tearDown(self):
+        self.store.close()
+        self.disk.stop()
+        self.temp.cleanup()
+
+    def restart(self):
+        self.store.close()
+        self.store = SocialVideoStore(self.config)
+
+    def complete(self, url, canonical=None):
+        with patch.object(self.store.executor,"submit") as submit:
+            value = self.store.create(url)
+            self.assertEqual(submit.call_count,1)
+        def worker(args,**kwargs):
+            directory = Path(args[-1])
+            (directory/"video.mp4").write_bytes(b"video")
+            (directory/"result.json").write_text(json.dumps({
+                "duration":2,"width":720,"height":1280,"cache_key":social_cache_key(canonical or url)}))
+            return subprocess.CompletedProcess(args,0)
+        with patch("nikita_archive.social_video.run_worker",side_effect=worker):
+            self.store.run(value["job_id"],social_url(url))
+        self.assertEqual(self.store.status(value["job_id"])["state"],"ready")
+        return value["job_id"]
+
+    def test_same_tiktok_id_deduplicates_inflight_despite_username_or_share_route(self):
+        with patch.object(self.store.executor,"submit") as submit:
+            first = self.store.create("https://www.tiktok.com/@first/video/123456?source=private")
+            second = self.store.create("https://tiktok.com/@renamed/video/123456/")
+            third = self.store.create("https://www.tiktok.com/share/video/123456/")
+        self.assertEqual(first["job_id"],second["job_id"])
+        self.assertEqual(first["job_id"],third["job_id"])
+        self.assertFalse(first["cached"])
+        self.assertEqual(submit.call_count,1)
+
+    def test_ready_cache_survives_restart_without_download_or_private_url_metadata(self):
+        identifier = self.complete("https://instagram.com/reel/abc/?igsh=secret")
+        self.restart()
+        with patch.object(self.store.executor,"submit") as submit:
+            value = self.store.create("https://www.instagram.com/p/abc/")
+        self.assertEqual(value["job_id"],identifier)
+        self.assertEqual(value["state"],"ready")
+        self.assertTrue(value["cached"])
+        submit.assert_not_called()
+        self.assertEqual(self.store.ready(identifier)[0].read_bytes(),b"video")
+        manifest = (self.store.root/"cache.json").read_text()
+        self.assertNotIn("https://",manifest)
+        self.assertNotIn("secret",manifest)
+        self.assertNotIn(str(self.root),manifest)
+        if os.name == "posix":
+            self.assertEqual((self.store.root/"cache.json").stat().st_mode & 0o777,0o600)
+
+    def test_resolved_shortlink_alias_survives_restart(self):
+        direct = "https://www.tiktok.com/@owner/video/123456"
+        identifier = self.complete("https://vt.tiktok.com/ZSp8radxX/",canonical=direct)
+        self.restart()
+        with patch.object(self.store.executor,"submit") as submit:
+            value = self.store.create(direct)
+            original = self.store.create("https://vt.tiktok.com/ZSp8radxX/")
+        submit.assert_not_called()
+        self.assertEqual(value["job_id"],identifier)
+        self.assertEqual(original["job_id"],identifier)
+        self.assertTrue(value["cached"])
+
+    def test_epoch_change_invalidates_ready_and_inflight_jobs(self):
+        identifier = self.complete("https://instagram.com/reel/abc/")
+        with patch.object(self.store.executor,"submit"):
+            queued = self.store.create("https://instagram.com/reel/def/")["job_id"]
+        with self.archive.connect() as db:
+            db.execute("UPDATE meta SET value='new-epoch' WHERE key='server_id'")
+        for job_id in (identifier,queued):
+            with self.assertRaises(KeyError):
+                self.store.status(job_id)
+        self.assertFalse((self.store.root/identifier).exists())
+        self.restart()
+        self.assertEqual(self.store.jobs,{})
+
+    def test_different_account_never_loads_previous_accounts_cache(self):
+        identifier = self.complete("https://instagram.com/reel/abc/")
+        with self.archive.connect() as db:
+            db.execute("UPDATE meta SET value='456' WHERE key='account_id'")
+        self.restart()
+        self.assertEqual(self.store.jobs,{})
+        self.assertFalse((self.store.root/identifier).exists())
+
+    def test_cache_rejects_missing_modified_or_symlink_media(self):
+        identifier = self.complete("https://instagram.com/reel/abc/")
+        (self.store.root/identifier/"video.mp4").write_bytes(b"changed")
+        self.restart()
+        self.assertEqual(self.store.jobs,{})
+        identifier = self.complete("https://instagram.com/reel/def/")
+        path = self.store.root/identifier/"video.mp4"
+        path.unlink()
+        outside = self.root/"outside.mp4"
+        outside.write_bytes(b"video")
+        path.symlink_to(outside)
+        self.restart()
+        self.assertEqual(self.store.jobs,{})
+        self.assertEqual(outside.read_bytes(),b"video")
+
+    def test_lru_and_ttl_eviction_are_bounded_and_preserve_archive_data(self):
+        identifiers = [self.complete(f"https://instagram.com/reel/post{index}/") for index in range(4)]
+        # Accessing an older entry makes it more recent than the untouched entries.
+        self.store.jobs[identifiers[0]]["last_access"] = time.time()+1
+        newest = self.complete("https://instagram.com/reel/post4/")
+        self.assertEqual(len(self.store.jobs),4)
+        self.assertIn(identifiers[0],self.store.jobs)
+        self.assertIn(newest,self.store.jobs)
+        self.assertNotIn(identifiers[1],self.store.jobs)
+        archive_file = self.root/"important-archive.blob"
+        archive_file.write_bytes(b"keep")
+        for job in self.store.jobs.values():
+            job["last_access"] = time.time()-self.store.cache_ttl-1
+        self.store.clean()
+        self.assertEqual(self.store.jobs,{})
+        self.assertEqual(archive_file.read_bytes(),b"keep")
+
+    def test_cache_byte_budget_evicts_oldest_complete_entry(self):
+        self.store.cache_bytes = 8
+        first = self.complete("https://instagram.com/reel/abc/")
+        second = self.complete("https://instagram.com/reel/def/")
+        self.assertNotIn(first,self.store.jobs)
+        self.assertIn(second,self.store.jobs)
+        self.assertLessEqual(sum(job["size"] for job in self.store.jobs.values()),self.store.cache_bytes)
+
+    def test_cache_metadata_write_failure_does_not_fail_completed_video(self):
+        with patch("nikita_archive.social_video.os.replace",side_effect=OSError("metadata disk failure")):
+            identifier = self.complete("https://instagram.com/reel/abc/")
+        self.assertEqual(self.store.status(identifier)["state"],"ready")
+        self.assertEqual(self.store.ready(identifier)[0].read_bytes(),b"video")
+
+    def test_epoch_change_while_worker_runs_cannot_publish_old_scope_result(self):
+        with patch.object(self.store.executor,"submit"):
+            identifier = self.store.create("https://instagram.com/reel/abc/")["job_id"]
+        def worker(args,**kwargs):
+            directory = Path(args[-1])
+            (directory/"video.mp4").write_bytes(b"video")
+            (directory/"result.json").write_text(json.dumps({"duration":2,"width":720,"height":1280}))
+            with self.archive.connect() as db:
+                db.execute("UPDATE meta SET value='changed-during-download' WHERE key='server_id'")
+            return subprocess.CompletedProcess(args,0)
+        with patch("nikita_archive.social_video.run_worker",side_effect=worker):
+            self.store.run(identifier,"https://instagram.com/reel/abc/")
+        self.assertNotIn(identifier,self.store.jobs)
+        self.assertFalse((self.store.root/identifier).exists())

@@ -8,10 +8,12 @@ from pathlib import Path
 import resource
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 from urllib.parse import urlsplit
-from .social_video import MAX_VIDEO_BYTES, VideoFailure, social_url
+from .social_video import MAX_VIDEO_BYTES, VideoFailure, social_cache_key, social_url
+from .video_transport import install_public_transport
 
 # The shared social link must be HTTPS, but TikTok also returns public HTTP
 # CDN tracks. Python downloads still use the same public-address guard.
@@ -22,7 +24,7 @@ VIDEO_FORMAT = ("best[ext=mp4][protocol~='^https?$'][vcodec~='^(avc1|h264)']/"
 
 def public_addresses(host, port, *args, **kwargs):
     addresses = _getaddrinfo(host,port,*args,**kwargs)
-    if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
+    if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global or ipaddress.ip_address(item[4][0]).is_multicast for item in addresses):
         raise OSError("Private network destinations are not allowed")
     return addresses
 
@@ -95,9 +97,16 @@ def resolved_url(downloader, url):
     instagram = host=="instagram.com" and source.path.startswith("/share/")
     tiktok = host in ("vt.tiktok.com","vm.tiktok.com") or host=="tiktok.com" and source.path.startswith("/t/")
     if instagram or tiktok:
-        headers = {"User-Agent":"facebookexternalhit/1.1"} if tiktok else {}
+        extensions = {}
+        if tiktok:
+            try:
+                target, _ = downloader._parse_impersonate_targets(True)
+                if target is not None:
+                    extensions["impersonate"] = target
+            except (AttributeError,TypeError,ValueError):
+                pass
         def fetch(method):
-            with downloader.urlopen(Request(url,method=method,headers=headers)) as response:
+            with downloader.urlopen(Request(url,method=method,extensions=extensions)) as response:
                 return response.url
         used_head = False
         try:
@@ -134,6 +143,56 @@ def resolved_url(downloader, url):
     return url
 
 
+def progressive_mp4(path):
+    """Recognize a normal MP4 with its index before media; reject fragmented files."""
+    total = path.stat().st_size
+    found_ftyp = found_moov = False
+    try:
+        with path.open("rb") as stream:
+            for _ in range(1024):
+                start = stream.tell()
+                header = stream.read(8)
+                if len(header) != 8:
+                    return False
+                size, kind = struct.unpack(">I4s",header)
+                header_size = 8
+                if size == 1:
+                    extended = stream.read(8)
+                    if len(extended) != 8:
+                        return False
+                    size = struct.unpack(">Q",extended)[0]
+                    header_size = 16
+                elif size == 0:
+                    size = total-start
+                if size < header_size or start+size > total:
+                    return False
+                if kind == b"ftyp":
+                    payload = stream.read(min(1024,size-header_size))
+                    brands = [payload[:4],*[payload[i:i+4] for i in range(8,len(payload),4)]]
+                    found_ftyp = any(brand in (b"isom",b"iso2",b"iso3",b"iso4",b"iso5",b"iso6",
+                                               b"mp41",b"mp42",b"avc1",b"M4V ",b"MSNV") for brand in brands)
+                elif kind == b"moov":
+                    # Fragmented MP4s have mvex in moov. A normal moov is small
+                    # relative to the bounded media file; avoid loading it whole.
+                    end, offset = start+size,stream.tell()
+                    while offset+8 <= end:
+                        stream.seek(offset)
+                        child = stream.read(8)
+                        child_size, child_kind = struct.unpack(">I4s",child)
+                        if child_kind == b"mvex" or child_size < 8 or offset+child_size > end:
+                            return False
+                        offset += child_size
+                    found_moov = True
+                elif kind == b"moof":
+                    return False
+                elif kind == b"mdat":
+                    return found_ftyp and found_moov
+                stream.seek(start+size)
+    except (OSError,ValueError,struct.error):
+        return False
+    return False
+
+
 def download_video(url, directory):
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         raise VideoFailure("video_dependency_missing","prepare")
@@ -160,8 +219,10 @@ def download_video(url, directory):
                    allowed_extractors=["TikTok",r"vm\.tiktok","Instagram"],
                    noprogress=True,overwrites=False)
     stage = "resolve"
+    browser_transport = False
     try:
         with YoutubeDL(options) as downloader:
+            browser_transport = install_public_transport(downloader,public_addresses)
             target_url = resolved_url(downloader, url)
             stage = "extract"
             result = downloader.extract_info(target_url,download=True)
@@ -179,7 +240,10 @@ def download_video(url, directory):
     except VideoFailure as error:
         raise VideoFailure(error.code,error.stage or stage,error.exception_type) from None
     except Exception as error:
-        raise VideoFailure(failure_code(error),stage,type(error).__name__) from None
+        code = failure_code(error)
+        if (urlsplit(url).hostname or "").endswith("tiktok.com") and not browser_transport and code == "video_extraction_failed":
+            code = "video_dependency_missing"
+        raise VideoFailure(code,stage,type(error).__name__) from None
     if path.parent!=directory or not 0<path.stat().st_size<=MAX_VIDEO_BYTES:
         raise VideoFailure("video_too_large" if path.stat().st_size>MAX_VIDEO_BYTES else "video_processing_failed")
     stage = "probe"
@@ -190,13 +254,27 @@ def download_video(url, directory):
         duration = float(metadata.get("format",{}).get("duration",0))
         if not math.isfinite(duration) or not 0<duration<=3600 or video.get("codec_name")!="h264":
             raise VideoFailure("video_unsupported_codec")
-        # Remux only; no CPU-heavy video re-encoding. Enable progressive iPhone playback.
         target = directory/"video.mp4"
-        stage = "remux"
-        subprocess.run(["ffmpeg","-nostdin","-v","error","-protocol_whitelist","file,pipe","-i",str(path),
-                        "-map","0:v:0","-map","0:a:0?","-c","copy","-movflags","+faststart",str(target)],capture_output=True,timeout=40,check=True)
-        path.unlink()
-        (directory/"result.json").write_text(json.dumps(dict(duration=duration,width=int(video["width"]),height=int(video["height"]))))
+        streams = metadata["streams"]
+        video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+        audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+        compatible = (len(video_streams) == 1 and len(audio_streams) <= 1
+                      and len(streams) == len(video_streams)+len(audio_streams)
+                      and video.get("pix_fmt") in ("yuv420p","yuvj420p")
+                      and all(stream.get("codec_name") == "aac" for stream in audio_streams))
+        reused_container = compatible and progressive_mp4(path)
+        if reused_container:
+            os.replace(path,target)
+        else:
+            # Remux only; no CPU-heavy video re-encoding.
+            stage = "remux"
+            subprocess.run(["ffmpeg","-nostdin","-v","error","-protocol_whitelist","file,pipe","-i",str(path),
+                            "-map","0:v:0","-map","0:a:0?","-c","copy","-movflags","+faststart",str(target)],capture_output=True,timeout=40,check=True)
+            path.unlink()
+        temporary = directory/"result.tmp"
+        temporary.write_text(json.dumps(dict(duration=duration,width=int(video["width"]),height=int(video["height"]),
+                                            cache_key=social_cache_key(target_url),reused_container=reused_container)))
+        os.replace(temporary,directory/"result.json")
     except VideoFailure as error:
         raise VideoFailure(error.code,error.stage or stage,error.exception_type) from None
     except (TimeoutError, subprocess.TimeoutExpired):

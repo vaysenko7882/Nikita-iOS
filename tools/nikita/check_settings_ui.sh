@@ -87,17 +87,16 @@ for path in pathlib.Path('submodules/SettingsUI/Sources').glob('CodeGram*.swift'
     names.update(re.findall(r'return "([a-z][a-z0-9.]*)"', text))
 names.discard('codegram.ghost')
 (app / 'icons.json').write_text(json.dumps(sorted(names)))
-pathlib.Path(sys.argv[2], 'expected-frames.txt').write_text('''These are production controls in an isolated test host, recorded in both light and dark appearances. The host calls the actual ClassicDesign startup appearance installer before its window is created. Each phase name ends in -dark or -light.
-Appearance/privacy: every multiline title and description fits inside its opaque solid card. No overlaps or clipped text. Switches keep the native size and have solid thumbs. Dark appearance has a black backdrop; light appearance has a light grouped backdrop. Symbols and labels retain readable contrast. No background image, refraction, blur or glass highlight shows through the cards.
-Voice: title/value/slider stay inside one solid surface; no squashed symbols or gray icon chips. The slider thumb remains opaque.
-Dashboard: artwork and labels share the solid content hierarchy. Cards are opaque on the first frame, with no fade, late material swap or glass elasticity.
-Scroll/return: content and its opaque surface move together, upward then downward, and settle without a detached label or stale background. Only native scroll animation runs.
-Text entry: the plain preset dialog opens above the keyboard when it is shown; its focused field contains «Радио». Save closes the panel once and its handler still reads that text after dismissal. Both buttons and all text remain inside the opaque panel.
-Video error: the production plain alert has an opaque panel, complete readable diagnostic footer and separate Copy error/Keep draft buttons. Longer content remains reachable by scrolling, with no horizontal clipping. Copy error runs once with the shown diagnostic after dismissal. The panel and its content cross-fade together once on opening and once on closing, without refraction, liquid highlights or background morphing.
-Media actions: the production plain action panel and its content cross-fade together and settle; Save and Start countdown are legible, aligned and inside the safe area; dismissal uses Cancel or a dimmed-area tap. After a countdown starts, Save and Cancel remain and Start is absent. No overlapping timer/action labels. The presenting controls stay in place; the plain panel must not morph the source screen or introduce glass during its transition. The custom-surface checks do not prove every full-app system component is opaque. Gallery/audio integration still requires a real account and received media.
-Search: a plain UITextField, magnifier and cancel button stay inside the solid host, with aligned editing controls and keyboard. The field is readable on opaque surfaces in light and dark. Focus, text entry and cancellation use public controls; no native search material or private field subviews are used.
-Icon carousel: the installed icon is initially centered. Artwork moves horizontally and scales together inside its clipping shape; labels, page dots and the explicit Apply button stay aligned below. Background interpolates with scrolling; Paper uses a cream backdrop with dark text, Chrome a red backdrop. Each animation settles once without a loop, late image or text overlap. Scrolling alone never applies an icon.
-The recording does not establish physical-device frame rate, heat, or finger-driven elasticity; those need a full app device check.
+pathlib.Path(sys.argv[2], 'expected-frames.txt').write_text('''These are actual production controls in an isolated UIKit host, recorded in light and dark appearances. The startup installer runs before the first window. ClassicDesign and GlassEffects remain false: modern geometry stays enabled while public system-bar appearances and item backgrounds have no glass effect. Native isTranslucent is allowed to keep modern bar geometry.
+Appearance/privacy/voice: rows touch within each section, with one connected opaque group, 22pt outer corners, square inner corners and a physical-pixel inset separator. There is no individual-card gap. Rows are at least 52pt and expand for multiline text through the largest accessibility size. Native switches remain full size, white slider thumbs stay opaque, and all labels fit with readable contrast in both appearances.
+Dashboard: three full-width connected groups contain Ghost/Archive, the four feature destinations, then Storage/Additional. Rows touch within each group, with 24pt outer corners; only group boundaries have 20pt spacing. Artwork and labels move together with the opaque content on initial display, scroll and return, with no delayed material swap.
+Text entry: the production preset dialog opens above the keyboard with focused text «Радио». Save runs once after closing and retains the text. The opaque panel has 32pt corners, capsule buttons, no glass and a maximum width of 340pt.
+Video error: the production opaque alert has complete readable diagnostics and separate Copy error/Keep draft buttons. Content remains reachable by scrolling. Copy runs once after dismissal. Its opening and closing transition preserves panel geometry with no refraction.
+Media actions: the production opaque action sheet has 32pt panel corners, capsule buttons and maximum width 520pt. Save and Start countdown remain legible and safe; after starting, Save/Cancel remain and Start is absent. Labels fit without overlap. Custom surfaces do not prove all authenticated app components are opaque.
+Search: a native UITextField, magnifier and cancel button stay aligned inside the opaque search host. Focus, typing and cancel use public controls and preserve readable contrast.
+Icon carousel: the installed icon opens centered in the real viewport. 176pt artwork moves at 210pt page spacing. The explicit Apply capsule stays 18pt above the bottom safe area, while the hero scrolls on short/accessibility screens. Paper uses cream with dark text; other backdrops and interpolated labels retain contrast. Scrolling alone never applies an icon.
+All nine icon choices have an early transition/burst phase and a separate resting phase: Original pulse, Clip paths, Paper folds, Echo rings, Rift split, Slice lines, Pixel grid, Chrome sweep and Stairs. The raw video records each complete transition; named burst stills are requested immediately. Each one-shot effect has at most 35 layers, completes within 1.21 seconds, and removes all layers at 1.3 seconds. Hiding effects or removing the view clears layers. No animation loops continue after settling. An installed icon disables Apply with readable text.
+These recordings do not establish physical-device frame rate, heat, finger-driven elasticity or authenticated integration.
 ''')
 PY
 CODEGRAM_UI_SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
@@ -153,7 +152,7 @@ if not match:
 pid = int(match.group(1))
 seen, timeline = set(), []
 start = time.monotonic()
-while time.monotonic() - start < 600:
+while time.monotonic() - start < 900:
     for name in ('runtime-progress.json', 'uncaught-exception.txt'):
         source = documents / name
         if source.is_file():
@@ -172,9 +171,9 @@ while time.monotonic() - start < 600:
     if phase and phase not in seen:
         seen.add(phase)
         detected = round(time.monotonic() - start, 3)
-        # The video preserves the whole transition. Capture the named still after
-        # the first rendering pass rather than during the previous phase's frame.
-        time.sleep(.5)
+        # The raw video preserves each complete transition. Request early burst
+        # frames promptly while the real one-shot layers are still active.
+        time.sleep(.05 if '-burst-' in phase else .5)
         subprocess.run(['xcrun', 'simctl', 'io', sim, 'screenshot', str(output / (phase + '.png'))], check=True)
         timeline.append({'phase': phase, 'phase_seen_after_launch': detected, 'seconds_after_launch': round(time.monotonic() - start, 3)})
         (documents / ('captured-' + phase)).touch()
@@ -185,7 +184,7 @@ while time.monotonic() - start < 600:
         report = json.loads(result.read_text())
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if report['failures'] or report['checks'] < 500: raise SystemExit('Native settings UI regression checks failed')
-        phases = {'appearance', 'privacy', 'voice', 'text-entry', 'video-error', 'media-actions', 'media-actions-started', 'dashboard', 'scroll', 'return', 'search', 'icons-original', 'icons-clip', 'icons-paper', 'icons-pixel', 'icons-chrome', 'icons-stairs', 'icons-applied'}
+        phases = {'appearance', 'privacy', 'voice', 'text-entry', 'video-error', 'media-actions', 'media-actions-started', 'dashboard', 'scroll', 'return', 'search', 'icons-original-burst', 'icons-original', 'icons-clip-burst', 'icons-clip', 'icons-paper-burst', 'icons-paper', 'icons-echo-burst', 'icons-echo', 'icons-rift-burst', 'icons-rift', 'icons-slice-burst', 'icons-slice', 'icons-pixel-burst', 'icons-pixel', 'icons-chrome-burst', 'icons-chrome', 'icons-stairs-burst', 'icons-stairs', 'icons-effects-stopped', 'icons-applied'}
         required = {phase + '-' + style for phase in phases for style in ('dark', 'light')}
         missing = sorted(required - seen)
         if missing or report.get('recorded_styles') != ['dark', 'light']:

@@ -250,11 +250,68 @@ class ProfileCollectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.calls,[])
 
     async def test_own_block_update_never_claims_target_blocked_or_unblocked_me(self):
+        await self.observer.scan(100,"456")
         self.observer.user_update(types.UpdatePeerBlocked(types.PeerUser(100),blocked=True))
         self.observer.user_update(types.UpdatePeerBlocked(types.PeerUser(100),blocked=False))
-        values=[e["payload"]["after"] for e in self.events() if e["payload"].get("item_id")=="_my_blocklist"]
-        self.assertEqual([v["blocked_by_me"] for v in values],[False,True])
-        self.assertTrue(all(v["blocked_by_target"]=="unknown_not_exposed_by_telegram" for v in values))
+        events=[e for e in self.events() if e["kind"].startswith("own_blocklist.")]
+        self.assertEqual([e["kind"] for e in events],["own_blocklist.unblocked","own_blocklist.blocked"])
+        self.assertTrue(all(e["payload"]["certainty"]=="confirmed" for e in events))
+        assessment=self.store.status(100)["profiles"][0]["block_assessment"]
+        self.assertEqual(assessment["blocked_by_target"],"unknown_not_exposed_by_telegram")
+        self.assertFalse(any(e["kind"].startswith("block_signals.") for e in self.events()))
+
+    async def test_raw_status_correlates_existing_photo_loss_without_rpc(self):
+        self.client.user.photo=types.UserProfilePhoto(photo_id=1,dc_id=1)
+        self.client.user.status=types.UserStatusOnline(datetime.datetime.now(datetime.timezone.utc))
+        with patch("nikita_archive.profiles.time.time",return_value=100):
+            await self.observer.scan(100,"456")
+        self.client.calls.clear()
+        with patch("nikita_archive.profiles.time.time",return_value=101):
+            self.store.observe_availability(100,{"photo_visible":False})
+        with patch("nikita_archive.profiles.time.time",return_value=102):
+            self.observer.user_update(types.UpdateUserStatus(100,types.UserStatusEmpty()))
+        event=next(e for e in self.events() if e["kind"]=="block_signals.possible_restriction")
+        self.assertEqual(event["payload"]["after"]["source"],"telegram_update")
+        self.assertEqual(event["payload"]["after"]["certainty"],"inferred")
+        with patch("nikita_archive.profiles.time.time",return_value=103):
+            self.observer.user_update(types.UpdateUserStatus(100,types.UserStatusRecently()))
+        event=next(e for e in self.events() if e["kind"]=="block_signals.visibility_restored")
+        self.assertEqual(event["payload"]["after"]["certainty"],"observation")
+        self.assertEqual(self.client.calls,[])
+
+    async def test_slow_full_response_does_not_overwrite_new_own_block_update(self):
+        self.store.observe_availability(100,{"profile_request":"ok","photo_visible":True,"last_seen_visibility":"visible","blocked_by_me":False})
+        original=self.observer.request
+        async def request(value):
+            result=await original(value)
+            if isinstance(value,functions.users.GetFullUserRequest):
+                self.observer.user_update(types.UpdatePeerBlocked(types.PeerUser(100),blocked=True))
+            return result
+        self.observer.request=request
+        await self.observer.scan(100,"456")
+        assessment=self.store.status(100)["profiles"][0]["block_assessment"]
+        self.assertTrue(assessment["observations"]["blocked_by_me"])
+        self.assertFalse(any(e["kind"]=="own_blocklist.unblocked" for e in self.events()))
+
+    async def test_negative_photo_update_invalidates_an_older_full_response(self):
+        self.store.observe_availability(100,{"profile_request":"ok","photo_visible":False,"last_seen_visibility":"UserStatusEmpty"})
+        self.client.user.photo=NS(photo_id=1)
+        self.client.user.status=types.UserStatusRecently()
+        original=self.observer.request
+        async def request(value):
+            result=await original(value)
+            if isinstance(value,functions.users.GetFullUserRequest):
+                class PhotoUpdate:
+                    user_id=100
+                    photo=types.UserProfilePhotoEmpty()
+                with patch.object(types,"UpdateUserPhoto",PhotoUpdate,create=True):
+                    self.observer.user_update(PhotoUpdate())
+            return result
+        self.observer.request=request
+        await self.observer.scan(100,"456")
+        assessment=self.store.status(100)["profiles"][0]["block_assessment"]
+        self.assertFalse(assessment["observations"]["photo_visible"])
+        self.assertEqual(assessment["state"],"insufficient_evidence")
 
     async def test_gift_count_change_refreshes_without_waiting_for_gift_interval(self):
         self.client.info.stargifts_count=1

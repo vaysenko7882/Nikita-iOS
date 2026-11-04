@@ -25,6 +25,13 @@ class ProfileCollector:
         self.story_poll_interval = store.STORY_INTERVAL
         self.story_poll_task = None
         self.story_deadlines = {}
+        self.availability_versions = {}
+
+    @staticmethod
+    def presence_fields(status):
+        name = type(status).__name__
+        return dict(last_seen_visibility="visible" if name in ("UserStatusOnline","UserStatusOffline") else name,
+                    status_hidden_by_me=bool(getattr(status,"by_me",False)))
 
     async def request(self, value):
         async with self.rpc_slots:
@@ -50,16 +57,24 @@ class ProfileCollector:
     def user_update(self, update):
         peer_id = getattr(update,"user_id",None) or getattr(getattr(update,"peer_id",None),"user_id",None)
         if peer_id and self.store.enabled(peer_id):
-            self.store.collection(peer_id,"notifications",{"_"+type(update).__name__:public_value(update)},complete=False)
+            is_presence = isinstance(update,getattr(types,"UpdateUserStatus",type(None)))
+            is_blocklist = isinstance(update,getattr(types,"UpdatePeerBlocked",type(None)))
+            if not is_presence and not is_blocklist:
+                self.store.collection(peer_id,"notifications",{"_"+type(update).__name__:public_value(update)},complete=False)
             # These values are the event itself: do not wait for another full
             # scan, which could already contain a later name/photo again.
             fields = {}
+            availability = {}
             entity = getattr(update,"_entities",{}).get(peer_id)
             if isinstance(update,types.UpdateUser) and isinstance(entity,types.User) and not entity.min:
                 fields = {name:public_value(getattr(entity,name,None)) for name in
                           ("first_name","last_name","username","usernames","premium","verified","scam","fake","emoji_status","color","profile_color")}
                 photo_id = getattr(getattr(entity,"photo",None),"photo_id",None)
                 fields["current_photo_id"] = str(photo_id) if photo_id else None
+                availability.update(self.presence_fields(getattr(entity,"status",None)))
+                availability["account_deleted"] = bool(getattr(entity,"deleted",False))
+                if photo_id:
+                    availability["photo_visible"] = True
             elif isinstance(update,types.UpdateUserName):
                 fields = dict(first_name=update.first_name,last_name=update.last_name,
                               username=next((name.username for name in update.usernames if name.active),None),
@@ -67,16 +82,28 @@ class ProfileCollector:
             elif isinstance(update,getattr(types,"UpdateUserPhoto",type(None))):
                 photo_id = getattr(getattr(update,"photo",None),"photo_id",None)
                 fields = dict(current_photo_id=str(photo_id) if photo_id else None)
+                # An absent raw photo does not include fallback-photo privacy.
+                # Confirm disappearance in the next paced full-user response.
+                if photo_id:
+                    availability["photo_visible"] = True
             elif isinstance(update,getattr(types,"UpdateUserEmojiStatus",type(None))):
                 fields = dict(emoji_status=public_value(update.emoji_status))
+            elif is_presence:
+                availability.update(self.presence_fields(update.status))
             if fields:
                 self.store.fields(peer_id,fields,partial=True)
             # updatePeerBlocked describes OUR blocklist, never the target's.
-            if isinstance(update,getattr(types,"UpdatePeerBlocked",type(None))):
-                self.store.collection(peer_id,"notifications",{"_my_blocklist":dict(
+            if is_blocklist:
+                availability.update(dict(
                     blocked_by_me=bool(update.blocked),
-                    blocked_my_stories_from=bool(getattr(update,"blocked_my_stories_from",False)),
-                    blocked_by_target="unknown_not_exposed_by_telegram")},complete=False)
+                    blocked_my_stories_from=bool(getattr(update,"blocked_my_stories_from",False))))
+            if availability or "current_photo_id" in fields:
+                # Even an absent raw photo invalidates a response that started
+                # before the update; disappearance itself needs fallback-aware
+                # confirmation from the next full-user request.
+                self.availability_versions[peer_id] = self.availability_versions.get(peer_id,0)+1
+            if availability:
+                self.store.observe_availability(peer_id,availability,source="telegram_update",record_general=False)
             self.dirty_profiles.add(peer_id)
             self.store.nudge(peer_id)
 
@@ -214,6 +241,7 @@ class ProfileCollector:
 
     async def scan(self, peer_id, access_hash, *, include_stories=True):
         input_peer = types.InputPeerUser(peer_id,int(access_hash))
+        availability_version = self.availability_versions.get(peer_id,0)
         full = await self.request(functions.users.GetFullUserRequest(types.InputUser(peer_id,int(access_hash))))
         user = next(user for user in full.users if user.id==peer_id)
         info = full.full_user
@@ -229,15 +257,12 @@ class ProfileCollector:
         fields["personal_photo_id"] = str(signature[3]) if signature[3] else None
         old_gift_count = self.store.field_value(peer_id,"stargifts_count")
         self.store.fields(peer_id,fields)
-        status = type(getattr(user,"status",None)).__name__
-        last_seen = "visible" if status in ("UserStatusOnline","UserStatusOffline") else status
-        self.store.collection(peer_id,"availability",{"current":dict(
-            profile_request="ok",photo_visible=bool(photo_id or signature[2]),about_visible=bool(getattr(info,"about",None)),
-            last_seen_visibility=last_seen,account_deleted=bool(getattr(user,"deleted",False)),
-            blocked_by_me=bool(getattr(info,"blocked",False)),
-            blocked_by_target="unknown_not_exposed_by_telegram",
-            note="Доступность фото, описания и статуса не доказывает блокировку: она также зависит от настроек приватности."
-        )},complete=False)
+        if availability_version == self.availability_versions.get(peer_id,0):
+            self.store.observe_availability(peer_id,dict(
+                profile_request="ok",photo_visible=bool(photo_id or signature[2]),about_visible=bool(getattr(info,"about",None)),
+                account_deleted=bool(getattr(user,"deleted",False)),blocked_by_me=bool(getattr(info,"blocked",False)),
+                blocked_my_stories_from=bool(getattr(info,"blocked_my_stories_from",False)),
+                **self.presence_fields(getattr(user,"status",None))))
         # Active stories first: fetch only what this session can actually see.
         warnings = []
         operations = [("Сторис",lambda: self.stories(peer_id,input_peer))] if include_stories else []
@@ -369,7 +394,7 @@ class ProfileCollector:
                 except Exception as error:
                     # No usernames, bio, credentials or attachment references in logs.
                     if type(error).__name__ in ("UserPrivacyRestrictedError","UserIdInvalidError","InputUserDeactivatedError"):
-                        self.store.collection(peer_id,"availability",{"current":dict(profile_request="unavailable",reason=type(error).__name__,blocked_by_target="unknown_not_exposed_by_telegram")},complete=False)
+                        self.store.observe_availability(peer_id,dict(profile_request="unavailable",reason=type(error).__name__))
                     self.store.checked(peer_id,type(error).__name__,delay=300)
                 if peer_id in self.dirty_profiles:
                     self.store.nudge(peer_id)

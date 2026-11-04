@@ -181,9 +181,9 @@ final class CodeGramGeneralController: CodeGramFeatureController {
             rows = [self.textRow(s.localMessageArchive.title, icon: "archivebox", action: { [weak self] in guard let self else { return }; self.push(CodeGramLocalArchiveController(context: self.context)) }),
                 self.textRow(s.messageFilter.title, icon: "line.3.horizontal.decrease", action: { [weak self] in guard let self else { return }; self.push(CodeGramFiltersController(context: self.context)) })]
         case .appearance:
-            footer = "Liquid Glass отключён во всём приложении. Панели и элементы управления используют непрозрачное оформление."
+            footer = "Современная компоновка и скругления сохранены. Стеклянный материал отключён."
             rows = [self.textRow("Иконка приложения", detail: "Твои иконки и живая карусель", icon: "app", action: { [weak self] in guard let self else { return }; self.push(CodeGramIconPickerController(context: self.context)) }),
-                self.textRow("Непрозрачное оформление", detail: "Liquid Glass отключён во всём приложении.", icon: "rectangle.on.rectangle"),
+                self.textRow("Современный интерфейс", detail: "Прежняя компоновка без эффекта Liquid Glass.", icon: "rectangle.on.rectangle"),
                 self.flag(s.interfaceTuning.showAppBadge, info: s.interfaceTuning.showAppBadgeInfo, key: \.showAppBadge, icon: "capsule"),
                 self.textRow(s.interfaceTuning.title, icon: "slider.horizontal.3", action: { [weak self] in guard let self else { return }; self.push(CodeGramInterfaceController(context: self.context)) })]
         case .additional:

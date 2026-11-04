@@ -125,6 +125,93 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(event["kind"],"availability.changed")
         self.assertEqual(event["payload"]["after"]["blocked_by_target"],"unknown_not_exposed_by_telegram")
 
+    def observe(self, when, **values):
+        with patch("nikita_archive.profiles.time.time",return_value=when):
+            self.store.observe_availability(100,values)
+        return self.store.status(100)["profiles"][0]["block_assessment"]
+
+    def test_missing_data_and_status_alone_are_not_a_target_block(self):
+        self.observe(100,profile_request="ok",photo_visible=False,last_seen_visibility="UserStatusEmpty")
+        self.observe(101,profile_request="ok",photo_visible=False,last_seen_visibility="NoneType")
+        self.assertEqual(self.store.status(100)["profiles"][0]["block_assessment"]["state"],"insufficient_evidence")
+        self.observe(102,profile_request="ok",photo_visible=True,last_seen_visibility="visible")
+        result=self.observe(103,last_seen_visibility="UserStatusEmpty")
+        self.assertEqual(result["state"],"insufficient_evidence")
+        self.assertFalse(any(e["kind"].startswith("block_signals.") for e in self.history()))
+
+    def test_recent_status_and_photo_loss_is_inferred_not_confirmed(self):
+        self.observe(100,profile_request="ok",photo_visible=True,last_seen_visibility="visible",blocked_by_me=False)
+        self.observe(101,last_seen_visibility="UserStatusEmpty")
+        result=self.observe(102,photo_visible=False)
+        self.assertEqual((result["state"],result["certainty"]),("possible_restriction","inferred"))
+        self.assertEqual(result["blocked_by_target"],"unknown_not_exposed_by_telegram")
+        self.assertEqual(result["reasons"],["status_became_unavailable","photo_became_unavailable"])
+        self.assertTrue(result["before"]["photo_visible"])
+        self.assertEqual(result["previously_visible_at"],100)
+        self.observe(103,profile_request="ok",photo_visible=False,last_seen_visibility="UserStatusEmpty")
+        self.store=ProfileStore(self.archive)
+        self.observe(104,profile_request="ok",photo_visible=False,last_seen_visibility="UserStatusEmpty")
+        events=[e for e in self.history() if e["kind"]=="block_signals.possible_restriction"]
+        self.assertEqual(len(events),1)
+        self.assertEqual(events[0]["payload"]["after"]["possible_since"],102)
+
+    def test_stale_or_confounded_observations_do_not_raise_block_inference(self):
+        self.observe(100,profile_request="ok",photo_visible=True,last_seen_visibility="visible",blocked_by_me=False)
+        self.observe(110,profile_request="unavailable",reason="UserPrivacyRestrictedError")
+        result=self.observe(300,profile_request="ok",photo_visible=False,last_seen_visibility="UserStatusEmpty")
+        self.assertEqual(result["state"],"insufficient_evidence")
+        self.observe(301,profile_request="ok",photo_visible=True,last_seen_visibility="visible")
+        result=self.observe(302,photo_visible=False,last_seen_visibility="UserStatusEmpty",blocked_by_me=True)
+        self.assertEqual(result["state"],"insufficient_evidence")
+        self.assertEqual(result["reasons"],["blocked_by_me"])
+        self.observe(303,blocked_by_me=False)
+        self.observe(304,profile_request="ok",photo_visible=True,last_seen_visibility="visible")
+        result=self.observe(305,photo_visible=False,last_seen_visibility="UserStatusEmpty",account_deleted=True)
+        self.assertEqual(result["reasons"],["account_deleted"])
+        self.assertFalse(any(e["kind"]=="block_signals.possible_restriction" for e in self.history()))
+
+    def test_restored_visibility_is_not_reported_as_confirmed_unblock(self):
+        self.observe(100,profile_request="ok",photo_visible=True,last_seen_visibility="visible")
+        self.observe(101,photo_visible=False,last_seen_visibility="UserStatusEmpty")
+        result=self.observe(102,last_seen_visibility="visible")
+        self.assertEqual((result["state"],result["certainty"]),("visibility_restored","observation"))
+        events=[e for e in self.history() if e["kind"]=="block_signals.visibility_restored"]
+        self.assertEqual(len(events),1)
+        self.assertEqual(events[0]["payload"]["after"]["blocked_by_target"],"unknown_not_exposed_by_telegram")
+        self.observe(103,last_seen_visibility="UserStatusEmpty")
+        self.assertEqual(len([e for e in self.history() if e["kind"]=="block_signals.possible_restriction"]),1)
+
+    def test_inference_ignores_gifts_and_does_not_journal_duplicate_presence(self):
+        self.observe(100,profile_request="ok",photo_visible=True,last_seen_visibility="visible")
+        count=len(self.history())
+        with patch("nikita_archive.profiles.time.time",return_value=101):
+            self.store.observe_availability(100,{"last_seen_visibility":"visible"},source="telegram_update",record_general=False)
+        self.assertEqual(len(self.history()),count)
+        self.store.collection(100,"gifts",{"gift":{"gift":{"id":7}}})
+        self.store.collection(100,"gifts",{})
+        self.assertFalse(any(e["kind"].startswith("block_signals.") for e in self.history()))
+
+    def test_reenabling_tracking_does_not_reuse_unobserved_restriction_state(self):
+        self.observe(100,profile_request="ok",photo_visible=True,last_seen_visibility="visible")
+        self.observe(101,photo_visible=False,last_seen_visibility="UserStatusEmpty")
+        self.assertEqual(self.store.status(100)["profiles"][0]["block_assessment"]["state"],"possible_restriction")
+        self.store.configure(100,{"enabled":False})
+        self.assertIsNone(self.store.status(100)["profiles"][0]["block_assessment"])
+        self.store.configure(100,{"enabled":True,"access_hash":"-456"})
+        self.assertIsNone(self.store.status(100)["profiles"][0]["block_assessment"])
+        result=self.observe(102,photo_visible=False,last_seen_visibility="UserStatusEmpty",profile_request="ok")
+        self.assertEqual(result["state"],"insufficient_evidence")
+        self.assertEqual(len([e for e in self.history() if e["kind"]=="block_signals.possible_restriction"]),1)
+        self.observe(103,photo_visible=True,last_seen_visibility="visible")
+        self.assertFalse(any(e["kind"]=="block_signals.visibility_restored" for e in self.history()))
+
+    def test_disabled_tracking_does_not_receive_block_assessment(self):
+        self.store.configure(100,{"enabled":False})
+        count=len(self.history())
+        self.observe(100,profile_request="ok",photo_visible=True,last_seen_visibility="visible")
+        self.assertEqual(len(self.history()),count)
+        self.assertIsNone(self.store.status(100)["profiles"][0]["block_assessment"])
+
     def test_raw_notifications_deduplicate_but_changed_name_is_logged(self):
         self.store.collection(100,"notifications",{"_name":{"first_name":"Before"}},complete=False)
         self.store.collection(100,"notifications",{"_name":{"first_name":"Before"}},complete=False)

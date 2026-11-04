@@ -6,7 +6,6 @@ import UIKit
 final class CodeGramIconPickerController: ViewController {
     private let context: AccountContext
     private let picker: CodeGramIconPickerView
-    private let scroll = UIScrollView()
     init(context: AccountContext) {
         self.context = context
         self.picker = CodeGramIconPickerView(currentName: context.sharedContext.applicationBindings.getAlternateIconName())
@@ -16,7 +15,6 @@ final class CodeGramIconPickerController: ViewController {
         self.picker.onPalette = { [weak self] color in
             guard let self, self.isNodeLoaded else { return }
             self.displayNode.backgroundColor = color
-            self.scroll.backgroundColor = color
         }
         self.picker.onApply = { [weak self] choice in
             guard let self else { return }
@@ -37,20 +35,24 @@ final class CodeGramIconPickerController: ViewController {
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
-        CodeGramSettingsTheme.disableScrollEdgeEffects(self.scroll)
-        self.displayNode.view.addSubview(self.scroll)
-        self.scroll.addSubview(self.picker)
+        self.displayNode.view.addSubview(self.picker)
         self.statusBar.statusBarStyle = CodeGramAppIconChoice.all[self.picker.selectedIndex].light ? .Black : .White
         self.displayNodeDidLoad()
     }
     override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
         let top = self.cleanNavigationHeight
-        let height = max(0, layout.size.height - top - layout.intrinsicInsets.bottom)
-        self.scroll.frame = CGRect(x: 0, y: top, width: layout.size.width, height: height)
-        self.picker.frame = CGRect(x: 0, y: 0, width: layout.size.width, height: max(height, 1000))
-        self.scroll.contentSize = self.picker.bounds.size
+        self.picker.bottomInset = layout.intrinsicInsets.bottom
+        self.picker.frame = CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top))
         self.displayNode.backgroundColor = self.picker.backgroundColor
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        self.picker.setEffectsVisible(true)
+    }
+    override func viewWillDisappear(_ animated: Bool) {
+        self.picker.setEffectsVisible(false)
+        super.viewWillDisappear(animated)
     }
 }
 

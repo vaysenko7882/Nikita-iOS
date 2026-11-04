@@ -26,7 +26,6 @@ final class CodeGramDashboardController: ViewController {
     private let bottomSurface = UIView()
     private let storage = CodeGramDashboardRow(destination: .storage)
     private let additional = CodeGramDashboardRow(destination: .additional)
-    private let separator = UIView()
     private let footer = UILabel()
     private let emptyLabel = UILabel()
     private var searchRows: [CodeGramDashboardRow] = []
@@ -69,7 +68,13 @@ final class CodeGramDashboardController: ViewController {
         self.footer.text = "На этом iPhone"; self.footer.textColor = .tertiaryLabel; self.footer.textAlignment = .center
         self.emptyLabel.text = "Ничего не найдено\nПопробуй «голос», «архив» или «плашка»."; self.emptyLabel.numberOfLines = 0; self.emptyLabel.textAlignment = .center; self.emptyLabel.textColor = .secondaryLabel
         for view in [self.titleLabel, self.subtitleLabel, self.logo, self.searchSurface, self.ghost, self.archive, self.privacy, self.messages, self.appearance, self.voice, self.bottomSurface, self.footer, self.emptyLabel] { self.contentView.addSubview(view) }
-        self.bottomSurface.addSubview(self.storage); self.bottomSurface.addSubview(self.additional); self.bottomSurface.addSubview(self.separator)
+        self.bottomSurface.addSubview(self.storage); self.bottomSurface.addSubview(self.additional)
+        self.ghost.setSectionPosition(.first)
+        self.archive.setSectionPosition(.last)
+        let tiles = [self.privacy, self.messages, self.appearance, self.voice]
+        for (index, tile) in tiles.enumerated() { tile.setSectionPosition(CodeGramSectionPosition(row: index, count: tiles.count), separatorInset: 92) }
+        self.storage.setSectionPosition(.first, separatorInset: 63)
+        self.additional.setSectionPosition(.last, separatorInset: 63)
         self.bottomSurface.isAccessibilityElement = false
         self.ghost.action = { [weak self] in self?.open(.ghost) }; self.archive.action = { [weak self] in self?.open(.archive) }
         self.ghost.changed = { [weak self] value in self?.setGhost(value) }; self.archive.changed = { [weak self] value in self?.setArchive(value) }
@@ -135,7 +140,7 @@ final class CodeGramDashboardController: ViewController {
         self.voice.setDetail(title); self.layoutContent()
     }
     private func refreshFonts() {
-        self.titleLabel.font = codegramDashboardFont(36, weight: .bold, style: .largeTitle)
+        self.titleLabel.font = codegramDashboardFont(34, weight: .bold, style: .largeTitle)
         self.subtitleLabel.font = codegramDashboardFont(15, style: .subheadline)
         self.searchField.font = UIFont.preferredFont(forTextStyle: .body)
         self.footer.font = codegramDashboardFont(12, style: .caption1); self.emptyLabel.font = codegramDashboardFont(16)
@@ -148,7 +153,6 @@ final class CodeGramDashboardController: ViewController {
         self.displayNode.backgroundColor = dark ? .black : .systemGroupedBackground
         self.logo.tintColor = .label
         self.logo.image = codegramBrandMark()?.withRenderingMode(.alwaysTemplate)
-        self.separator.backgroundColor = .clear
         for surface in [self.ghost, self.archive, self.privacy, self.messages, self.appearance, self.voice] as [CodeGramDashboardSurface] { surface.applyPalette(dark: dark) }
         self.searchSurface.refreshPalette()
         self.refreshAppearanceDetail()
@@ -159,11 +163,10 @@ final class CodeGramDashboardController: ViewController {
 
     private func layoutContent() {
         guard self.layoutSize.width > 0 else { return }
-        let width = max(1, min(720, self.layoutSize.width - self.safeInsets.left - self.safeInsets.right - 32))
+        let width = max(1, min(640, self.layoutSize.width - self.safeInsets.left - self.safeInsets.right - 32))
         let largeText = UIFont.preferredFont(forTextStyle: .body).pointSize > 20
-        let singleColumn = width < 325 || largeText
         var y: CGFloat = 10
-        let logoSize: CGFloat = largeText ? 50 : 62
+        let logoSize: CGFloat = largeText ? 50 : 56
         let titleY = largeText ? y + 58 : y
         let titleWidth = largeText ? width : max(1, width - 84)
         let titleHeight = self.titleLabel.font.lineHeight
@@ -174,42 +177,38 @@ final class CodeGramDashboardController: ViewController {
         y = max(self.logo.frame.maxY, self.subtitleLabel.frame.maxY) + 14
         let searchHeight = max(50, UIFont.preferredFont(forTextStyle: .body).lineHeight + 24)
         self.searchSurface.frame = CGRect(x: 0, y: y, width: width, height: searchHeight)
-        y += searchHeight + 10
+        y += searchHeight + 18
         let searching = !self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let home: [UIView] = [self.ghost, self.archive, self.privacy, self.messages, self.appearance, self.voice, self.bottomSurface, self.footer]
         for view in home { view.isHidden = searching }
         for row in self.searchRows { row.isHidden = !searching }
         self.emptyLabel.isHidden = !searching || !self.searchRows.isEmpty
         if searching {
-            for row in self.searchRows {
+            for (index, row) in self.searchRows.enumerated() {
+                row.setSectionPosition(CodeGramSectionPosition(row: index, count: self.searchRows.count), separatorInset: 63)
                 let height = row.preferredHeight(width: width)
-                row.frame = CGRect(x: 0, y: y, width: width, height: height); y += height + 8
+                row.frame = CGRect(x: 0, y: y, width: width, height: height); y += height
             }
             if self.searchRows.isEmpty { self.emptyLabel.frame = CGRect(x: 16, y: y + 20, width: width - 32, height: 110); y += 150 }
         } else {
-            let gap: CGFloat = 10
-            let smallWidth = singleColumn ? width : (width - gap) / 2
-            let singleQuickColumn = singleColumn || width < 380
-            let quickWidth = singleQuickColumn ? width : smallWidth
-            let quickHeight = max(60, UIFont.preferredFont(forTextStyle: .body).lineHeight * 2 + 20)
-            self.ghost.frame = CGRect(x: 0, y: y, width: quickWidth, height: quickHeight)
-            self.archive.frame = CGRect(x: singleQuickColumn ? 0 : quickWidth + gap, y: singleQuickColumn ? y + quickHeight + gap : y, width: quickWidth, height: quickHeight)
-            y += singleQuickColumn ? quickHeight * 2 + gap + 10 : quickHeight + 10
-            let tiles = [self.privacy, self.messages, self.appearance, self.voice]
-            for row in 0 ..< (singleColumn ? 4 : 2) {
-                let first = row * (singleColumn ? 1 : 2)
-                let count = singleColumn ? 1 : 2
-                let height = (first ..< first + count).map { tiles[$0].preferredHeight(width: smallWidth) }.max() ?? 180
-                for column in 0 ..< count { tiles[first + column].frame = CGRect(x: CGFloat(column) * (smallWidth + gap), y: y, width: smallWidth, height: height) }
-                y += height + 10
+            for quick in [self.ghost, self.archive] {
+                let height = quick.preferredHeight(width: width)
+                quick.frame = CGRect(x: 0, y: y, width: width, height: height)
+                y += height
             }
+            y += 20
+            for tile in [self.privacy, self.messages, self.appearance, self.voice] {
+                let height = tile.preferredHeight(width: width)
+                tile.frame = CGRect(x: 0, y: y, width: width, height: height)
+                y += height
+            }
+            y += 20
             let storageHeight = self.storage.preferredHeight(width: width)
             let additionalHeight = self.additional.preferredHeight(width: width)
-            self.bottomSurface.frame = CGRect(x: 0, y: y, width: width, height: storageHeight + additionalHeight + 8)
+            self.bottomSurface.frame = CGRect(x: 0, y: y, width: width, height: storageHeight + additionalHeight)
             self.storage.frame = CGRect(x: 0, y: 0, width: width, height: storageHeight)
-            self.additional.frame = CGRect(x: 0, y: storageHeight + 8, width: width, height: additionalHeight)
-            self.separator.frame = CGRect(x: 63, y: storageHeight, width: max(0, width - 80), height: 0.5)
-            y += storageHeight + additionalHeight + 24
+            self.additional.frame = CGRect(x: 0, y: storageHeight, width: width, height: additionalHeight)
+            y += storageHeight + additionalHeight + 18
             self.footer.frame = CGRect(x: 0, y: y, width: width, height: self.footer.font.lineHeight + 6); y = self.footer.frame.maxY + 12
         }
         self.contentView.frame = CGRect(x: max(self.safeInsets.left + 16, (self.layoutSize.width - width) / 2), y: 0, width: width, height: y)
@@ -258,7 +257,7 @@ private final class CodeGramOrganizedSectionController: CodeGramTableController 
     override func makeSections() -> [CodeGramSettingsSection] {
         if self.section == .messages {
             return [CodeGramSettingsSection(title: "История и сохранение", footer: "Параметры локального архива относятся к этому iPhone. Фоновое сохранение на сервере настраивается в разделе «Хранилище и VPS».", rows: [
-                self.switchRow("TikTok и Instagram → видео", value: NikitaSettingsStore.shared.sendsSocialLinksAsVideo, detail: "Одну ссылку на публичное видео до 250 МБ скачать через VPS и отправить видеофайлом. Нужна служба VPS версии 5. При ошибке ссылка останется в черновике.", icon: "play.rectangle", changed: { value in NikitaSettingsStore.shared.sendsSocialLinksAsVideo = value }),
+                self.switchRow("TikTok и Instagram → видео", value: NikitaSettingsStore.shared.sendsSocialLinksAsVideo, detail: "Публичные ролики отправляются файлом. Подготовка идёт в фоне и не мешает переписке.", icon: "play.rectangle", changed: { value in NikitaSettingsStore.shared.sendsSocialLinksAsVideo = value }),
                 self.textRow("Локальный архив", detail: "Удалённые сообщения и версии правок", icon: "archivebox", action: { [weak self] in guard let self else { return }; self.push(localMessageArchiveSettingsController(context: self.context)) }),
                 self.textRow("Оформление удалённых", detail: "Прозрачность, затемнение и рамка", icon: "bubble.left", action: { [weak self] in guard let self else { return }; self.push(CodeGramDeletedStyleController(context: self.context)) }),
                 self.textRow("Фильтры сообщений", icon: "line.3.horizontal.decrease.circle", action: { [weak self] in guard let self else { return }; self.push(messageFilterSettingsController(context: self.context)) }),
