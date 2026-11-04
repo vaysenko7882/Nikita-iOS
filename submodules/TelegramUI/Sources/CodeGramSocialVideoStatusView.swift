@@ -8,6 +8,11 @@ final class CodeGramSocialVideoStatusView: UIView {
         let title: String
         let detail: String
         let count: Int
+        let isNotice: Bool
+        init(mode: Mode, title: String, detail: String, count: Int, isNotice: Bool = false) {
+            self.mode = mode; self.title = title; self.detail = detail; self.count = count; self.isNotice = isNotice
+        }
+
     }
     var primaryAction: (() -> Void)?
     var copyAction: (() -> Void)?
@@ -94,10 +99,10 @@ final class CodeGramSocialVideoStatusView: UIView {
         self.detailLabel.textColor = secondary
         self.spinner.color = foreground
         self.primaryButton.setTitle(value.mode == .failed || value.mode == .cancelled ? "Повторить" : "Отменить", for: .normal)
-        self.primaryButton.isHidden = value.mode == .enqueueing
+        self.primaryButton.isHidden = value.mode == .enqueueing || value.isNotice
         self.copyButton.setTitle(value.mode == .cancelled ? "Ссылка" : "Ошибка", for: .normal)
-        self.copyButton.isHidden = value.mode != .failed && value.mode != .cancelled
-        self.closeButton.isHidden = self.copyButton.isHidden
+        self.copyButton.isHidden = value.isNotice || (value.mode != .failed && value.mode != .cancelled)
+        self.closeButton.isHidden = self.copyButton.isHidden && !value.isNotice
         for button in [self.primaryButton, self.copyButton] { button.setTitleColor(accent, for: .normal) }
         self.closeButton.tintColor = secondary
         self.titleLabel.accessibilityLabel = value.title
@@ -108,6 +113,7 @@ final class CodeGramSocialVideoStatusView: UIView {
     }
     func showQueueFullNotice() {
         self.detailLabel.text = "Очередь заполнена. Ссылка осталась в поле."
+        self.setNeedsLayout()
     }
     private struct ActionLayout {
         let below: Bool

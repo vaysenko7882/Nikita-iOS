@@ -116,7 +116,7 @@ private final class VideoStatusHarnessController: UIViewController {
             self.view.setNeedsLayout(); self.view.layoutIfNeeded()
         }
     }
-    private func expectBanner(_ banner: CodeGramSocialVideoStatusView, mode: CodeGramSocialVideoStatusView.Mode, context: String) {
+    private func expectBanner(_ banner: CodeGramSocialVideoStatusView, mode: CodeGramSocialVideoStatusView.Mode, isNotice: Bool = false, context: String) {
         banner.layoutIfNeeded()
         self.expect(banner.isOpaque && (banner.backgroundColor?.resolvedColor(with: banner.traitCollection).cgColor.alpha ?? 0) > 0.999, "banner is not opaque: \(context)")
         self.expect(abs(banner.layer.cornerRadius - 18) < 0.1, "banner rounding changed: \(context)")
@@ -125,13 +125,19 @@ private final class VideoStatusHarnessController: UIViewController {
         let copy = self.button("CodeGram.videoSendCopy", in: banner)
         let dismiss = self.button("CodeGram.videoSendDismiss", in: banner)
         self.expect(primary != nil && copy != nil && dismiss != nil, "production status actions missing: \(context)")
-        self.expect(primary?.isHidden == (mode == .enqueueing), "wrong primary visibility: \(context)")
-        self.expect(copy?.isHidden == (mode != .failed && mode != .cancelled), "wrong copy visibility: \(context)")
-        self.expect(dismiss?.isHidden == copy?.isHidden, "dismiss visibility differs from copy: \(context)")
+        self.expect(primary?.isHidden == (mode == .enqueueing || isNotice), "wrong primary visibility: \(context)")
+        let hideCopy = isNotice || (mode != .failed && mode != .cancelled)
+        self.expect(copy?.isHidden == hideCopy, "wrong copy visibility: \(context)")
+        self.expect(dismiss?.isHidden == (isNotice ? false : hideCopy), "wrong dismiss visibility: \(context)")
         self.expect(primary?.currentTitle == (mode == .failed || mode == .cancelled ? "Повторить" : "Отменить"), "wrong primary title: \(context)")
         for view in self.descendants(banner).filter({ !$0.isHidden }) {
             let rect = view.convert(view.bounds, to: banner)
             self.expect(rect.minX.isFinite && rect.minY.isFinite && rect.width.isFinite && rect.height.isFinite && rect.width >= 0 && rect.height >= 0, "invalid banner geometry: \(context)")
+        }
+        if isNotice {
+            for spinner in self.descendants(banner).compactMap({ $0 as? UIActivityIndicatorView }) {
+                self.expect(!spinner.isAnimating && spinner.isHidden, "queue notice displayed a preparing spinner: \(context)")
+            }
         }
         let allActionButtons = [primary, copy, dismiss].compactMap { $0 }
         let actionButtons = allActionButtons.filter { !$0.isHidden }
@@ -168,15 +174,23 @@ private final class VideoStatusHarnessController: UIViewController {
             }
         }
     }
+    private func showQueueNotice(target: CodeGramSocialVideoStatusView? = nil) {
+        let target = target ?? self.banner
+        target.update(.init(mode: .cancelled, title: "Очередь заполнена", detail: "Ссылка осталась в поле. Отправь её позже.", count: 0, isNotice: true), background: .secondarySystemBackground, foreground: .label, secondary: .secondaryLabel, accent: .systemBlue)
+        if target === self.banner {
+            self.currentMode = .cancelled
+            self.view.setNeedsLayout(); self.view.layoutIfNeeded()
+        }
+    }
     private func expectTyping() {
         self.expect(self.editor.isFirstResponder, "preparing a video dismissed the composer")
         let before = self.editor.text ?? ""
         self.editor.selectedRange = NSRange(location: before.utf16.count, length: 0)
         self.editor.insertText(" Ещё сообщение.")
         self.expect(self.editor.text == before + " Ещё сообщение.", "chat typing failed while status was visible")
-        let point = self.editor.convert(CGPoint(x: 22, y: 22), to: self.view)
+        let point = self.editor.convert(CGPoint(x: self.editor.bounds.midX, y: self.editor.bounds.midY), to: self.view)
         let hit = self.view.hitTest(point, with: nil)
-        self.expect(hit === self.editor || hit?.isDescendant(of: self.editor) == true, "status overlay intercepted a composer touch")
+        self.expect(hit === self.editor || hit?.isDescendant(of: self.editor) == true, "status overlay intercepted a composer touch: hit=\(String(describing: hit)) point=\(point) editor=\(self.editor.frame) bounds=\(self.editor.bounds)")
         self.expect(!self.banner.frame.intersects(self.editor.frame), "status banner covers the composer")
         self.expect(self.presentedViewController == nil, "status displayed a modal blocker")
     }
@@ -197,6 +211,10 @@ private final class VideoStatusHarnessController: UIViewController {
                             fixture.layoutIfNeeded()
                             self.expectBanner(fixture, mode: mode, context: "\(width)/\(category.rawValue)/\(style.rawValue)/\(mode)")
                         }
+                        self.showQueueNotice(target: fixture)
+                        fixture.frame = CGRect(x: 16, y: 120, width: width, height: fixture.preferredHeight(width: width))
+                        fixture.layoutIfNeeded()
+                        self.expectBanner(fixture, mode: .cancelled, isNotice: true, context: "notice/\(width)/\(category.rawValue)/\(style.rawValue)")
                         fixture.removeFromSuperview()
                     }
                 }
@@ -301,14 +319,28 @@ private final class VideoStatusHarnessController: UIViewController {
         self.expect(self.copyCalls > 0, "copy diagnostic action did not run")
         self.expectTyping()
         self.phase("failed") {
-            self.banner.showQueueFullNotice(); self.banner.setNeedsLayout(); self.banner.layoutIfNeeded()
+            let draft = self.editor.text ?? ""
+            self.showQueueNotice()
+            self.expect(self.editor.text == draft, "queue-full notice consumed the draft")
+            self.expectBanner(self.banner, mode: .cancelled, isNotice: true, context: "queue-full notice")
+            self.expectTyping()
             self.phase("queue-full") {
-                self.show(.preparing)
-                self.rotate(to: .landscapeRight) {
-                    self.expectTyping()
-                    self.expectBanner(self.banner, mode: .preparing, context: "landscape")
-                    self.phase("landscape") {
-                        self.rotate(to: .portrait) { self.recordAccessibility() }
+                let dismissed = self.dismissCalls
+                let draft = self.editor.text ?? ""
+                self.button("CodeGram.videoSendDismiss", in: self.banner)?.sendActions(for: .touchUpInside)
+                self.expect(self.dismissCalls == dismissed + 1, "queue notice Close callback did not run")
+                self.banner.isHidden = true
+                self.expect(self.editor.text == draft, "closing queue notice changed the draft")
+                self.expectTyping()
+                self.phase("queue-notice-dismissed") {
+                    self.banner.isHidden = false
+                    self.show(.preparing)
+                    self.rotate(to: .landscapeRight) {
+                        self.expectTyping()
+                        self.expectBanner(self.banner, mode: .preparing, context: "landscape")
+                        self.phase("landscape") {
+                            self.rotate(to: .portrait) { self.recordAccessibility() }
+                        }
                     }
                 }
             }

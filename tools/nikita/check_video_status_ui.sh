@@ -85,7 +85,7 @@ Preparing: the bounded opaque18pt banner reports two queued videos, shows Cancel
 Cancelled: Retry, Copy link and Close are available. Retry invokes the same production primary callback; the composer remains editable.
 Enqueueing: the banner reports the Telegram queue phase and hides Cancel, while typing remains available.
 Failed: Retry, Copy error and Close are legible and receive taps. Action callbacks run; the composer is still usable.
-Queue full: a readable notice explains that the original link stays in the composer.
+Queue full: the actual isNotice presentation is visible with no queued entries. It shows Close only, hides Retry/Copy, stops its spinner, and preserves the draft and native typing. Queue-notice-dismissed proves Close removes that notice without changing the draft or stealing composer input.
 Landscape: the real window scene rotates, relays out its actual production banner and native keyboard/composer, and remains editable without a modal blocker.
 Accessibility: the production view uses the largest accessibility category. Action titles fit, buttons retain44pt targets, error actions wrap below preview labels on narrow/AX layouts, and labels/buttons stay inside the opaque banner without overlapping.
 Dismissed: Close removes the sender-only record while typing continues. The production spinner runs only for an active onscreen preparing/enqueueing record, stops on resign-active, and stops when detached. No glass material is used.
@@ -157,7 +157,7 @@ while time.monotonic() - start < 450:
         report = json.loads(result.read_text())
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if report['failures'] or report['checks'] < 500: raise SystemExit('Native video status UI regression checks failed')
-        phases = {'preparing', 'cancelled', 'enqueueing', 'failed', 'queue-full', 'landscape', 'accessibility', 'dismissed'}
+        phases = {'preparing', 'cancelled', 'enqueueing', 'failed', 'queue-full', 'queue-notice-dismissed', 'landscape', 'accessibility', 'dismissed'}
         required = {phase + '-' + style for phase in phases for style in ('dark', 'light')}
         missing = sorted(required - seen)
         if missing or report.get('recorded_styles') != ['dark', 'light']:

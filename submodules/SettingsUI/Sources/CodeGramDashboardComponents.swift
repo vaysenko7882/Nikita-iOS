@@ -252,7 +252,10 @@ final class CodeGramQuickCard: CodeGramDashboardSurface {
         self.setNeedsLayout()
     }
     func preferredHeight(width: CGFloat) -> CGFloat {
-        let textWidth = max(1, width - max(51, self.toggle.intrinsicContentSize.width) - 88)
+        // UIKit can fit a switch wider than its reported intrinsic size.
+        // Measure the same actual control width used by layoutSubviews.
+        self.toggle.sizeToFit()
+        let textWidth = max(1, width - self.toggle.bounds.width - 88)
         let size = CGSize(width: textWidth, height: .greatestFiniteMagnitude)
         return max(64, self.caption.sizeThatFits(size).height + self.detail.sizeThatFits(size).height + 26)
     }

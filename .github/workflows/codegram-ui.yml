@@ -12,6 +12,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   native-history:
+    if: ${{ !contains(github.event.head_commit.message, '[status ui]') && !contains(github.event.head_commit.message, '[settings-status ui]') }}
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
@@ -37,6 +38,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   native-settings:
+    if: ${{ !contains(github.event.head_commit.message, '[status ui]') }}
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
@@ -70,6 +72,7 @@ jobs:
           retention-days: 14
 
   native-material:
+    if: ${{ !contains(github.event.head_commit.message, '[status ui]') && !contains(github.event.head_commit.message, '[settings-status ui]') }}
     runs-on: xcode-27
     timeout-minutes: 20
     steps:

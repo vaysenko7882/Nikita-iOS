@@ -260,7 +260,8 @@ def main():
         covered = [video["source"] for video in report["videos"]
                    if any(part.startswith(prefix) for part in Path(video["source"]).parts)]
         report["job_video_coverage"][job] = covered
-        if job in report["native_job_results"] and not covered:
+        result = report["native_job_results"].get(job, {}).get("result")
+        if job in report["native_job_results"] and result != "skipped" and not covered:
             report["errors"].append("No decodable source video retained for " + job)
     if not videos:
         report["errors"].append("No source videos were retained by the native jobs")

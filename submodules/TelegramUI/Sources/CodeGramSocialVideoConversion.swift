@@ -296,7 +296,7 @@ private final class CodeGramSocialVideoAccountQueue {
         guard group.copying.claim(id: entry.state.id, attempt: attempt) else { return }
         let key = entry.state.sourceURL.absoluteString
         // Keep the master alive until all copies complete, even if another intent is cancelled.
-        DispatchQueue.global(qos: .utility).async { [group] in
+        DispatchQueue.global(qos: .utility).async { [weak self, weak entry, group] in
             let copy = FileManager.default.temporaryDirectory.appendingPathComponent("CodeGram-send-\(UUID().uuidString).mp4")
             var success = false
             do { try FileManager.default.linkItem(at: url, to: copy); success = true } catch {
@@ -393,6 +393,8 @@ final class CodeGramSocialVideoChatStatus {
     private var width: CGFloat = 0
     private var top: CGFloat = 0
     private var maximumHeight: CGFloat = 0
+    private var queueFullNotice: URL?
+    private var queueFullNoticeDismiss: DispatchWorkItem?
     init(node: ChatControllerNode) {
         self.node = node; self.queue = CodeGramSocialVideoAccountQueue.get(node.context)
         node.view.addSubview(self.view)
@@ -400,13 +402,36 @@ final class CodeGramSocialVideoChatStatus {
         self.view.layoutChanged = { [weak self] in self?.refresh() }
         self.refresh()
     }
-    deinit { if let observer { self.queue.detach(observer) }; self.view.removeFromSuperview() }
+    deinit { self.queueFullNoticeDismiss?.cancel(); if let observer { self.queue.detach(observer) }; self.view.removeFromSuperview() }
     func layout(width: CGFloat, top: CGFloat, maximumHeight: CGFloat) {
         self.width = width; self.top = top; self.maximumHeight = max(0, maximumHeight); self.refresh()
     }
-    func showQueueFullNotice() { self.view.showQueueFullNotice() }
+    func showQueueFullNotice(sourceURL: URL) {
+        self.queueFullNotice = sourceURL
+        self.queueFullNoticeDismiss?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.clearQueueFullNotice() }
+        self.queueFullNoticeDismiss = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
+        self.refresh()
+    }
+    func clearQueueFullNotice() {
+        self.queueFullNoticeDismiss?.cancel(); self.queueFullNoticeDismiss = nil
+        self.queueFullNotice = nil; self.refresh()
+    }
     private func refresh() {
         guard let node = self.node, let peerId = node.chatLocation.peerId else { self.view.isHidden = true; return }
+        if let sourceURL = self.queueFullNotice, self.maximumHeight > 0, self.width > 68 {
+            self.view.isHidden = false
+            let theme = node.chatPresentationInterfaceState.theme
+            self.view.update(.init(mode: .cancelled, title: "Очередь видео заполнена", detail: "Уже подготавливается 8 видео. Ссылка осталась в поле — отправь её, когда освободится место.", count: 1, isNotice: true), background: theme.list.itemBlocksBackgroundColor, foreground: theme.list.itemPrimaryTextColor, secondary: theme.list.itemSecondaryTextColor, accent: theme.list.itemAccentColor)
+            self.view.primaryAction = nil; self.view.copyAction = nil
+            self.view.copyLinkAction = { UIPasteboard.general.string = sourceURL.absoluteString }
+            self.view.dismissAction = { [weak self] in self?.clearQueueFullNotice() }
+            let width = max(0, self.width - 24)
+            self.view.frame = CGRect(x: 12, y: self.top + 8, width: width, height: min(self.maximumHeight, self.view.preferredHeight(width: width)))
+            node.view.bringSubviewToFront(self.view)
+            return
+        }
         let entries = self.queue.visible(peerId: peerId, threadId: node.chatLocation.threadId)
         guard let entry = entries.first, self.maximumHeight > 0, self.width > 68 else { self.view.isHidden = true; return }
         self.view.isHidden = false
@@ -465,7 +490,8 @@ extension ChatControllerNode {
             return true
         }
         let queue = CodeGramSocialVideoAccountQueue.get(self.context)
-        guard queue.canAccept else { self.codegramVideoStatus?.showQueueFullNotice(); return true }
+        guard queue.canAccept else { self.codegramVideoStatus?.showQueueFullNotice(sourceURL: url); return true }
+        self.codegramVideoStatus?.clearQueueFullNotice()
         let correlationId = Int64.random(in: Int64.min ... Int64.max)
         let template = EnqueueMessage.message(text: "", attributes: messageEffect.map { [EffectMessageAttribute(id: $0.id)] } ?? [], inlineStickers: [:], mediaReference: nil, threadId: self.chatLocation.threadId, replyToMessageId: self.chatPresentationInterfaceState.interfaceState.replyMessageSubject?.subjectModel, replyToStoryId: nil, localGroupingKey: nil, correlationId: correlationId, bubbleUpEmojiOrStickersets: [])
         // This existing transform freezes paid stars, send-as, reply/thread, silence and schedule.
