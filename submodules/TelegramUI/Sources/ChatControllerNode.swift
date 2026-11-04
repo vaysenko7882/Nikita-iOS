@@ -482,7 +482,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     }
     
     private var lastSendTimestamp = 0.0
-    var codegramVideoConversion: CodeGramSocialVideoConversion?
+    var codegramVideoStatus: CodeGramSocialVideoChatStatus?
     
     private var openStickersBeginWithEmoji: Bool = false
     private var openStickersDisposable: Disposable?
@@ -1038,7 +1038,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                                 count = Int32(ceil(CGFloat(self.chatPresentationInterfaceState.interfaceState.effectiveInputState.inputText.length) / 4096.0))
                             }
                             controller.presentPaidMessageAlertIfNeeded(count: count, completion: { [weak self] postpone in
-                                self?.sendCurrentMessage(postpone: postpone)
+                                self?.sendCurrentMessage(postpone: postpone, codegramPaidMessageAuthorized: true)
                             })
                         } else {
                             self.sendCurrentMessage()
@@ -1096,7 +1096,6 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     }
     
     deinit {
-        self.codegramVideoConversion?.cancel()
         self.interactiveEmojisDisposable?.dispose()
         self.openStickersDisposable?.dispose()
         self.displayVideoUnmuteTipDisposable?.dispose()
@@ -1107,6 +1106,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     
     override func didLoad() {
         super.didLoad()
+        self.codegramVideoStatus = CodeGramSocialVideoChatStatus(node: self)
         
         let recognizer = WindowPanRecognizer(target: nil, action: nil)
         recognizer.cancelsTouchesInView = false
@@ -1224,6 +1224,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     }
     
     func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition protoTransition: ContainedViewLayoutTransition, listViewTransaction: (ListViewUpdateSizeAndInsets, CGFloat, Bool, @escaping () -> Void) -> Void, updateExtraNavigationBarBackgroundHeight: (CGFloat, CGFloat, ContainedViewLayoutTransition) -> Void) {
+        self.codegramVideoStatus?.layout(width: layout.size.width, top: navigationBarHeight)
         let transition: ContainedViewLayoutTransition
         if let _ = self.scheduledAnimateInAsOverlayFromNode {
             transition = .immediate
@@ -5110,7 +5111,25 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
     }
 
-    func sendCurrentMessage(silentPosting: Bool? = nil, scheduleTime: Int32? = nil, repeatPeriod: Int32? = nil, postpone: Bool = false, messageEffect: ChatSendMessageEffect? = nil, sendWithoutFormatting: Bool = false, codegramVideo: TelegramMediaFile? = nil, completion: @escaping () -> Void = {}) {
+    /// Consume only the draft that this synchronous Send action captured.
+    /// Async queue callbacks never edit the composer or restore an older draft.
+    func codegramConsumeLinkDraft(text: String) -> Bool {
+        guard let panel = self.inputPanelNode as? ChatTextInputPanelNode,
+            panel.inputTextState.inputText.string == text else { return false }
+        self.ignoreUpdateHeight = true
+        panel.text = ""
+        self.requestUpdateChatInterfaceState(.immediate, true, { state in
+            return state.withUpdatedReplyMessageSubject(nil)
+                .withUpdatedSendMessageEffect(nil)
+                .withUpdatedComposeInputState(ChatTextInputState(inputText: NSAttributedString(string: "")))
+                .withUpdatedComposeDisableUrlPreviews([])
+        })
+        self.ignoreUpdateHeight = false
+        self.updateTypingActivity(false)
+        return true
+    }
+
+    func sendCurrentMessage(silentPosting: Bool? = nil, scheduleTime: Int32? = nil, repeatPeriod: Int32? = nil, postpone: Bool = false, messageEffect: ChatSendMessageEffect? = nil, sendWithoutFormatting: Bool = false, codegramVideo: TelegramMediaFile? = nil, codegramPaidMessageAuthorized: Bool = false, completion: @escaping () -> Void = {}) {
         guard let textInputPanelNode = self.inputPanelNode as? ChatTextInputPanelNode else {
             return
         }
@@ -5164,7 +5183,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                             self.controller?.push(premiumController)
                         }),
                         TextAlertAction(type: .genericAction, title: strings.RichText_SendWithoutFormatting, action: { [weak self] in
-                            self?.sendCurrentMessage(silentPosting: silentPosting, scheduleTime: scheduleTime, repeatPeriod: repeatPeriod, postpone: postpone, messageEffect: messageEffect, sendWithoutFormatting: true, completion: completion)
+                            self?.sendCurrentMessage(silentPosting: silentPosting, scheduleTime: scheduleTime, repeatPeriod: repeatPeriod, postpone: postpone, messageEffect: messageEffect, sendWithoutFormatting: true, codegramPaidMessageAuthorized: codegramPaidMessageAuthorized, completion: completion)
                         }),
                         TextAlertAction(type: .genericAction, title: strings.Common_Cancel, action: {
                         })
@@ -5318,9 +5337,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             if codegramVideo == nil, !sendAsRichMessage,
                 effectivePresentationInterfaceState.interfaceState.editMessage == nil,
                 effectivePresentationInterfaceState.interfaceState.forwardMessageIds == nil,
-                self.codegramConvertLinkIfNeeded(text: effectiveInputText.string, controller: self.controller, resume: { [weak self] file in
-                    self?.sendCurrentMessage(silentPosting: silentPosting,scheduleTime: scheduleTime,repeatPeriod: repeatPeriod,postpone: postpone,messageEffect: messageEffect,sendWithoutFormatting: sendWithoutFormatting,codegramVideo: file,completion: completion)
-                }) { return }
+                self.codegramQueueLinkIfNeeded(text: effectiveInputText.string, controller: self.controller, silentPosting: silentPosting, scheduleTime: scheduleTime, repeatPeriod: repeatPeriod, postpone: postpone, messageEffect: messageEffect, paidAuthorized: codegramPaidMessageAuthorized, completion: completion) { return }
 
             let timestamp = CACurrentMediaTime()
             if self.lastSendTimestamp + 0.15 > timestamp {

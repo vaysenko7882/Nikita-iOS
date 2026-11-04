@@ -93,5 +93,93 @@ final class CodeGramSocialVideoTests: XCTestCase {
         XCTAssertFalse(CodeGramVPSError.socialVideoFailure(code: "video_dns_error", serviceVersion: "5.2.0\nsecret").message.contains("secret"))
         XCTAssertTrue(CodeGramVPSError.connection(URLError(.dnsLookupFailed)).message.contains("адрес VPS"))
     }
+    func testCancelledVideoIntentCannotEnqueueLateCompletion() {
+        let url = URL(string: "https://www.tiktok.com/@owner/video/123")!
+        var intent = CodeGramSocialVideoSendState(accountSession: "account-session", destination: "peer:thread", sourceURL: url)
+        XCTAssertTrue(intent.cancel())
+        XCTAssertFalse(intent.claimHandoff(attempt: 0, accountSession: "account-session"))
+        XCTAssertEqual(intent.phase, .cancelled)
+    }
+    func testRetryRejectsOldCompletionAndHandoffIsExactlyOnce() {
+        let url = URL(string: "https://www.instagram.com/reel/Ab123/")!
+        var intent = CodeGramSocialVideoSendState(accountSession: "one", destination: "captured-peer:12", sourceURL: url)
+        XCTAssertTrue(intent.fail(attempt: 0))
+        XCTAssertEqual(intent.retry(), 1)
+        XCTAssertFalse(intent.claimHandoff(attempt: 0, accountSession: "one"))
+        XCTAssertFalse(intent.claimHandoff(attempt: 1, accountSession: "another-login"))
+        XCTAssertTrue(intent.claimHandoff(attempt: 1, accountSession: "one"))
+        XCTAssertFalse(intent.claimHandoff(attempt: 1, accountSession: "one"))
+        XCTAssertFalse(intent.cancel()) // Already in the native pending-message handoff.
+        XCTAssertTrue(intent.finishHandoff(attempt: 1, accepted: true))
+        XCTAssertFalse(intent.finishHandoff(attempt: 1, accepted: true))
+        XCTAssertEqual(intent.destination, "captured-peer:12")
+        XCTAssertEqual(intent.sourceURL, url)
+        XCTAssertNil(intent.retry())
+    }
+    func testTwoExplicitSendsOfTheSameLinkRemainIndependent() {
+        let url = URL(string: "https://vt.tiktok.com/Ab123/")!
+        var first = CodeGramSocialVideoSendState(accountSession: "one", destination: "peer-a", sourceURL: url)
+        var second = CodeGramSocialVideoSendState(accountSession: "one", destination: "peer-b", sourceURL: url)
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertTrue(first.cancel())
+        XCTAssertTrue(second.claimHandoff(attempt: 0, accountSession: "one"))
+        XCTAssertEqual(first.destination, "peer-a")
+        XCTAssertEqual(second.destination, "peer-b")
+    }
+    func testVideoCacheOwnsMasterSeparatelyFromEachUploaderInput() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CodeGram-cache-test-\(UUID().uuidString)")
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent("CodeGram-cache-source-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: directory); try? FileManager.default.removeItem(at: source) }
+        try Data(repeating: 42, count: 1024).write(to: source)
+        let url = URL(string: "https://www.instagram.com/reel/Ab123/")!
+        let metadata = CodeGramSocialVideoFileCache.Metadata(sourceURL: url.absoluteString, size: 1024, duration: 2, width: 64, height: 64)
+        let cache = CodeGramSocialVideoFileCache(directory: directory)
+        let stored = expectation(description: "master stored")
+        cache.store(source: source, metadata: metadata) { success in XCTAssertTrue(success); stored.fulfill() }
+        wait(for: [stored], timeout: 5)
+        try FileManager.default.removeItem(at: source)
+        let copied = expectation(description: "independent uploader input")
+        cache.copyForSend(sourceURL: url) { result in
+            XCTAssertEqual(result?.0, metadata)
+            if let input = result?.1 {
+                XCTAssertEqual(try? Data(contentsOf: input).count, 1024)
+                try? FileManager.default.removeItem(at: input) // Native uploader unlinks its own input.
+            } else { XCTFail("Missing cached video") }
+            copied.fulfill()
+        }
+        wait(for: [copied], timeout: 5)
+        let again = expectation(description: "master survives uploader")
+        cache.copyForSend(sourceURL: url) { result in
+            XCTAssertNotNil(result)
+            if let input = result?.1 { try? FileManager.default.removeItem(at: input) }
+            again.fulfill()
+        }
+        wait(for: [again], timeout: 5)
+        cache.invalidate()
+        let loggedOut = expectation(description: "logout cannot reuse account cache")
+        cache.copyForSend(sourceURL: url) { result in XCTAssertNil(result); loggedOut.fulfill() }
+        wait(for: [loggedOut], timeout: 5)
+    }
+    func testVideoCacheExpiresAndRejectsUnvalidatedMetadata() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CodeGram-cache-expiry-\(UUID().uuidString)")
+        let source = directory.appendingPathExtension("mp4")
+        defer { try? FileManager.default.removeItem(at: directory); try? FileManager.default.removeItem(at: source) }
+        try Data(repeating: 1, count: 16).write(to: source)
+        let url = URL(string: "https://vt.tiktok.com/Ab123/")!
+        let metadata = CodeGramSocialVideoFileCache.Metadata(sourceURL: url.absoluteString, size: 16, duration: 1, width: 32, height: 32)
+        let old = CodeGramSocialVideoFileCache(directory: directory, now: { Date(timeIntervalSince1970: 100) })
+        let stored = expectation(description: "old master")
+        old.store(source: source, metadata: metadata) { success in XCTAssertTrue(success); stored.fulfill() }
+        wait(for: [stored], timeout: 5)
+        let reopened = CodeGramSocialVideoFileCache(directory: directory, ttl: 60, now: { Date(timeIntervalSince1970: 161) })
+        let expired = expectation(description: "expired input never used")
+        reopened.copyForSend(sourceURL: url) { result in XCTAssertNil(result); expired.fulfill() }
+        wait(for: [expired], timeout: 5)
+        let invalid = CodeGramSocialVideoFileCache.Metadata(sourceURL: "https://private.example/video", size: 16, duration: .nan, width: 0, height: 32)
+        let rejected = expectation(description: "invalid metadata")
+        reopened.store(source: source, metadata: invalid) { success in XCTAssertFalse(success); rejected.fulfill() }
+        wait(for: [rejected], timeout: 5)
+    }
+
 }
 
