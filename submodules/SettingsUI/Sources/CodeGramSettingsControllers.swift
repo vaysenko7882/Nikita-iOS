@@ -47,7 +47,7 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
         self.tableView.contentInsetAdjustmentBehavior = .never
         self.tableView.keyboardDismissMode = .interactive
         self.tableView.rowHeight = UITableView.automaticDimension
-        self.tableView.estimatedRowHeight = 88
+        self.tableView.estimatedRowHeight = 64
         self.tableView.dataSource = self; self.tableView.delegate = self
         self.displayNode.view.addSubview(self.tableView)
         self.reloadContent()
@@ -62,8 +62,8 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
     func reloadContent() { self.sections = self.makeSections(); self.tableView.reloadData() }
     func makeSections() -> [CodeGramSettingsSection] { [] }
     func notice(_ message: String, title: String = "CodeGram") {
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "ОК", style: .default))
+        let alert = CodeGramPlainAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(CodeGramPlainAlertAction(title: "ОК", style: .default))
         self.present(alert, animated: true)
     }
     func numberOfSections(in tableView: UITableView) -> Int { self.sections.count }
@@ -71,7 +71,10 @@ class CodeGramTableController: ViewController, UITableViewDataSource, UITableVie
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { self.sections[section].title }
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? { self.sections[section].footer }
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        self.sections[indexPath.section].rows[indexPath.row].cell()
+        let section = self.sections[indexPath.section]
+        let cell = section.rows[indexPath.row].cell()
+        (cell as? CodeGramSurfaceCell)?.configureSection(row: indexPath.row, count: section.rows.count)
+        return cell
     }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { tableView.deselectRow(at: indexPath, animated: true); self.sections[indexPath.section].rows[indexPath.row].action?() }
     func textRow(_ title: String, detail: String? = nil, icon: String, action: (() -> Void)? = nil) -> CodeGramSettingsRow {
@@ -118,9 +121,9 @@ final class CodeGramVoiceController: CodeGramTableController {
         presetRows.append(self.textRow("Сохранить свой пресет", icon: "plus.circle", action: { [weak self] in self?.savePreset() }))
         presetRows.append(self.textRow("Удалить свои пресеты", icon: "bookmark.slash", action: { [weak self] in
             guard let self else { return }
-            let alert = UIAlertController(title: "Удалить свои пресеты?", message: "Текущие настройки голоса сохранятся.", preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Отмена", style: .cancel))
-            alert.addAction(UIAlertAction(title: "Удалить", style: .destructive, handler: { [weak self] _ in NikitaSettingsStore.shared.voicePresets = []; self?.reloadContent() }))
+            let alert = CodeGramPlainAlertController(title: "Удалить свои пресеты?", message: "Текущие настройки голоса сохранятся.", preferredStyle: .alert)
+            alert.addAction(CodeGramPlainAlertAction(title: "Отмена", style: .cancel))
+            alert.addAction(CodeGramPlainAlertAction(title: "Удалить", style: .destructive, handler: { [weak self] _ in NikitaSettingsStore.shared.voicePresets = []; self?.reloadContent() }))
             self.present(alert, animated: true)
         }))
         return [
@@ -143,10 +146,10 @@ final class CodeGramVoiceController: CodeGramTableController {
         ]
     }
     private func savePreset() {
-        let alert = UIAlertController(title: "Свой голос", message: "Назови текущие настройки", preferredStyle: .alert)
+        let alert = CodeGramPlainAlertController(title: "Свой голос", message: "Назови текущие настройки", preferredStyle: .alert)
         alert.addTextField { $0.placeholder = "Название пресета" }
-        alert.addAction(UIAlertAction(title: "Отмена", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Сохранить", style: .default, handler: { [weak self, weak alert] _ in
+        alert.addAction(CodeGramPlainAlertAction(title: "Отмена", style: .cancel))
+        alert.addAction(CodeGramPlainAlertAction(title: "Сохранить", style: .default, handler: { [weak self, weak alert] _ in
             guard let self, let name = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return }
             var presets = NikitaSettingsStore.shared.voicePresets
             guard presets.count < 24 else { self.notice("Уже сохранено 24 пресета. Сначала удали ненужные."); return }
@@ -156,7 +159,7 @@ final class CodeGramVoiceController: CodeGramTableController {
     }
 }
 
-private final class CodeGramDeletedPreviewCell: CodeGramGlassCell {
+private final class CodeGramDeletedPreviewCell: CodeGramSurfaceCell {
     private let bubble = UIView()
     init() {
         super.init(style: .default, reuseIdentifier: nil)
@@ -214,5 +217,6 @@ final class CodeGramContentController: CodeGramTableController {
         ]
     }
 }
+
 
 

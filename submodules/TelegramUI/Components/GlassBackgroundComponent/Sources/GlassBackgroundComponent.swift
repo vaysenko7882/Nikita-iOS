@@ -572,7 +572,7 @@ public class GlassBackgroundView: UIView {
     public static var useCustomGlassImpl: Bool = false
     
     public override init(frame: CGRect) {
-        if ClassicDesign.isEnabled {
+        if !GlassEffects.isEnabled {
             self.legacyView = nil
             self.legacyHighlightContainerView = nil
             self.legacyHighlightClippingContext = nil
@@ -585,7 +585,7 @@ public class GlassBackgroundView: UIView {
             let classicView = ClassicGlassMaterialView(frame: CGRect())
             self.classicView = classicView
             self.classicClippingContext = ClippingShapeContext(view: classicView)
-        } else if #available(iOS 26.0, *), !GlassBackgroundView.useCustomGlassImpl {
+        } else if #available(iOS 26.0, *), GlassEffects.isEnabled, !GlassBackgroundView.useCustomGlassImpl {
             self.classicView = nil
             self.classicClippingContext = nil
             
@@ -626,7 +626,7 @@ public class GlassBackgroundView: UIView {
         
         self.maskContainerView = UIView()
         self.maskContainerView.backgroundColor = .white
-        if let filter = CALayer.luminanceToAlpha() {
+        if GlassEffects.isEnabled, let filter = CALayer.luminanceToAlpha() {
             self.maskContainerView.layer.filters = [filter]
         }
         
@@ -854,7 +854,7 @@ public class GlassBackgroundView: UIView {
                 transition.setAlpha(view: foregroundView, alpha: isVisible ? 1.0 : 0.0)
             } else {
                 if let nativeView = self.nativeView {
-                    if #available(iOS 26.0, *) {
+                    if #available(iOS 26.0, *), GlassEffects.isEnabled {
                         var glassEffect: UIGlassEffect?
                         
                         if isVisible {
@@ -966,7 +966,7 @@ public final class GlassBackgroundContainerView: UIView {
     /// Whether containers merge the glass shapes in them: native glass does, the custom implementation (before iOS 26, or
     /// `GlassBackgroundView.useCustomGlassImpl`) only stacks them.
     public static var mergesShapes: Bool {
-        if ClassicDesign.isEnabled {
+        if !GlassEffects.isEnabled {
             return false
         }
         if #available(iOS 26.0, *), !GlassBackgroundView.useCustomGlassImpl {
@@ -977,11 +977,11 @@ public final class GlassBackgroundContainerView: UIView {
 
     public init(spacing: CGFloat = 7.0) {
         self.spacing = spacing
-        if ClassicDesign.isEnabled {
+        if !GlassEffects.isEnabled {
             self.nativeView = nil
             self.nativeParamsView = nil
             self.legacyView = ContentView()
-        } else if #available(iOS 26.0, *), !GlassBackgroundView.useCustomGlassImpl {
+        } else if #available(iOS 26.0, *), GlassEffects.isEnabled, !GlassBackgroundView.useCustomGlassImpl {
             let effect = UIGlassContainerEffect()
             effect.spacing = spacing
             let nativeView = UIVisualEffectView(effect: effect)
@@ -1560,7 +1560,7 @@ public extension GlassBackgroundView {
             size = CGSize(width: 1.0, height: 1.0)
         }
         
-        if ClassicDesign.isEnabled {
+        if !GlassEffects.isEnabled {
             return generateImage(size, rotatedContext: { size, context in
                 context.clear(CGRect(origin: CGPoint(), size: size))
                 context.setFillColor(fillColor.cgColor)

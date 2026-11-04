@@ -17,6 +17,7 @@ import WebUI
 import AvatarNode
 import PeerNameColorItem
 import BoostLevelIconComponent
+import SettingsUI
 
 private let enabledPublicBioEntities: EnabledEntityTypes = [.allUrl, .mention, .hashtag]
 private let enabledPrivateBioEntities: EnabledEntityTypes = [.internalUrl, .mention, .hashtag]
@@ -903,6 +904,14 @@ func infoItems(
     }
 
     let interfaceSettings = InterfaceTuningSettingsStore.shared.current
+    if let peer = data.peer, case let .user(user) = peer, user.botInfo == nil, peer.id != context.account.peerId {
+        let account = String(context.account.peerId.id._internalGetInt64Value())
+        let identifier = String(peer.id.id._internalGetInt64Value())
+        let tracked = NikitaSettingsStore.shared.isProfileTracked(account: account, peerId: identifier)
+        items[.technical]!.append(PeerInfoScreenDisclosureItem(id: 91991, label: .text(tracked ? "Включено" : ""), text: "Отслеживание профиля", icon: UIImage(systemName: "person.crop.circle.badge.clock")?.withTintColor(presentationData.theme.list.itemPrimaryTextColor, renderingMode: .alwaysOriginal), action: {
+            interaction.getController()?.push(codegramProfileTrackingController(context: context, peerId: peer.id, accessHash: user.accessHash?.value, title: peer.debugDisplayTitle))
+        }))
+    }
     let interfaceStrings = presentationData.strings.localFeatures.interfaceTuning
     var technicalItemId = 91000
 

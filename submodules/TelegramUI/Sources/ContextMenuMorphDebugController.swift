@@ -153,12 +153,8 @@ final class ContextMenuMorphDebugController: ViewController {
             label.font = .systemFont(ofSize: 12)
             foreground.view.addSubview(label)
             reference.addSubnode(foreground)
-            let background: UIVisualEffectView
-            if #available(iOS 26.0, *) {
-                background = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
-            } else {
-                background = UIVisualEffectView(effect: UIBlurEffect(style: .regular))
-            }
+            let background = UIVisualEffectView(effect: nil)
+            background.backgroundColor = .secondarySystemBackground
             background.frame = button.frame
             let maskContainer = UIView(frame: background.bounds)
             let mask = UIView(frame: index == 15 ? maskContainer.bounds.inset(by: UIEdgeInsets(top: 16, left: 0, bottom: 0, right: 0)) : maskContainer.bounds)
@@ -174,6 +170,7 @@ final class ContextMenuMorphDebugController: ViewController {
             reference.makeContextMenuSourceContent = { [weak self, weak reference] in
                 guard let self, let reference else { return nil }
                 let liveBackground = UIVisualEffectView(effect: background.effect)
+                liveBackground.backgroundColor = background.backgroundColor
                 liveBackground.frame = mask.frame
                 liveBackground.layer.cornerRadius = mask.layer.cornerRadius
                 liveBackground.clipsToBounds = true
@@ -278,7 +275,8 @@ final class ContextMenuMorphDebugController: ViewController {
         label.textAlignment = .center
         foreground.view.addSubview(label)
         source.addSubnode(foreground)
-        let background = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        let background = UIVisualEffectView(effect: nil)
+        background.backgroundColor = .secondarySystemBackground
         background.frame = source.frame
         let mask = UIView(frame: background.bounds)
         mask.backgroundColor = .white
@@ -292,6 +290,7 @@ final class ContextMenuMorphDebugController: ViewController {
         source.makeContextMenuSourceContent = { [weak self, weak source] in
             guard let self, let source else { return nil }
             let liveBackground = UIVisualEffectView(effect: background.effect)
+            liveBackground.backgroundColor = background.backgroundColor
             liveBackground.frame = source.bounds
             liveBackground.layer.cornerRadius = 16
             liveBackground.clipsToBounds = true

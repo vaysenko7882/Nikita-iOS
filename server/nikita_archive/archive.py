@@ -14,6 +14,8 @@ class Archive:
         self.path = str(path)
         self.media = None
         self.policy = None
+        self.profiles = None
+        self.social_videos = None
         Path(self.path).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self.connect() as db:
             db.executescript("""

@@ -2,28 +2,28 @@ import UIKit
 
 /// Complete constraints from the cell to every visible label let UITableView
 /// measure multiline switch rows instead of overflowing a fixed-height row.
-class CodeGramGlassCell: UITableViewCell {
-    let glass = CodeGramMaterialView(radius: 22)
+class CodeGramSurfaceCell: UITableViewCell {
+    let surface = CodeGramSurfaceView(radius: 22)
     let bodyView = UIView()
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         CodeGramSettingsTheme.prepare(self)
         self.clipsToBounds = false; self.contentView.clipsToBounds = false
-        self.contentView.addSubview(self.glass)
-        self.glass.contentView.addSubview(self.bodyView)
-        self.glass.translatesAutoresizingMaskIntoConstraints = false
+        self.contentView.addSubview(self.surface)
+        self.surface.contentView.addSubview(self.bodyView)
+        self.surface.translatesAutoresizingMaskIntoConstraints = false
         self.bodyView.translatesAutoresizingMaskIntoConstraints = false
-        let minimum = self.glass.heightAnchor.constraint(greaterThanOrEqualToConstant: 60)
+        let minimum = self.surface.heightAnchor.constraint(greaterThanOrEqualToConstant: 52)
         minimum.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            self.glass.topAnchor.constraint(equalTo: self.contentView.topAnchor, constant: 4),
-            self.glass.bottomAnchor.constraint(equalTo: self.contentView.bottomAnchor, constant: -4),
-            self.glass.leadingAnchor.constraint(equalTo: self.contentView.leadingAnchor),
-            self.glass.trailingAnchor.constraint(equalTo: self.contentView.trailingAnchor),
-            self.bodyView.topAnchor.constraint(equalTo: self.glass.topAnchor),
-            self.bodyView.bottomAnchor.constraint(equalTo: self.glass.bottomAnchor),
-            self.bodyView.leadingAnchor.constraint(equalTo: self.glass.leadingAnchor),
-            self.bodyView.trailingAnchor.constraint(equalTo: self.glass.trailingAnchor), minimum
+            self.surface.topAnchor.constraint(equalTo: self.contentView.topAnchor),
+            self.surface.bottomAnchor.constraint(equalTo: self.contentView.bottomAnchor),
+            self.surface.leadingAnchor.constraint(equalTo: self.contentView.leadingAnchor),
+            self.surface.trailingAnchor.constraint(equalTo: self.contentView.trailingAnchor),
+            self.bodyView.topAnchor.constraint(equalTo: self.surface.topAnchor),
+            self.bodyView.bottomAnchor.constraint(equalTo: self.surface.bottomAnchor),
+            self.bodyView.leadingAnchor.constraint(equalTo: self.surface.leadingAnchor),
+            self.bodyView.trailingAnchor.constraint(equalTo: self.surface.trailingAnchor), minimum
         ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -35,7 +35,7 @@ class CodeGramGlassCell: UITableViewCell {
         }
     }
     override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
-        // A glass content host has no intrinsic width while UITableView performs
+        // The content host has no intrinsic width while UITableView performs
         // its fitting pass. Give multiline labels their final wrapping width
         // before asking Auto Layout for the height.
         self.updateWrappingWidth(targetSize.width)
@@ -44,6 +44,31 @@ class CodeGramGlassCell: UITableViewCell {
     override func layoutSubviews() {
         super.layoutSubviews()
         self.updateWrappingWidth(self.contentView.bounds.width)
+        // History and selection controllers also create these cells.
+        var ancestor = self.superview
+        while let view = ancestor {
+            if let table = view as? UITableView {
+                if let indexPath = table.indexPath(for: self) {
+                    self.configureSection(row: indexPath.row, count: table.numberOfRows(inSection: indexPath.section))
+                }
+                break
+            }
+            ancestor = view.superview
+        }
+    }
+    func configureSection(row: Int, count: Int) {
+        self.surface.setSectionPosition(CodeGramSectionPosition(row: row, count: count))
+    }
+    override func setHighlighted(_ highlighted: Bool, animated: Bool) {
+        super.setHighlighted(highlighted, animated: animated)
+        self.refreshSelection()
+    }
+    override func setSelected(_ selected: Bool, animated: Bool) {
+        super.setSelected(selected, animated: animated)
+        self.refreshSelection()
+    }
+    private func refreshSelection() {
+        self.surface.backgroundColor = self.isHighlighted || self.isSelected ? CodeGramSettingsTheme.selectedSurface : CodeGramSettingsTheme.surface
     }
     func install(_ view: UIView) {
         self.bodyView.addSubview(view)
@@ -51,8 +76,8 @@ class CodeGramGlassCell: UITableViewCell {
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: self.bodyView.leadingAnchor, constant: 16),
             view.trailingAnchor.constraint(equalTo: self.bodyView.trailingAnchor, constant: -16),
-            view.topAnchor.constraint(equalTo: self.bodyView.topAnchor, constant: 14),
-            view.bottomAnchor.constraint(equalTo: self.bodyView.bottomAnchor, constant: -14)
+            view.topAnchor.constraint(equalTo: self.bodyView.topAnchor, constant: 12),
+            view.bottomAnchor.constraint(equalTo: self.bodyView.bottomAnchor, constant: -12)
         ])
     }
 }
@@ -61,14 +86,43 @@ final class CodeGramValueSwitch: UISwitch {
     var changed: ((Bool) -> Void)?
     override init(frame: CGRect) {
         super.init(frame: frame)
-        self.onTintColor = .systemGray
+        self.onTintColor = CodeGramSettingsTheme.accent
+        self.thumbTintColor = .white
         self.addTarget(self, action: #selector(self.updateValue), for: .valueChanged)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     @objc private func updateValue() { self.changed?(self.isOn) }
 }
 
-final class CodeGramTextCell: CodeGramGlassCell {
+/// Supply a bitmap thumb so UIKit cannot substitute an interactive glass knob.
+final class CodeGramValueSlider: UISlider {
+    private var thumbColor: UIColor?
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.minimumTrackTintColor = CodeGramSettingsTheme.accent
+        self.maximumTrackTintColor = .systemGray3
+        self.refreshThumb()
+        if #available(iOS 17.0, *) {
+            self.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: CodeGramValueSlider, _: UITraitCollection) in view.refreshThumb() }
+        }
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func layoutSubviews() { super.layoutSubviews(); self.refreshThumb() }
+    private func refreshThumb() {
+        let color = UIColor.white
+        guard color != self.thumbColor else { return }
+        self.thumbColor = color
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 28, height: 28)).image { _ in
+            let path = UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: 24, height: 24))
+            color.setFill(); path.fill()
+            UIColor(white: 0.82, alpha: 1).setStroke(); path.lineWidth = 0.5; path.stroke()
+        }
+        self.setThumbImage(image, for: .normal)
+        self.setThumbImage(image, for: .highlighted)
+    }
+}
+
+final class CodeGramTextCell: CodeGramSurfaceCell {
     private let caption = UILabel()
     private let detailLabel = UILabel()
     private var iconWidth: CGFloat = 28
@@ -102,7 +156,7 @@ final class CodeGramTextCell: CodeGramGlassCell {
             heading.addArrangedSubview(arrow)
         }
         let stack = UIStackView(arrangedSubviews: [heading])
-        stack.axis = .vertical; stack.spacing = 7
+        stack.axis = .vertical; stack.spacing = 4
         if let detail, !detail.isEmpty {
             let label = self.detailLabel
             label.text = detail; label.textColor = .secondaryLabel
@@ -128,7 +182,7 @@ final class CodeGramTextCell: CodeGramGlassCell {
     }
 }
 
-final class CodeGramFieldCell: CodeGramGlassCell {
+final class CodeGramFieldCell: CodeGramSurfaceCell {
     init(field: UITextField, symbol: String) {
         super.init(style: .default, reuseIdentifier: nil)
         field.removeFromSuperview()
@@ -145,10 +199,10 @@ final class CodeGramFieldCell: CodeGramGlassCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-final class CodeGramSliderCell: CodeGramGlassCell {
+final class CodeGramSliderCell: CodeGramSurfaceCell {
     private let caption = UILabel()
     private let valueLabel = UILabel()
-    private let slider = UISlider()
+    private let slider = CodeGramValueSlider()
     private let changed: (Double) -> Void
     private let format: (Double) -> String
     init(title: String, symbol: String, value: Double, range: ClosedRange<Double>, format: @escaping (Double) -> String, changed: @escaping (Double) -> Void) {
@@ -188,3 +242,4 @@ final class CodeGramSliderCell: CodeGramGlassCell {
         self.changed(value)
     }
 }
+

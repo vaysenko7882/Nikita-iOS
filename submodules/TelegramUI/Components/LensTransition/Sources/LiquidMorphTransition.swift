@@ -1,4 +1,5 @@
 import UIKit
+import Display
 import LensTransitionRuntime
 
 @available(iOS 26.0, *)
@@ -10,7 +11,7 @@ public final class LiquidMorphTransition {
     }
 
     public static var isSupported: Bool {
-        return LTTransitionDriver.isSupported()
+        return GlassEffects.isEnabled && LTTransitionDriver.isSupported()
     }
 
     public static func sourcePreview(for view: UIView, parameters: UIPreviewParameters, usePresentationTransform: Bool = false) -> UITargetedPreview? {

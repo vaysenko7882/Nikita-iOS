@@ -5,6 +5,15 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = [
+    "submodules/SettingsUI/Sources/CodeGramIconPickerView.swift",
+    "submodules/SettingsUI/Sources/CodeGramIconPickerController.swift",
+    "submodules/SettingsUI/Sources/CodeGramProfileTrackingController.swift",
+    "submodules/TelegramCore/Sources/Nikita/CodeGramVPSClient.swift",
+    "submodules/TelegramCore/Sources/Nikita/CodeGramSocialVideoLink.swift",
+    "submodules/TelegramCore/Sources/Nikita/CodeGramSocialVideoMedia.swift",
+    "submodules/TelegramUI/Sources/CodeGramSocialVideoConversion.swift",
+    "submodules/TelegramUI/Sources/ChatControllerNode.swift",
+    "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift",
     "submodules/SettingsUI/Sources/CodeGramSettingsCells.swift",
     "submodules/SettingsUI/Sources/CodeGramDashboardComponents.swift",
     "submodules/SettingsUI/Sources/CodeGramSettingsTheme.swift",

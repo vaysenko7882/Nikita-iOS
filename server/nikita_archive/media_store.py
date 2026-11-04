@@ -29,6 +29,7 @@ class MediaStore:
         self.reserve = max(0, int(config.get("media_min_free_bytes", 1024**3)))
         self.workers = max(2, min(4, int(config.get("media_workers", 3))))
         self.reservations = {}
+        self._wakeups = {}
         with archive.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS media_assets(
@@ -44,10 +45,17 @@ class MediaStore:
                 CREATE TABLE IF NOT EXISTS media_sources(
                     id TEXT NOT NULL,peer_type TEXT NOT NULL,peer_id INTEGER NOT NULL,message_id INTEGER NOT NULL,
                     PRIMARY KEY(id,peer_type,peer_id,message_id));
+                CREATE TABLE IF NOT EXISTS media_story_assets(id TEXT PRIMARY KEY);
             """)
             columns = {row[1] for row in db.execute("PRAGMA table_info(media_assets)")}
             if "category" not in columns:
                 db.execute("ALTER TABLE media_assets ADD COLUMN category TEXT NOT NULL DEFAULT 'files'")
+            if not archive._meta(db,"story_media_queue_v1",""):
+                for identifier,request in db.execute("SELECT id,request FROM media_assets WHERE request LIKE '%CodeGramProfile%'"):
+                    source = json.loads(request).get("source") or {}
+                    if source.get("type")=="CodeGramProfile" and source.get("section")=="stories":
+                        db.execute("INSERT OR IGNORE INTO media_story_assets VALUES(?)", (identifier,))
+                db.execute("INSERT OR REPLACE INTO meta VALUES('story_media_queue_v1','1')")
             from .policy import source_peer
             if db.execute("SELECT COUNT(*) FROM media_sources").fetchone()[0]==0:
                 for identifier,request in db.execute("SELECT id,request FROM media_assets").fetchall():
@@ -65,6 +73,8 @@ class MediaStore:
                 db.execute("INSERT OR REPLACE INTO meta VALUES('storage_categories_v4','1')")
 
     def permitted(self, identifier):
+        if self.archive.profiles is not None and self.archive.profiles.permits_asset(identifier):
+            return True
         if self.archive.policy is None: return True
         with self.archive.connect() as db:
             sources = db.execute("SELECT DISTINCT peer_type,peer_id FROM media_sources WHERE id=?",(identifier,)).fetchall()
@@ -121,6 +131,26 @@ class MediaStore:
             from .policy import source_peer
             source = source_peer(request.get("source"))
             if source: db.execute("INSERT OR IGNORE INTO media_sources VALUES(?,?,?,?)",(identifier,*source))
+            profile_source = request.get("source") or {}
+            if profile_source.get("type")=="CodeGramProfile" and profile_source.get("section")=="stories":
+                db.execute("INSERT OR IGNORE INTO media_story_assets VALUES(?)", (identifier,))
+        # Each bounded worker has its own notification so an idle story lane
+        # wakes on receipt instead of waiting for the one-second retry timer.
+        # Calls from another thread are safe; an API MediaStore owns no workers.
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        for wake,loop in list(self._wakeups.items()):
+            if wake.is_set():
+                continue
+            try:
+                if current_loop is loop:
+                    wake.set()
+                else:
+                    loop.call_soon_threadsafe(wake.set)
+            except RuntimeError:
+                pass  # A worker's event loop may have just shut down.
         return {"blob_id": identifier, "size": size}
 
     def catalog(self, descriptor):
@@ -128,16 +158,22 @@ class MediaStore:
             db.execute("INSERT OR REPLACE INTO media_catalog VALUES(?,?,?)",
                 (descriptor["id"], descriptor["kind"], json.dumps(descriptor, separators=(",", ":"))))
 
-    def claim(self, small_only=False):
+    def claim(self, small_only=False, story_only=False):
         if not self.enabled:
+            return None
+        if story_only and self.archive.profiles is None:
             return None
         with self.archive.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             maximum = 16*1024**2 if small_only else MAX_MEDIA_SIZE
-            candidates = db.execute("SELECT id,request,size,mime,attempts FROM media_assets WHERE state IN ('pending','paused_policy') AND retry_at<=? AND size<=? ORDER BY priority DESC,size,rowid",
+            lane = " AND id IN (SELECT id FROM media_story_assets)" if story_only else ""
+            order = "priority DESC,rowid DESC" if story_only else "priority DESC,size,rowid"
+            candidates = db.execute("SELECT id,request,size,mime,attempts FROM media_assets WHERE state IN ('pending','paused_policy') AND retry_at<=? AND size<=?" + lane + " ORDER BY " + order,
                 (time.time(), maximum))
             available = max(0, shutil.disk_usage(self.root).free - self.reserve - sum(self.reservations.values()))
             for identifier, request, size, mime, attempts in candidates:
+                if story_only and not self.archive.profiles.permits_asset(identifier):
+                    continue
                 if not self.permitted(identifier):
                     db.execute("UPDATE media_assets SET state='paused_policy',error='paused_by_policy' WHERE id=? AND state!='paused_policy'",(identifier,))
                     continue
@@ -169,11 +205,11 @@ class MediaStore:
             db.execute("UPDATE media_assets SET state='ready',sha256=?,error='',mtime_ns=? WHERE id=?",
                 (digest, info.st_mtime_ns, job["id"]))
 
-    def defer(self, job, error, delay=None):
+    def defer(self, job, error, delay=None, terminal=False):
         attempts = job["attempts"] + 1
         with self.archive.connect() as db:
             db.execute("UPDATE media_assets SET state=?,attempts=?,retry_at=?,error=? WHERE id=?",
-                ("failed" if attempts >= 8 else "pending", attempts,
+                ("failed" if terminal or attempts >= 8 else "pending", attempts,
                  time.time() + (delay if delay is not None else min(3600, 15 * 2**min(attempts, 8))),
                  type(error).__name__[:64], job["id"]))
 
@@ -233,11 +269,23 @@ class MediaStore:
         if not self.permitted(job["id"]): raise CapturePaused()
         self.complete(job, digest)
 
-    async def worker(self, client, small_only=False):
+    async def worker(self, client, small_only=False, story_only=False):
+        wake = asyncio.Event()
+        self._wakeups[wake] = asyncio.get_running_loop()
+        try:
+            await self._work(client, wake, small_only, story_only)
+        finally:
+            self._wakeups.pop(wake, None)
+
+    async def _work(self, client, wake, small_only, story_only):
         while True:
-            job = self.claim(small_only)
+            wake.clear()
+            job = self.claim(small_only, story_only)
             if job is None:
-                await asyncio.sleep(1)
+                try:
+                    await asyncio.wait_for(wake.wait(), 1)
+                except asyncio.TimeoutError:
+                    pass
                 continue
             try:
                 await self.download(client, job)
@@ -253,7 +301,7 @@ class MediaStore:
                 # message. Refresh that reference once; deletion is not treated
                 # as recoverable content and never creates an invented file.
                 source = job["request"].get("source")
-                if type(error).__name__ in ("FileReferenceExpiredError", "FileReferenceInvalidError") and source:
+                if type(error).__name__ in ("FileReferenceExpiredError", "FileReferenceInvalidError") and source and source.get("type")!="CodeGramProfile":
                     try:
                         from telethon import types
                         from .media_capture import MediaCapture
@@ -268,7 +316,14 @@ class MediaStore:
                             continue
                     except Exception as refreshed_error:
                         error = refreshed_error
-                self.defer(job, error, getattr(error, "seconds", None))
+                # A lost story reference cannot be refreshed from a chat
+                # message. Keep its metadata and report unavailable bytes;
+                # a later received full story can register a fresh reference.
+                story_source = (source or {}).get("type")=="CodeGramProfile" and (source or {}).get("section")=="stories"
+                terminal = story_source and type(error).__name__ in (
+                    "FileReferenceExpiredError", "FileReferenceInvalidError", "FileIdInvalidError",
+                    "LocationInvalidError", "PhotoInvalidError")
+                self.defer(job, error, getattr(error, "seconds", None), terminal=terminal)
             finally:
                 self.reservations.pop(job["id"], None)
 
@@ -315,3 +370,4 @@ class MediaStore:
         stats = self.stats()
         return {**stats,"partial_bytes":partial_bytes,"total_bytes":stats["stored_bytes"]+partial_bytes+database_bytes,"categories":categories,"deleted_bytes":deleted,"database_bytes":database_bytes,
             "paused_by_policy":paused,"deleted_messages":deleted_count,"revision_count":revisions,"reserved_bytes":self.reserve}
+

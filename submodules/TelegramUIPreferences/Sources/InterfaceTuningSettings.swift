@@ -60,7 +60,7 @@ public struct InterfaceTuningSettings: Codable, Equatable {
         self.showSearchShortcut = showSearchShortcut
         self.stretchBottomBar = stretchBottomBar
         self.showAppBadge = showAppBadge
-        self.classicDesign = classicDesign
+        self.classicDesign = false
         self.showProfileIdentifiers = showProfileIdentifiers
         self.showDataCenter = showDataCenter
         self.showRegistrationDate = showRegistrationDate
@@ -96,7 +96,7 @@ public struct InterfaceTuningSettings: Codable, Equatable {
         self.showSearchShortcut = try container.decodeIfPresent(Bool.self, forKey: .showSearchShortcut) ?? true
         self.stretchBottomBar = try container.decodeIfPresent(Bool.self, forKey: .stretchBottomBar) ?? false
         self.showAppBadge = try container.decodeIfPresent(Bool.self, forKey: .showAppBadge) ?? true
-        self.classicDesign = try container.decodeIfPresent(Bool.self, forKey: .classicDesign) ?? false
+        self.classicDesign = false
         self.showProfileIdentifiers = try container.decodeIfPresent(Bool.self, forKey: .showProfileIdentifiers) ?? false
         self.showDataCenter = try container.decodeIfPresent(Bool.self, forKey: .showDataCenter) ?? false
         self.showRegistrationDate = try container.decodeIfPresent(Bool.self, forKey: .showRegistrationDate) ?? false
@@ -183,7 +183,8 @@ public final class InterfaceTuningSettingsStore {
         } else {
             currentValue = self.cachedValue
         }
-        let updatedValue = f(currentValue)
+        var updatedValue = f(currentValue)
+        updatedValue.classicDesign = false
         self.cachedValue = updatedValue
         if let data = try? JSONEncoder().encode(updatedValue) {
             self.defaults.set(data, forKey: self.key)

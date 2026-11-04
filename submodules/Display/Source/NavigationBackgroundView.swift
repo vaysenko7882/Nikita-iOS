@@ -64,7 +64,7 @@ public final class NavigationBackgroundNode: ASDisplayNode {
             self.scheduledUpdate = true
             return
         }
-        if self.enableBlur && !sharedIsReduceTransparencyEnabled && ((self._color.alpha > .ulpOfOne && self._color.alpha < 0.95) || forceKeepBlur) {
+        if self.enableBlur && GlassEffects.isEnabled && !sharedIsReduceTransparencyEnabled && ((self._color.alpha > .ulpOfOne && self._color.alpha < 0.95) || forceKeepBlur) {
             if self.effectView == nil {
                 let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .light))
 
@@ -123,8 +123,8 @@ public final class NavigationBackgroundNode: ASDisplayNode {
         self.enableBlur = effectiveEnableBlur
         self.enableSaturation = effectiveEnableSaturation
 
-        if sharedIsReduceTransparencyEnabled {
-            transition.updateBackgroundColor(node: self.backgroundNode, color: self._color.withAlphaComponent(1.0))
+        if sharedIsReduceTransparencyEnabled || !GlassEffects.isEnabled {
+            transition.updateBackgroundColor(node: self.backgroundNode, color: self._color.alpha > .ulpOfOne ? self._color.withAlphaComponent(1.0) : .clear)
         } else {
             transition.updateBackgroundColor(node: self.backgroundNode, color: self._color)
         }
@@ -215,7 +215,7 @@ open class BlurredBackgroundView: UIView {
     }
     
     private func updateBackgroundBlur(forceKeepBlur: Bool) {
-        if let color = self._color, self.enableBlur && !sharedIsReduceTransparencyEnabled && ((color.alpha > .ulpOfOne && color.alpha < 0.95) || forceKeepBlur) {
+        if let color = self._color, self.enableBlur && GlassEffects.isEnabled && !sharedIsReduceTransparencyEnabled && ((color.alpha > .ulpOfOne && color.alpha < 0.95) || forceKeepBlur) {
             if self.effectView == nil {
                 let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .light))
 
@@ -271,8 +271,8 @@ open class BlurredBackgroundView: UIView {
         self._color = color
         self.enableBlur = effectiveEnableBlur
 
-        if sharedIsReduceTransparencyEnabled {
-            transition.updateBackgroundColor(layer: self.backgroundView.layer, color: color.withAlphaComponent(1.0))
+        if sharedIsReduceTransparencyEnabled || !GlassEffects.isEnabled {
+            transition.updateBackgroundColor(layer: self.backgroundView.layer, color: color.alpha > .ulpOfOne ? color.withAlphaComponent(1.0) : .clear)
         } else {
             transition.updateBackgroundColor(layer: self.backgroundView.layer, color: color)
         }

@@ -3,6 +3,7 @@
 from pathlib import Path
 import base64
 import io
+import json
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -52,4 +53,17 @@ small = mark.copy()
 small.thumbnail((52, 52), Image.Resampling.LANCZOS)
 badge.alpha_composite(small, (166, 13))
 badge.save(ROOT / 'submodules/TelegramUI/Images.xcassets/Components/AppBadge.imageset/AppBadge@3x.png', optimize=True)
-print('CodeGram icons generated from the supplied original.')
+previews = ROOT / 'Telegram/Telegram-iOS/CodeGramIconPreviews'
+previews.mkdir(parents=True, exist_ok=True)
+icon.resize((256, 256), Image.Resampling.LANCZOS).save(previews / 'CGOriginalPreview.png', optimize=True)
+choices = json.loads((ROOT / 'tools/nikita/assets/icons/manifest.json').read_text())
+for choice in choices:
+    name = choice['name']
+    with Image.open(ROOT / 'tools/nikita/assets/icons' / choice['source']) as supplied:
+        artwork = supplied.convert('RGB')
+        artwork.resize((256, 256), Image.Resampling.LANCZOS).save(previews / (name + 'Preview.png'), optimize=True)
+        folder = ROOT / 'Telegram/Telegram-iOS' / (name + '.alticon')
+        folder.mkdir(parents=True, exist_ok=True)
+        for suffix, size in (('@2x', 120), ('@3x', 180), ('Ipad', 76), ('Ipad@2x', 152), ('LargeIpad@2x', 167)):
+            artwork.resize((size, size), Image.Resampling.LANCZOS).save(folder / (name + suffix + '.png'), optimize=True)
+print('CodeGram original and eight owner-supplied alternate icons generated.')

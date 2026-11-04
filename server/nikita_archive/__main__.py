@@ -108,9 +108,13 @@ async def run(config):
     from .collector import collect
     from .media_store import MediaStore
     from .policy import CapturePolicy
+    from .profiles import ProfileStore
+    from .social_video import SocialVideoStore
     archive = Archive(config["database_path"])
     archive.policy = CapturePolicy(archive)
     archive.media = MediaStore(archive,config)
+    archive.profiles = ProfileStore(archive)
+    archive.social_videos = SocialVideoStore(config)
     archive.set_connected(False)
     server = make_server(archive, config["token"], int(config.get("port", 8765)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -124,6 +128,7 @@ async def run(config):
     except asyncio.CancelledError:
         pass
     finally:
+        archive.social_videos.close()
         server.shutdown()
         server.server_close()
 

@@ -53,7 +53,7 @@ private enum CodeGramArchiveAPI {
     }
 }
 
-final class CodeGramCapturePolicyController: CodeGramTableController, UISearchBarDelegate {
+final class CodeGramCapturePolicyController: CodeGramTableController {
     private var defaults = ["private": true, "groups": false, "channels": false, "archived": false]
     private var exceptions: [[String: Any]] = []
     private var dialogs: [[String: Any]] = []
@@ -78,17 +78,17 @@ final class CodeGramCapturePolicyController: CodeGramTableController, UISearchBa
         let search = CodeGramSearchView()
         search.frame = header.bounds.insetBy(dx: 20, dy: 6)
         search.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        search.searchBar.placeholder = "Найти диалог, группу или канал"
-        search.searchBar.delegate = self
+        search.textField.placeholder = "Найти диалог, группу или канал"
+        search.onTextChanged = { [weak self] text in self?.searchChanged(text) }
+        search.onSubmit = { [weak self] in self?.searchWork?.cancel(); self?.load(refreshRules: false) }
         header.addSubview(search); self.tableView.tableHeaderView = header
     }
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+    private func searchChanged(_ searchText: String) {
         self.query = String(searchText.prefix(128)); self.searchGeneration += 1
         self.searchWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.load(refreshRules: false) }
         self.searchWork = work; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
     }
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) { searchBar.resignFirstResponder(); self.searchWork?.cancel(); self.load(refreshRules: false) }
     private func load(refreshRules: Bool) {
         let generation = self.searchGeneration
         self.loading = true
@@ -129,9 +129,9 @@ final class CodeGramCapturePolicyController: CodeGramTableController, UISearchBa
     private func mode(_ dialog: [String: Any]) -> String? { self.exceptions.first(where: { self.samePeer($0, dialog) })?["mode"] as? String }
     private func edit(_ dialog: [String: Any]) {
         guard self.revision != nil else { return }
-        let alert = UIAlertController(title: dialog["title"] as? String ?? "Исключение", message: "«Всегда» работает даже в папке «Архив» и при выключенной категории.", preferredStyle: .alert)
+        let alert = CodeGramPlainAlertController(title: dialog["title"] as? String ?? "Исключение", message: "«Всегда» работает даже в папке «Архив» и при выключенной категории.", preferredStyle: .alert)
         for (title, mode) in [("По общим правилам", "default"), ("Всегда сохранять", "always"), ("Никогда не сохранять", "never")] {
-            alert.addAction(UIAlertAction(title: title, style: .default, handler: { [weak self] _ in
+            alert.addAction(CodeGramPlainAlertAction(title: title, style: .default, handler: { [weak self] _ in
                 guard let self, let type = dialog["peer_type"] as? String, let id = dialog["peer_id"] as? NSNumber else { return }
                 self.exceptions.removeAll(where: { self.samePeer($0, dialog) })
                 if mode != "default" {
@@ -141,7 +141,7 @@ final class CodeGramCapturePolicyController: CodeGramTableController, UISearchBa
                 self.message = "Есть несохранённые изменения. Нажми «Сохранить»."; self.reloadContent()
             }))
         }
-        alert.addAction(UIAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
+        alert.addAction(CodeGramPlainAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
     }
     override func makeSections() -> [CodeGramSettingsSection] {
         let rows = [("private", "Личные диалоги", "person"), ("groups", "Группы", "person.2"), ("channels", "Каналы", "megaphone"), ("archived", "Разрешать папку «Архив»", "archivebox")].map { key, title, icon in
@@ -184,7 +184,7 @@ private final class CodeGramStorageBar: UIView {
         }
     }
 }
-private final class CodeGramStorageSummaryCell: CodeGramGlassCell {
+private final class CodeGramStorageSummaryCell: CodeGramSurfaceCell {
     init(total: Int64, categories: [(String, Int64, UIColor)]) {
         super.init(style: .default, reuseIdentifier: nil)
         self.selectionStyle = .none
@@ -256,5 +256,6 @@ final class CodeGramStorageController: CodeGramTableController {
         return result
     }
 }
+
 
 

@@ -80,6 +80,19 @@ public final class NikitaSettingsStore {
         set { self.defaults.set(newValue, forKey: "codegram.allowProtectedExport"); NotificationCenter.default.post(name: Self.changed, object: nil) }
     }
 
+    public var sendsSocialLinksAsVideo: Bool {
+        get { self.defaults.bool(forKey: "codegram.sendsSocialLinksAsVideo") }
+        set { self.defaults.set(newValue, forKey: "codegram.sendsSocialLinksAsVideo"); NotificationCenter.default.post(name: Self.changed, object: nil) }
+    }
+
+    public func isProfileTracked(account: String, peerId: String) -> Bool {
+        self.defaults.bool(forKey: "codegram.trackedProfile.\(account).\(peerId)")
+    }
+    public func setProfileTracked(_ tracked: Bool, account: String, peerId: String) {
+        self.defaults.set(tracked, forKey: "codegram.trackedProfile.\(account).\(peerId)")
+        NotificationCenter.default.post(name: Self.changed, object: nil)
+    }
+
     public var allowsRestrictedContent: Bool {
         get { return self.defaults.bool(forKey: "codegram.allowRestrictedContent") }
         set { self.defaults.set(newValue, forKey: "codegram.allowRestrictedContent"); NotificationCenter.default.post(name: Self.changed, object: nil) }

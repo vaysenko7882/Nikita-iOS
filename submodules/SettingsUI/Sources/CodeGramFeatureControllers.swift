@@ -69,28 +69,28 @@ final class CodeGramLocalArchiveController: CodeGramFeatureController {
         return self.switchRow(title, value: self.settings?[keyPath: key] ?? false, icon: icon, changed: { [weak self] value in self?.update { $0[keyPath: key] = value } })
     }
     private func selectLimit(disappearing: Bool) {
-        let alert = UIAlertController(title: "Лимит медиа", message: nil, preferredStyle: .alert)
+        let alert = CodeGramPlainAlertController(title: "Лимит медиа", message: nil, preferredStyle: .alert)
         let values = disappearing ? DeletedMessageArchiveSettings.allowedDisappearingMediaLimitGigabytes : DeletedMessageArchiveSettings.allowedMediaLimitGigabytes
         for value in values {
-            alert.addAction(UIAlertAction(title: "\(value) ГБ", style: .default, handler: { [weak self] _ in
+            alert.addAction(CodeGramPlainAlertAction(title: "\(value) ГБ", style: .default, handler: { [weak self] _ in
                 self?.update({ if disappearing { $0.disappearingMediaLimitGigabytes = value } else { $0.mediaLimitGigabytes = value } }, refresh: true)
             }))
         }
-        alert.addAction(UIAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
+        alert.addAction(CodeGramPlainAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
     }
     private func editMarker() {
-        let alert = UIAlertController(title: "Метка удалённого сообщения", message: nil, preferredStyle: .alert)
+        let alert = CodeGramPlainAlertController(title: "Метка удалённого сообщения", message: nil, preferredStyle: .alert)
         alert.addTextField { [weak self] in $0.text = self?.settings?.deletedMessageMarker }
-        alert.addAction(UIAlertAction(title: "Сохранить", style: .default, handler: { [weak self, weak alert] _ in
+        alert.addAction(CodeGramPlainAlertAction(title: "Сохранить", style: .default, handler: { [weak self, weak alert] _ in
             let value = String((alert?.textFields?.first?.text ?? "").prefix(DeletedMessageArchiveSettings.deletedMessageMarkerLimit))
             self?.update { $0.deletedMessageMarker = value }
         }))
-        alert.addAction(UIAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
+        alert.addAction(CodeGramPlainAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
     }
     private func clear(mediaOnly: Bool) {
-        let alert = UIAlertController(title: mediaOnly ? "Очистить медиа архива?" : "Очистить локальный архив?", message: "Это действие относится к данным на этом iPhone.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Отмена", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Очистить", style: .destructive, handler: { [weak self] _ in
+        let alert = CodeGramPlainAlertController(title: mediaOnly ? "Очистить медиа архива?" : "Очистить локальный архив?", message: "Это действие относится к данным на этом iPhone.", preferredStyle: .alert)
+        alert.addAction(CodeGramPlainAlertAction(title: "Отмена", style: .cancel))
+        alert.addAction(CodeGramPlainAlertAction(title: "Очистить", style: .destructive, handler: { [weak self] _ in
             guard let self else { return }
             let signal = mediaOnly ? self.context.engine.messages.clearDeletedMessageArchiveMedia() : self.context.engine.messages.clearDeletedMessageArchive()
             self.subscriptions.add((signal |> deliverOnMainQueue).start(completed: { [weak self] in self?.refreshStats() }))
@@ -181,8 +181,9 @@ final class CodeGramGeneralController: CodeGramFeatureController {
             rows = [self.textRow(s.localMessageArchive.title, icon: "archivebox", action: { [weak self] in guard let self else { return }; self.push(CodeGramLocalArchiveController(context: self.context)) }),
                 self.textRow(s.messageFilter.title, icon: "line.3.horizontal.decrease", action: { [weak self] in guard let self else { return }; self.push(CodeGramFiltersController(context: self.context)) })]
         case .appearance:
-            footer = s.madgram.classicDesignInfo
-            rows = [self.flag(s.madgram.classicDesign, info: s.madgram.classicDesignInfo, key: \.classicDesign, icon: "rectangle.on.rectangle"),
+            footer = "Современная компоновка и скругления сохранены. Стеклянный материал отключён."
+            rows = [self.textRow("Иконка приложения", detail: "Твои иконки и живая карусель", icon: "app", action: { [weak self] in guard let self else { return }; self.push(CodeGramIconPickerController(context: self.context)) }),
+                self.textRow("Современный интерфейс", detail: "Прежняя компоновка без эффекта Liquid Glass.", icon: "rectangle.on.rectangle"),
                 self.flag(s.interfaceTuning.showAppBadge, info: s.interfaceTuning.showAppBadgeInfo, key: \.showAppBadge, icon: "capsule"),
                 self.textRow(s.interfaceTuning.title, icon: "slider.horizontal.3", action: { [weak self] in guard let self else { return }; self.push(CodeGramInterfaceController(context: self.context)) })]
         case .additional:
@@ -276,4 +277,5 @@ final class CodeGramBusinessExceptionsController: CodeGramFeatureController {
         return [CodeGramSettingsSection(title: nil, footer: "Переключатель определяет видимость панели в выбранном диалоге. Возврат к общему значению удаляет исключение.", rows: [self.textRow("Добавить исключение", icon: "plus", action: { [weak self] in self?.add() })] + rows)]
     }
 }
+
 

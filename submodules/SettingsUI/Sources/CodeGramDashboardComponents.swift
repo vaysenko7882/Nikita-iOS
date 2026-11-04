@@ -67,7 +67,7 @@ enum CodeGramDestination: CaseIterable {
         case .messages: return "удаление сообщения правки версии история edits delete"
         case .archive: return "архив сохранять удаленные измененные сообщения версии история"
         case .filters: return "блокировка отправитель скрыть тень shadow фильтр"
-        case .appearance: return "тема темная светлая glass стекло плашка статус бар классический дизайн"
+        case .appearance: return "тема темная светлая glass стекло плашка статус бар дизайн"
         case .interface: return "интерфейс жесты свайп панели кнопки анимации"
         case .deleted: return "opacity прозрачность удаленных черное затемнение рамка пунктир цвет"
         case .voice: return "войсченджер voicechanger voice changer голос низкий писклявый робот эхо тембр высота пресет"
@@ -185,8 +185,8 @@ final class CodeGramDashboardTile: CodeGramDashboardSurface {
     init(destination: CodeGramDestination) {
         self.artwork = CodeGramCardArtwork(kind: destination)
         super.init()
-        self.caption.text = destination.title; self.caption.textColor = .label; self.caption.numberOfLines = 2
-        self.detail.text = destination.detail; self.detail.textColor = .secondaryLabel; self.detail.numberOfLines = 2
+        self.caption.text = destination.title; self.caption.textColor = .label; self.caption.numberOfLines = 0
+        self.detail.text = destination.detail; self.detail.textColor = .secondaryLabel; self.detail.numberOfLines = 0
         self.arrow.tintColor = .tertiaryLabel; self.arrow.contentMode = .scaleAspectFit
         for view in [self.artwork, self.caption, self.detail, self.arrow] { view.isUserInteractionEnabled = false; self.contentView.addSubview(view) }
         self.isAccessibilityElement = true; self.accessibilityTraits = .button
@@ -194,26 +194,28 @@ final class CodeGramDashboardTile: CodeGramDashboardSurface {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     func refreshFonts() {
-        self.caption.font = codegramDashboardFont(18, weight: .semibold, style: .headline)
+        self.caption.font = codegramDashboardFont(17, weight: .semibold, style: .headline)
         self.detail.font = codegramDashboardFont(13, style: .footnote)
         self.caption.adjustsFontForContentSizeCategory = true; self.detail.adjustsFontForContentSizeCategory = true
         self.setNeedsLayout()
     }
     func setDetail(_ text: String) { self.detail.text = text; self.accessibilityLabel = "\(self.caption.text ?? ""), \(text)"; self.setNeedsLayout() }
     func preferredHeight(width: CGFloat) -> CGFloat {
-        let title = self.caption.sizeThatFits(CGSize(width: max(1, width - 45), height: .greatestFiniteMagnitude)).height
-        let detail = self.detail.sizeThatFits(CGSize(width: max(1, width - 32), height: .greatestFiniteMagnitude)).height
-        return max(min(width * 0.96, 220), 94 + title + detail + 26)
+        let available = max(1, width - 124)
+        let title = self.caption.sizeThatFits(CGSize(width: available, height: .greatestFiniteMagnitude)).height
+        let detail = self.detail.sizeThatFits(CGSize(width: available, height: .greatestFiniteMagnitude)).height
+        return max(80, title + detail + 28)
     }
     override func layoutSubviews() {
         super.layoutSubviews()
-        let titleSize = self.caption.sizeThatFits(CGSize(width: max(1, self.bounds.width - 45), height: .greatestFiniteMagnitude))
-        let detailSize = self.detail.sizeThatFits(CGSize(width: max(1, self.bounds.width - 32), height: .greatestFiniteMagnitude))
-        let titleY = self.bounds.height - 16 - detailSize.height - 5 - titleSize.height
-        self.caption.frame = CGRect(x: 16, y: titleY, width: self.bounds.width - 45, height: titleSize.height)
-        self.detail.frame = CGRect(x: 16, y: self.caption.frame.maxY + 5, width: self.bounds.width - 32, height: detailSize.height)
-        self.arrow.frame = CGRect(x: self.bounds.width - 27, y: titleY + max(0, titleSize.height / 2 - 7), width: 8, height: 14)
-        self.artwork.frame = CGRect(x: 8, y: 8, width: self.bounds.width - 16, height: max(75, titleY - 20))
+        let textWidth = max(1, self.bounds.width - 124)
+        let titleSize = self.caption.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude))
+        let detailSize = self.detail.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude))
+        let titleY = max(12, (self.bounds.height - titleSize.height - detailSize.height - 4) / 2)
+        self.caption.frame = CGRect(x: 92, y: titleY, width: textWidth, height: titleSize.height)
+        self.detail.frame = CGRect(x: 92, y: self.caption.frame.maxY + 4, width: textWidth, height: detailSize.height)
+        self.arrow.frame = CGRect(x: self.bounds.width - 25, y: (self.bounds.height - 14) / 2, width: 8, height: 14)
+        self.artwork.frame = CGRect(x: 12, y: (self.bounds.height - 56) / 2, width: 64, height: 56)
         self.artwork.setNeedsDisplay()
         self.accessibilityLabel = "\(self.caption.text ?? ""), \(self.detail.text ?? "")"
     }
@@ -232,7 +234,8 @@ final class CodeGramQuickCard: CodeGramDashboardSurface {
                 self.caption.text = title; self.caption.textColor = .label
         self.detail.text = "Загрузка…"; self.detail.textColor = .secondaryLabel
         self.icon.tintColor = .label; self.icon.contentMode = .scaleAspectFit
-        self.toggle.onTintColor = UIColor(white: 0.78, alpha: 1)
+        self.toggle.onTintColor = CodeGramSettingsTheme.accent
+        self.toggle.thumbTintColor = .white
         self.toggle.isEnabled = false; self.toggle.accessibilityLabel = title
         self.toggle.addTarget(self, action: #selector(self.changedToggle), for: .valueChanged)
         for view in [self.icon, self.caption, self.detail, self.toggle] { self.contentView.addSubview(view) }
@@ -242,11 +245,19 @@ final class CodeGramQuickCard: CodeGramDashboardSurface {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     func refreshFonts() {
-        self.caption.font = codegramDashboardFont(15, weight: .medium, style: .subheadline)
-        self.detail.font = codegramDashboardFont(12, style: .caption1)
-        self.caption.adjustsFontSizeToFitWidth = true; self.caption.minimumScaleFactor = 0.85
-        self.detail.adjustsFontSizeToFitWidth = true; self.detail.minimumScaleFactor = 0.85
+        self.caption.font = codegramDashboardFont(17, weight: .medium, style: .body)
+        self.detail.font = codegramDashboardFont(13, style: .footnote)
+        self.caption.numberOfLines = 0; self.detail.numberOfLines = 0
+        self.caption.adjustsFontForContentSizeCategory = true; self.detail.adjustsFontForContentSizeCategory = true
         self.setNeedsLayout()
+    }
+    func preferredHeight(width: CGFloat) -> CGFloat {
+        // UIKit can fit a switch wider than its reported intrinsic size.
+        // Measure the same actual control width used by layoutSubviews.
+        self.toggle.sizeToFit()
+        let textWidth = max(1, width - self.toggle.bounds.width - 88)
+        let size = CGSize(width: textWidth, height: .greatestFiniteMagnitude)
+        return max(64, self.caption.sizeThatFits(size).height + self.detail.sizeThatFits(size).height + 26)
     }
     func update(isOn: Bool, busy: Bool = false) {
         self.toggle.setOn(isOn, animated: false); self.toggle.isEnabled = !busy
@@ -255,14 +266,15 @@ final class CodeGramQuickCard: CodeGramDashboardSurface {
     }
     override func layoutSubviews() {
         super.layoutSubviews()
-        self.icon.frame = CGRect(x: 13, y: (self.bounds.height - 27) / 2, width: 23, height: 27)
-        self.toggle.sizeToFit(); self.toggle.frame.origin = CGPoint(x: self.bounds.width - self.toggle.bounds.width - 12, y: (self.bounds.height - self.toggle.bounds.height) / 2)
-        let textWidth = max(1, self.toggle.frame.minX - 50)
-        let titleHeight = self.caption.font.lineHeight
-        let detailHeight = self.detail.font.lineHeight
-        let y = (self.bounds.height - titleHeight - detailHeight - 2) / 2
-        self.caption.frame = CGRect(x: 45, y: y, width: textWidth, height: titleHeight)
-        self.detail.frame = CGRect(x: 45, y: y + titleHeight + 2, width: textWidth, height: detailHeight)
+        self.icon.frame = CGRect(x: 18, y: (self.bounds.height - 27) / 2, width: 25, height: 27)
+        self.toggle.sizeToFit(); self.toggle.frame.origin = CGPoint(x: self.bounds.width - self.toggle.bounds.width - 16, y: (self.bounds.height - self.toggle.bounds.height) / 2)
+        let textWidth = max(1, self.toggle.frame.minX - 72)
+        let size = CGSize(width: textWidth, height: .greatestFiniteMagnitude)
+        let titleHeight = self.caption.sizeThatFits(size).height
+        let detailHeight = self.detail.sizeThatFits(size).height
+        let y = (self.bounds.height - titleHeight - detailHeight - 3) / 2
+        self.caption.frame = CGRect(x: 60, y: y, width: textWidth, height: titleHeight)
+        self.detail.frame = CGRect(x: 60, y: y + titleHeight + 3, width: textWidth, height: detailHeight)
     }
     @objc private func changedToggle() { self.changed?(self.toggle.isOn) }
 }
@@ -275,8 +287,8 @@ final class CodeGramDashboardRow: CodeGramDashboardSurface {
     init(destination: CodeGramDestination) {
         self.icon = UIImageView(image: UIImage(systemName: destination.symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 26, weight: .light)))
         super.init()
-        self.caption.text = destination.title; self.caption.textColor = .label; self.caption.numberOfLines = 2
-        self.detail.text = destination.detail; self.detail.textColor = .secondaryLabel; self.detail.numberOfLines = 2
+        self.caption.text = destination.title; self.caption.textColor = .label; self.caption.numberOfLines = 0
+        self.detail.text = destination.detail; self.detail.textColor = .secondaryLabel; self.detail.numberOfLines = 0
         self.icon.tintColor = .label; self.icon.contentMode = .scaleAspectFit; self.arrow.tintColor = .tertiaryLabel; self.arrow.contentMode = .scaleAspectFit
         for view in [self.icon, self.caption, self.detail, self.arrow] { view.isUserInteractionEnabled = false; self.contentView.addSubview(view) }
         self.isAccessibilityElement = true; self.accessibilityTraits = .button
@@ -301,4 +313,5 @@ final class CodeGramDashboardRow: CodeGramDashboardSurface {
         self.accessibilityLabel = "\(self.caption.text ?? ""), \(self.detail.text ?? "")"
     }
 }
+
 
