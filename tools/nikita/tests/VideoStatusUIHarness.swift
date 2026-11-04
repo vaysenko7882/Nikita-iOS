@@ -133,7 +133,8 @@ private final class VideoStatusHarnessController: UIViewController {
             let rect = view.convert(view.bounds, to: banner)
             self.expect(rect.minX.isFinite && rect.minY.isFinite && rect.width.isFinite && rect.height.isFinite && rect.width >= 0 && rect.height >= 0, "invalid banner geometry: \(context)")
         }
-        let actionButtons = [primary, copy, dismiss].compactMap { $0 }.filter { !$0.isHidden }
+        let allActionButtons = [primary, copy, dismiss].compactMap { $0 }
+        let actionButtons = allActionButtons.filter { !$0.isHidden }
         for action in actionButtons {
             self.expect(banner.bounds.insetBy(dx: -1, dy: -1).contains(action.convert(action.bounds, to: banner)), "status action outside banner: \(context)")
             self.expect(action.bounds.width >= 44 && action.bounds.height >= 44, "status action has a small touch target: \(context)")
@@ -151,7 +152,7 @@ private final class VideoStatusHarnessController: UIViewController {
             }
         }
         let previews = self.descendants(banner).compactMap({ $0 as? UILabel }).filter { label in
-            !actionButtons.contains(where: { label.isDescendant(of: $0) })
+            !allActionButtons.contains(where: { label.isDescendant(of: $0) })
         }
         self.expect(previews.count >= 2, "missing production status preview labels: \(context)")
         for label in previews {
