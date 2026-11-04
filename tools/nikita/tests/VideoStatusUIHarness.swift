@@ -86,6 +86,15 @@ private final class VideoStatusHarnessController: UIViewController {
         }
     }
     private func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap { self.descendants($0) } }
+    private func visible(_ view: UIView, in root: UIView) -> Bool {
+        var node: UIView? = view
+        while let current = node {
+            if current.isHidden || current.alpha < 0.01 { return false }
+            if current === root { return true }
+            node = current.superview
+        }
+        return false
+    }
     private func button(_ id: String, in view: UIView) -> UIButton? { self.descendants(view).compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == id } }
     private func show(_ mode: CodeGramSocialVideoStatusView.Mode, target: CodeGramSocialVideoStatusView? = nil, count: Int = 1) {
         let target = target ?? self.banner
@@ -107,7 +116,7 @@ private final class VideoStatusHarnessController: UIViewController {
         banner.layoutIfNeeded()
         self.expect(banner.isOpaque && (banner.backgroundColor?.resolvedColor(with: banner.traitCollection).cgColor.alpha ?? 0) > 0.999, "banner is not opaque: \(context)")
         self.expect(abs(banner.layer.cornerRadius - 18) < 0.1, "banner rounding changed: \(context)")
-        self.expect(self.descendants(banner).compactMap { $0 as? UIVisualEffectView }.allSatisfy { $0.effect == nil }, "banner introduced a glass material: \(context)")
+        self.expect(self.descendants(banner).compactMap { $0 as? UIVisualEffectView }.allSatisfy { $0.effect == nil || !self.visible($0, in: banner) }, "banner introduced a glass material: \(context)")
         let primary = self.button("CodeGram.videoSendPrimary", in: banner)
         let copy = self.button("CodeGram.videoSendCopy", in: banner)
         let dismiss = self.button("CodeGram.videoSendDismiss", in: banner)

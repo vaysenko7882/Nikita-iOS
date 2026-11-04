@@ -397,6 +397,7 @@ final class CodeGramSocialVideoChatStatus {
         self.node = node; self.queue = CodeGramSocialVideoAccountQueue.get(node.context)
         node.view.addSubview(self.view)
         self.observer = self.queue.observe { [weak self] in self?.refresh() }
+        self.view.layoutChanged = { [weak self] in self?.refresh() }
         self.refresh()
     }
     deinit { if let observer { self.queue.detach(observer) }; self.view.removeFromSuperview() }

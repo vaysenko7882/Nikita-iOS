@@ -13,6 +13,7 @@ final class CodeGramSocialVideoStatusView: UIView {
     var copyAction: (() -> Void)?
     var copyLinkAction: (() -> Void)?
     var dismissAction: (() -> Void)?
+    var layoutChanged: (() -> Void)?
     private let contentView = UIScrollView()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let titleLabel = UILabel()
@@ -66,17 +67,25 @@ final class CodeGramSocialVideoStatusView: UIView {
         self.closeButton.accessibilityLabel = "Убрать запись"
         self.closeButton.addTarget(self, action: #selector(self.closePressed), for: .touchUpInside)
         self.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(self.longPressed(_:))))
+        if #available(iOS 17.0, *) {
+            self.registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: CodeGramSocialVideoStatusView, _: UITraitCollection) in
+                view.requestFontLayout()
+            }
+        }
         let center = NotificationCenter.default
+
         self.observers = [
             center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.updateSpinner() },
             center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.spinner.stopAnimating() },
-            center.addObserver(forName: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.updateSpinner() }
+            center.addObserver(forName: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.updateSpinner() },
+            center.addObserver(forName: UIContentSizeCategory.didChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.requestFontLayout() }
         ]
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     deinit { self.observers.forEach(NotificationCenter.default.removeObserver) }
 
     func update(_ value: Presentation, background: UIColor, foreground: UIColor, secondary: UIColor, accent: UIColor) {
+        if self.presentation.mode != value.mode { self.contentView.setContentOffset(.zero, animated: false) }
         self.presentation = value
         self.backgroundColor = background
         self.titleLabel.text = value.title + (value.count > 1 ? " · \(value.count)" : "")
@@ -144,6 +153,7 @@ final class CodeGramSocialVideoStatusView: UIView {
         self.contentView.contentSize = size
         self.contentView.isScrollEnabled = naturalHeight > self.bounds.height + 0.5
         self.contentView.showsVerticalScrollIndicator = self.contentView.isScrollEnabled
+        if !self.contentView.isScrollEnabled && self.contentView.contentOffset != .zero { self.contentView.setContentOffset(.zero, animated: false) }
         let actions = self.actionLayout(width: size.width)
         let controlsHeight = CGFloat(actions.rows.count) * actions.rowHeight
         var y = actions.below ? size.height - controlsHeight - 6 : (size.height - actions.rowHeight) * 0.5
@@ -162,10 +172,10 @@ final class CodeGramSocialVideoStatusView: UIView {
         self.detailLabel.frame = CGRect(x: 38, y: 12 + titleHeight, width: labelsWidth, height: detailHeight)
         self.spinner.frame = CGRect(x: 12, y: 13, width: 18, height: 18)
     }
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        if previousTraitCollection?.preferredContentSizeCategory != self.traitCollection.preferredContentSizeCategory {
-            self.setNeedsLayout()
+    private func requestFontLayout() {
+        DispatchQueue.main.async { [weak self] in
+            self?.setNeedsLayout()
+            self?.layoutChanged?()
         }
     }
     override func didMoveToWindow() { super.didMoveToWindow(); self.updateSpinner() }
