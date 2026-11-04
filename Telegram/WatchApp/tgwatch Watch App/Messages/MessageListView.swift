@@ -64,7 +64,7 @@ struct MessageListView: View {
                     onCancelDownload:  { fileId in store.cancelFileDownload(fileId: fileId) },
                     size: 36
                 )
-                .glassEffect(in: Circle())
+                .background(Color(white: 0.16), in: Circle())
             }
         }
         .sheet(item: $presentedPhoto) { photo in

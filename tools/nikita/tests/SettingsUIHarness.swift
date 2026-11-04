@@ -1,6 +1,6 @@
 import UIKit
 
-private let appearanceInfo = "Возвращает оформление Telegram до Liquid Glass. Применяется после перезапуска приложения."
+private let appearanceInfo = "Liquid Glass отключён во всём приложении."
 private let badgeInfo = "Показывает капсулу CODEGRAM у выреза экрана. Выключите, чтобы её скрыть."
 private let phoneInfo = "Скрывает ваш номер только на экране настроек этого приложения. Настройки видимости номера для других пользователей не меняются."
 
@@ -10,7 +10,7 @@ private func toggle(_ value: Bool = true) -> CodeGramValueSwitch {
 private func fixtureCells() -> [UITableViewCell] {
     let field = UITextField(); field.placeholder = "Ключ доступа с твоего VPS"
     return [
-        CodeGramTextCell(title: "Классический дизайн", detail: appearanceInfo, symbol: "rectangle.on.rectangle", control: toggle(false)),
+        CodeGramTextCell(title: "Непрозрачное оформление", detail: appearanceInfo, symbol: "rectangle.on.rectangle"),
         CodeGramTextCell(title: "Показывать в строке статуса", detail: badgeInfo, symbol: "capsule", control: toggle()),
         CodeGramTextCell(title: "Вкладки, профили и истории", symbol: "rectangle.3.group", disclosure: true),
         CodeGramTextCell(title: "Скрывать номер телефона в настройках", detail: phoneInfo, symbol: "phone", control: toggle(false)),
@@ -40,6 +40,9 @@ private final class HarnessController: UIViewController {
     private let search = CodeGramSearchView()
     private let dashboard = UIScrollView()
     private var cards: [UIView] = []
+    private var recordingStyle: UIUserInterfaceStyle = .dark
+    private var recordingIconPicker: CodeGramIconPickerView?
+    private var didStart = false
     private let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -50,7 +53,9 @@ private final class HarnessController: UIViewController {
     }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.runChecks(); self.showAppearance() }
+        guard !self.didStart else { return }
+        self.didStart = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.runChecks(); self.startRecording(style: .dark) }
     }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
@@ -64,7 +69,116 @@ private final class HarnessController: UIViewController {
         if !value { self.failures.append(message); print("UI REGRESSION: \(message)") }
     }
     private func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap { self.descendants($0) } }
+    private func isVisible(_ view: UIView, within root: UIView) -> Bool {
+        guard view.window != nil else { return false }
+        var current: UIView? = view
+        var belongsToRoot = false
+        while let node = current {
+            if node.isHidden || node.alpha < 0.01 { return false }
+            if node === root { belongsToRoot = true }
+            current = node.superview
+        }
+        return belongsToRoot
+    }
+    private func expectSolid(_ surface: CodeGramSurfaceView, context: String) {
+        self.expect(surface.isOpaque, "surface must be opaque: \(context)")
+        self.expect(abs(surface.alpha - 1) < 0.001, "surface alpha changes its content: \(context)")
+        let background = surface.backgroundColor?.resolvedColor(with: surface.traitCollection)
+        self.expect((background?.cgColor.alpha ?? 0) > 0.999, "surface has no opaque background: \(context)")
+        let activeEffects = self.descendants(surface).compactMap { $0 as? UIVisualEffectView }.filter {
+            $0.effect != nil && self.isVisible($0, within: surface)
+        }
+        self.expect(activeEffects.isEmpty, "visible visual effect inside solid surface: \(context)")
+    }
+    private func contrast(_ foreground: UIColor, over background: UIColor, traits: UITraitCollection) -> Double {
+        func rgba(_ color: UIColor) -> (Double, Double, Double, Double) {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            color.resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
+            return (Double(r), Double(g), Double(b), Double(a))
+        }
+        func luminance(_ r: Double, _ g: Double, _ b: Double) -> Double {
+            let values = [r, g, b].map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+            return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722
+        }
+        let (r, g, b, a) = rgba(foreground)
+        let (br, bg, bb, _) = rgba(background)
+        let text = luminance(r * a + br * (1 - a), g * a + bg * (1 - a), b * a + bb * (1 - a))
+        let backdrop = luminance(br, bg, bb)
+        return (max(text, backdrop) + 0.05) / (min(text, backdrop) + 0.05)
+    }
+    private func expectPlainAlert(_ alert: CodeGramPlainAlertController, context: String) {
+        alert.view.layoutIfNeeded()
+        self.expect(alert.traitCollection.userInterfaceStyle == self.recordingStyle, "alert does not follow the recorded appearance: \(context)")
+        guard let panel = self.descendants(alert.view).first(where: { $0.accessibilityIdentifier == "CodeGram.alert.panel" }) else {
+            self.expect(false, "missing production alert panel: \(context)")
+            return
+        }
+        self.expect(panel.isOpaque && (panel.backgroundColor?.resolvedColor(with: panel.traitCollection).cgColor.alpha ?? 0) > 0.999, "alert panel is not opaque: \(context)")
+        self.expect(self.descendants(panel).compactMap { $0 as? UIVisualEffectView }.allSatisfy { $0.effect == nil || !self.isVisible($0, within: panel) }, "alert contains a visible visual effect: \(context)")
+        for label in self.descendants(panel).compactMap({ $0 as? UILabel }).filter({ !($0.text ?? "").isEmpty }) {
+            let rect = label.convert(label.bounds, to: panel)
+            var ancestor = label.superview
+            var scroll: UIScrollView?
+            while let view = ancestor, view !== panel {
+                if let candidate = view as? UIScrollView { scroll = candidate; break }
+                ancestor = view.superview
+            }
+            let insidePanel = panel.bounds.insetBy(dx: -1, dy: -1).contains(rect)
+            let scrollable = scroll.map { $0.isScrollEnabled && $0.contentSize.height > $0.bounds.height + 1 && $0.contentLayoutGuide.layoutFrame.insetBy(dx: -1, dy: -1).contains(label.convert(label.bounds, to: $0)) } ?? false
+            let insideWidth = rect.minX >= -1 && rect.maxX <= panel.bounds.width + 1
+            self.expect(insideWidth && (insidePanel || scrollable), "alert label is neither visible nor reachable by scrolling: \(label.text ?? "") \(context)")
+            let needed = label.sizeThatFits(CGSize(width: label.bounds.width, height: .greatestFiniteMagnitude)).height
+            self.expect(label.bounds.height + 1 >= needed, "alert label is clipped: \(label.text ?? "") \(context)")
+        }
+    }
+    private func expectOpaqueBar(_ appearance: UIBarAppearance?, traits: UITraitCollection, context: String) {
+        guard let appearance else { self.expect(false, "missing system bar appearance: \(context)"); return }
+        self.expect(appearance.backgroundEffect == nil, "system bar has a visual effect: \(context)")
+        self.expect((appearance.backgroundColor?.resolvedColor(with: traits).cgColor.alpha ?? 0) > 0.999, "system bar background is not opaque: \(context)")
+    }
+    private func checkClassicStartup() {
+        ClassicDesign.isEnabled = false
+        self.expect(ClassicDesign.isEnabled, "saved preference can reactivate glass")
+        ClassicDesign.isEnabled = true
+        self.expect(ClassicDesign.isEnabled, "classic layout must remain enabled")
+        if #available(iOS 26.0, *) {
+            let item = UINavigationItem(title: "Native matte policy")
+            let left = UIBarButtonItem(title: "Left", style: .plain, target: nil, action: nil)
+            let right = UIBarButtonItem(title: "Right", style: .plain, target: nil, action: nil)
+            let back = UIBarButtonItem(title: "Back", style: .plain, target: nil, action: nil)
+            item.leftBarButtonItem = left
+            item.setRightBarButtonItems([right], animated: false)
+            item.backBarButtonItem = back
+            for button in [left, right, back] {
+                self.expect(button.hidesSharedBackground && !button.sharesBackground, "native navigation item retained its glass pill")
+            }
+            let another = UIBarButtonItem(title: "Another", style: .plain, target: nil, action: nil)
+            item.setLeftBarButtonItems([another], animated: false)
+            self.expect(another.hidesSharedBackground && !another.sharesBackground, "native left-item array bypassed matte policy")
+        }
+        let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 48))
+        let tabs = UITabBar(frame: CGRect(x: 0, y: 48, width: 320, height: 49))
+        self.view.addSubview(toolbar); self.view.addSubview(tabs)
+        for style in [UIUserInterfaceStyle.dark, .light] {
+            toolbar.overrideUserInterfaceStyle = style; tabs.overrideUserInterfaceStyle = style
+            toolbar.layoutIfNeeded(); tabs.layoutIfNeeded()
+            self.expect(!toolbar.isTranslucent && !tabs.isTranslucent, "system bars are translucent: \(style.rawValue)")
+            self.expectOpaqueBar(toolbar.standardAppearance, traits: toolbar.traitCollection, context: "toolbar/\(style.rawValue)")
+            self.expectOpaqueBar(toolbar.scrollEdgeAppearance, traits: toolbar.traitCollection, context: "toolbar edge/\(style.rawValue)")
+            self.expectOpaqueBar(tabs.standardAppearance, traits: tabs.traitCollection, context: "tab bar/\(style.rawValue)")
+            self.expectOpaqueBar(tabs.scrollEdgeAppearance, traits: tabs.traitCollection, context: "tab bar edge/\(style.rawValue)")
+            if let navigation = self.navigationController?.navigationBar {
+                navigation.overrideUserInterfaceStyle = style
+                self.expect(!navigation.isTranslucent, "navigation bar is translucent: \(style.rawValue)")
+                self.expectOpaqueBar(navigation.standardAppearance, traits: navigation.traitCollection, context: "navigation/\(style.rawValue)")
+                self.expectOpaqueBar(navigation.scrollEdgeAppearance, traits: navigation.traitCollection, context: "navigation edge/\(style.rawValue)")
+            } else { self.expect(false, "missing production startup navigation bar") }
+        }
+        self.navigationController?.navigationBar.overrideUserInterfaceStyle = .unspecified
+        toolbar.removeFromSuperview(); tabs.removeFromSuperview()
+    }
     private func runChecks() {
+        self.checkClassicStartup()
         for width in [320.0, 375.0, 440.0, 768.0] {
             for category in [UIContentSizeCategory.large, .extraExtraExtraLarge, .accessibilityExtraExtraExtraLarge] {
                 for style in [UIUserInterfaceStyle.dark, .light] {
@@ -84,15 +198,19 @@ private final class HarnessController: UIViewController {
                         let context = "\(width)/\(category.rawValue)/\(style.rawValue)"
                         for (index, cell) in fixture.cells.enumerated() {
                             cell.layoutIfNeeded()
-                            guard let cell = cell as? CodeGramGlassCell else { self.expect(false, "missing production cell"); continue }
+                            guard let cell = cell as? CodeGramSurfaceCell else { self.expect(false, "missing production cell"); continue }
                             self.expect(fixture.table.rectForRow(at: IndexPath(row: index, section: 0)).height >= 60, "collapsed row \(index) \(context)")
                             let labels = self.descendants(cell.bodyView).compactMap { $0 as? UILabel }.filter { $0.accessibilityIdentifier?.hasPrefix("CodeGram.") == true }
                             for label in labels {
                                 let rect = label.convert(label.bounds, to: cell.bodyView)
-                                self.expect(cell.bodyView.bounds.insetBy(dx: -1, dy: -1).contains(rect), "label outside glass: \(label.text ?? "") \(context) \(rect)/\(cell.bodyView.bounds)")
+                                self.expect(cell.bodyView.bounds.insetBy(dx: -1, dy: -1).contains(rect), "label outside solid surface: \(label.text ?? "") \(context) \(rect)/\(cell.bodyView.bounds)")
                                 let needed = label.sizeThatFits(CGSize(width: label.bounds.width, height: .greatestFiniteMagnitude)).height
                                 self.expect(label.bounds.height + 1 >= needed, "clipped text: \(label.text ?? "") \(context) bounds=\(label.bounds), needed=\(needed), maxWidth=\(label.preferredMaxLayoutWidth)")
-                                self.expect(label.isDescendant(of: cell.glass.contentView), "text detached from native material")
+                                self.expect(label.isDescendant(of: cell.surface.contentView), "text detached from solid surface")
+                                if let foreground = label.textColor, let background = cell.surface.backgroundColor {
+                                    let minimum = label.accessibilityIdentifier == "CodeGram.title" ? 4.5 : 3.0
+                                    self.expect(self.contrast(foreground, over: background, traits: label.traitCollection) >= minimum, "text lacks contrast on solid surface: \(label.text ?? "") \(context)")
+                                }
                             }
                             if labels.count > 1 {
                                 let first = labels[0].convert(labels[0].bounds, to: cell.bodyView)
@@ -105,9 +223,7 @@ private final class HarnessController: UIViewController {
                                 let hit = cell.hitTest(point, with: nil)
                                 self.expect(hit === control || hit?.isDescendant(of: control) == true, "switch cannot receive touches \(context)")
                             }
-                            if #available(iOS 26.0, *) {
-                                self.expect((cell.glass.effect as? UIGlassEffect)?.isInteractive == true, "native interactive glass missing")
-                            }
+                            self.expectSolid(cell.surface, context: "cell \(index) \(context)")
                         }
                         self.expect(CodeGramSettingsTheme.background.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark)) == .black, "dark backdrop is not black")
                         fixture.willMove(toParent: nil); fixture.view.removeFromSuperview(); fixture.removeFromParent()
@@ -124,12 +240,43 @@ private final class HarnessController: UIViewController {
         let card = CodeGramDashboardTile(destination: .privacy)
         var opened = false; card.action = { opened = true }
         self.expect(card.accessibilityActivate() && opened, "card action disconnected")
-        if #available(iOS 26.0, *) {
-            self.expect((self.search.effect as? UIGlassEffect)?.isInteractive == true, "search is not native interactive glass")
+        card.frame = CGRect(x: 0, y: 0, width: 320, height: 240)
+        self.view.addSubview(card)
+        self.search.isHidden = false
+        for style in [UIUserInterfaceStyle.dark, .light] {
+            card.overrideUserInterfaceStyle = style
+            self.search.overrideUserInterfaceStyle = style
+            card.layoutIfNeeded(); self.search.layoutIfNeeded()
+            self.expectSolid(card, context: "dashboard/\(style.rawValue)")
+            self.expectSolid(self.search, context: "search/\(style.rawValue)")
         }
-        self.expect(self.search.searchBar.isDescendant(of: self.search.contentView), "search detached from glass")
+        card.removeFromSuperview()
+        self.search.isHidden = true; self.search.overrideUserInterfaceStyle = .unspecified
+        self.expect(self.search.textField.isDescendant(of: self.search.contentView), "search detached from solid surface")
+        var query: String?
+        self.search.onTextChanged = { query = $0 }
+        self.search.textField.text = "архив"
+        self.search.textField.sendActions(for: .editingChanged)
+        self.expect(query == "архив", "plain search text changes are disconnected")
+        self.search.cancelButton.sendActions(for: .touchUpInside)
+        self.expect(query == "" && (self.search.textField.text ?? "").isEmpty, "plain search cancel does not clear the query")
+        self.search.onTextChanged = nil
     }
-    private func phase(_ name: String, after seconds: TimeInterval = 3, next: @escaping () -> Void) {
+    private func startRecording(style: UIUserInterfaceStyle) {
+        self.recordingStyle = style
+        self.overrideUserInterfaceStyle = style
+        self.navigationController?.overrideUserInterfaceStyle = style
+        self.view.backgroundColor = CodeGramSettingsTheme.background
+        self.recordingIconPicker?.removeFromSuperview(); self.recordingIconPicker = nil
+        self.cards.forEach { $0.removeFromSuperview() }; self.cards.removeAll()
+        self.dashboard.setContentOffset(.zero, animated: false)
+        self.dashboard.isHidden = true; self.search.isHidden = true
+        self.search.setShowsCancelButton(false, animated: false)
+        self.table.view.isHidden = false
+        self.showAppearance()
+    }
+    private func phase(_ baseName: String, after seconds: TimeInterval = 3, next: @escaping () -> Void) {
+        let name = baseName + (self.recordingStyle == .dark ? "-dark" : "-light")
         try? name.write(to: self.output.appendingPathComponent("phase.txt"), atomically: true, encoding: .utf8)
         let started = Date()
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
@@ -159,7 +306,100 @@ private final class HarnessController: UIViewController {
             CodeGramSliderCell(title: "Сила робота", symbol: "cpu", value: 0.25, range: 0 ... 1, format: { "\(Int($0 * 100))%" }, changed: { _ in }),
             CodeGramSliderCell(title: "Частота", symbol: "waveform.path", value: 68, range: 20 ... 160, format: { "\(Int($0)) Гц" }, changed: { _ in })
         ])
-        self.phase("voice") { self.showMediaActions() }
+        self.phase("voice") { self.showTextEntry() }
+    }
+    private func showTextEntry() {
+        let alert = CodeGramPlainAlertController(title: "Свой голос", message: "Название сохранённого пресета", preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "Название"
+            field.text = "Радио"
+        }
+        var calls = 0
+        var continued = false
+        func next() {
+            guard !continued else { return }
+            continued = true
+            self.showVideoError()
+        }
+        alert.addAction(CodeGramPlainAlertAction(title: "Сохранить", style: .default, handler: { [weak alert] _ in
+            calls += 1
+            self.expect(calls == 1, "plain dialog action ran more than once")
+            self.expect(alert?.presentingViewController == nil, "plain dialog action ran before dismissal")
+            self.expect(alert?.textFields?.first?.text == "Радио", "weak dialog capture lost entered text after dismissal")
+            next()
+        }))
+        alert.addAction(CodeGramPlainAlertAction(title: "Отмена", style: .cancel))
+        self.present(alert, animated: true) {
+            alert.textFields?.first?.becomeFirstResponder()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.expectPlainAlert(alert, context: "text entry")
+                self.expect(alert.textFields?.first?.isFirstResponder == true, "plain dialog field could not receive focus")
+                self.phase("text-entry", after: 1) {
+                    guard let save = self.descendants(alert.view).compactMap({ $0 as? UIButton }).first(where: { $0.titleLabel?.text == "Сохранить" }) else {
+                        self.expect(false, "plain dialog Save button is missing")
+                        alert.dismiss(animated: false) { next() }
+                        return
+                    }
+                    save.sendActions(for: .touchUpInside)
+                    save.sendActions(for: .touchUpInside)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak alert] in
+                        if calls == 0 {
+                            self.expect(false, "plain dialog Save action was lost")
+                            if let alert, alert.presentingViewController != nil {
+                                alert.dismiss(animated: false) { next() }
+                            } else { next() }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    private func showVideoError() {
+        let message = "VPS не смог определить адрес сервера видео. Проверь DNS на VPS.\n\nКод: video_dns_error · VPS: 5.2.0 · Этап: ссылка и DNS · Процесс: 1 · Класс: TransportError\n\nСсылка сохранена в черновике."
+        let alert = CodeGramPlainAlertController(title: "Видео не отправлено", message: message, preferredStyle: .alert)
+        var copies = 0
+        var copied: String?
+        var continued = false
+        func next() {
+            guard !continued else { return }
+            continued = true
+            self.showMediaActions()
+        }
+        alert.addAction(CodeGramPlainAlertAction(title: "Скопировать ошибку", style: .default, handler: { [weak alert] _ in
+            copies += 1; copied = message
+            self.expect(copies == 1 && copied == message, "diagnostic copy action must run once with the displayed message")
+            self.expect(alert?.presentingViewController == nil, "diagnostic copy action ran before dismissal")
+            next()
+        }))
+        alert.addAction(CodeGramPlainAlertAction(title: "Оставить черновик", style: .cancel))
+        self.expect(alert.actions.map { $0.title ?? "" } == ["Скопировать ошибку", "Оставить черновик"], "video error is missing diagnostic and draft actions")
+        self.present(alert, animated: true) {
+            self.expectPlainAlert(alert, context: "video error")
+            self.phase("video-error", after: 1) {
+                guard let button = self.descendants(alert.view).compactMap({ $0 as? UIButton }).first(where: { $0.titleLabel?.text == "Скопировать ошибку" }) else {
+                    self.expect(false, "diagnostic copy button is missing")
+                    alert.dismiss(animated: false) { next() }
+                    return
+                }
+                if let scroll = self.descendants(alert.view).compactMap({ $0 as? UIScrollView }).first {
+                    scroll.scrollRectToVisible(button.convert(button.bounds, to: scroll), animated: false)
+                }
+                alert.view.layoutIfNeeded()
+                let point = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: alert.view)
+                let hit = alert.view.hitTest(point, with: nil)
+                self.expect(hit === button || hit?.isDescendant(of: button) == true, "diagnostic copy button cannot receive touches")
+                button.sendActions(for: .touchUpInside)
+                button.sendActions(for: .touchUpInside)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak alert] in
+                    if copies == 0 {
+                        self.expect(false, "diagnostic copy action was lost")
+                        if let alert, alert.presentingViewController != nil {
+                            alert.dismiss(animated: false) { next() }
+                        } else { next() }
+                    }
+                }
+            }
+        }
     }
     private func showDashboard() {
         self.title = "CodeGram"
@@ -182,22 +422,20 @@ private final class HarnessController: UIViewController {
             self.phase("scroll", after: 2) {
                 self.dashboard.setContentOffset(.zero, animated: true)
                 self.phase("return", after: 2) {
-                    self.search.searchBar.setShowsCancelButton(true, animated: true)
-                    self.search.searchBar.searchTextField.becomeFirstResponder()
+                    self.search.setShowsCancelButton(true, animated: true)
+                    self.search.textField.becomeFirstResponder()
                     self.phase("search", after: 3) { self.showIconCarousel() }
                 }
             }
         }
     }
     private func showMediaActions() {
-        self.search.searchBar.resignFirstResponder()
+        self.search.textField.resignFirstResponder()
         let sheet = codeGramMediaActions(saveTitle: "Сохранить", startTitle: "Начать отсчёт", cancelTitle: "Отмена",
             canStart: true, sourceView: self.view, save: {}, start: {})
-        let anchor = sheet.popoverPresentationController?.sourceView
-        self.expect(anchor !== self.view && anchor?.bounds.size == CGSize(width: 2, height: 2), "Popover must not morph the entire presenting screen")
-        self.expect(anchor === codeGramMediaPopoverAnchor(in: self.view), "Repeated presentations must reuse their anchor")
         self.expect(sheet.actions.map { $0.title ?? "" } == ["Сохранить", "Начать отсчёт", "Отмена"], "Unopened media is missing explicit actions")
         self.present(sheet, animated: true) {
+            self.expectPlainAlert(sheet, context: "unopened media actions")
             self.phase("media-actions", after: 1) {
                 var firstCalls = 0
                 codeGramDismissMediaActions(sheet) {
@@ -207,9 +445,10 @@ private final class HarnessController: UIViewController {
                         canStart: false, sourceView: self.view, save: {}, start: {})
                     self.expect(started.actions.count == 2, "Existing countdown must not offer a second start")
                     self.present(started, animated: true) {
+                        self.expectPlainAlert(started, context: "started media actions")
                         self.phase("media-actions-started", after: 1) {
                             var closedCalls = 0
-                            let closed = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+                            let closed = CodeGramPlainAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
                             codeGramDismissMediaActions(closed) { closedCalls += 1 }
                             self.expect(closedCalls == 1, "Already closed action must not be lost")
                             var closingCalls = 0
@@ -226,7 +465,7 @@ private final class HarnessController: UIViewController {
         }
     }
     private func showIconCarousel() {
-        self.search.searchBar.resignFirstResponder()
+        self.search.textField.resignFirstResponder()
         self.search.isHidden = true; self.table.view.isHidden = true; self.dashboard.isHidden = true
         // Run the state sweep offscreen. Recording a fresh production instance
         // avoids carrying stress-test button transitions into the visual path.
@@ -264,6 +503,7 @@ private final class HarnessController: UIViewController {
     }
     private func recordIconCarousel() {
         let picker = CodeGramIconPickerView(currentName: "CGRift")
+        self.recordingIconPicker = picker
         self.view.addSubview(picker)
         picker.frame = CGRect(x: 0,y: self.view.safeAreaInsets.top,width: self.view.bounds.width,height: 1000)
         picker.layoutIfNeeded()
@@ -297,8 +537,12 @@ private final class HarnessController: UIViewController {
         }
     }
     private func finish() {
-        self.search.searchBar.resignFirstResponder()
-        let report: [String: Any] = ["checks": self.checks, "failures": self.failures, "ios": UIDevice.current.systemVersion, "production_sources": ["CodeGramSettingsTheme.swift", "CodeGramSettingsCells.swift", "CodeGramDashboardComponents.swift", "CodeGramIconPickerView.swift", "CodeGramMediaActions.swift"], "scope": "Native production controls and table self-sizing, not an authenticated full app session or a physical-device thermal test"]
+        self.search.textField.resignFirstResponder()
+        if self.recordingStyle == .dark {
+            self.startRecording(style: .light)
+            return
+        }
+        let report: [String: Any] = ["checks": self.checks, "failures": self.failures, "ios": UIDevice.current.systemVersion, "recorded_styles": ["dark", "light"], "production_sources": ["ClassicDesign.swift", "CodeGramSettingsTheme.swift", "CodeGramSettingsCells.swift", "CodeGramDashboardComponents.swift", "CodeGramIconPickerView.swift", "CodeGramMediaActions.swift"], "scope": "Native opaque production surfaces, light/dark recordings and table self-sizing; not an authenticated full app session or a physical-device thermal test"]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: self.output.appendingPathComponent("result.json"), options: .atomic) }
     }
 }
@@ -307,6 +551,7 @@ private final class HarnessSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
+        ClassicDesign.installOpaqueSystemAppearance()
         let window = UIWindow(windowScene: scene)
         let controller = HarnessController()
         let navigation = UINavigationController(rootViewController: controller)
@@ -321,3 +566,4 @@ private final class HarnessSceneDelegate: UIResponder, UIWindowSceneDelegate {
         config.delegateClass = HarnessSceneDelegate.self; return config
     }
 }
+

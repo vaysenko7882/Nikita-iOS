@@ -141,8 +141,8 @@ extension ChatControllerImpl {
                     self.context.sharedContext.mediaManager.setPlaylist(nil, type: .voice, control: .playback(.pause))
                     exportCodeGramDisappearingMedia(context: self.context, message: message, sourceView: self.chatDisplayNode.view, failed: { [weak self] in
                         guard let self else { return }
-                        let alert = UIAlertController(title: nil, message: self.presentationData.strings.localFeatures.disappearingMedia.exportFailed, preferredStyle: .alert)
-                        alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
+                        let alert = CodeGramPlainAlertController(title: nil, message: self.presentationData.strings.localFeatures.disappearingMedia.exportFailed, preferredStyle: .alert)
+                        alert.addAction(CodeGramPlainAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
                         self.context.sharedContext.applicationBindings.presentNativeController(alert)
                     })
                 }

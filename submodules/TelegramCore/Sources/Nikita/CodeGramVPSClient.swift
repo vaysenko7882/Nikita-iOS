@@ -7,8 +7,24 @@ public struct CodeGramVPSError: LocalizedError {
 
     /// Translate only known diagnostic codes. Never show an extractor's raw
     /// output, which can contain private URLs or other request details.
-    public static func socialVideoFailure(code: String?) -> CodeGramVPSError {
-        return self.knownSocialVideoFailure(code: code) ?? CodeGramVPSError("VPS не смог подготовить видео. Проверь состояние службы и версию сервера.")
+    public static func socialVideoFailure(code: String?, serviceVersion: String? = nil, stage: String? = nil, workerExitCode: Int? = nil, exceptionType: String? = nil) -> CodeGramVPSError {
+        let known = self.knownSocialVideoFailure(code: code)
+        let error = known ?? CodeGramVPSError("VPS не смог подготовить видео и не передал подробную причину.")
+        let publicCode = known != nil ? (code ?? "video_unknown_error") : "video_unknown_error"
+        var diagnostic = ["Код: \(publicCode)"]
+        if let version = serviceVersion, version.utf8.count <= 20,
+            let range = version.range(of: "^[0-9]{1,3}(\\.[0-9]{1,3}){1,3}$", options: .regularExpression),
+            range == (version.startIndex..<version.endIndex) {
+            diagnostic.append("VPS: \(version)")
+        } else {
+            diagnostic.append("VPS: версия не передана")
+        }
+        let stages = ["prepare": "подготовка", "resolve": "ссылка и DNS", "extract": "получение видео", "download": "скачивание", "probe": "проверка файла", "remux": "упаковка MP4", "worker_start": "запуск процесса", "worker": "процесс обработки"]
+        if let stage, let title = stages[stage] { diagnostic.append("Этап: \(title)") }
+        if let exit = workerExitCode, (-255...255).contains(exit) { diagnostic.append("Процесс: \(exit)") }
+        let safeExceptions: Set<String> = ["TransportError", "DownloadError", "ExtractorError", "UnsupportedError", "TimeoutExpired", "ModuleNotFoundError", "ImportError", "OSError", "FileNotFoundError", "PermissionError", "RuntimeError", "ValueError", "JSONDecodeError", "CalledProcessError", "ConnectionError", "ConnectionResetError", "URLError", "HTTPError", "gaierror", "SSLError"]
+        if let exception = exceptionType, safeExceptions.contains(exception) { diagnostic.append("Класс: \(exception)") }
+        return CodeGramVPSError(error.message + "\n\n" + diagnostic.joined(separator: " · "))
     }
     private static func knownSocialVideoFailure(code: String?) -> CodeGramVPSError? {
         let message: String
@@ -17,13 +33,19 @@ public struct CodeGramVPSError: LocalizedError {
         case "video_login_required": message = "Источник требует входа в аккаунт. Сервер поддерживает публичные ролики без авторизации."
         case "video_rate_limited": message = "TikTok или Instagram ограничил запросы с IP VPS. Повтори позже."
         case "video_network_error": message = "VPS не смог подключиться к источнику видео. Проверь сеть и доступность сайта с сервера."
+        case "video_dns_error": message = "VPS не может найти адрес сайта с видео (DNS). Проверь DNS и доступ к TikTok или Instagram с сервера."
         case "video_timeout": message = "Сервер превысил время подготовки видео. Повтори запрос позже."
         case "video_too_large": message = "Видео превышает предел 250 МБ."
         case "video_unsupported_codec": message = "Источник не предоставил видео в поддерживаемом формате H.264."
         case "video_processing_failed": message = "VPS получил видео, но не смог подготовить MP4. Проверь журнал службы и ffmpeg на сервере."
         case "video_dependency_missing": message = "На VPS не хватает компонентов обработки видео. Повтори установку серверной службы из актуальной ветки."
         case "insufficient_storage": message = "На VPS не хватает свободного места для видео."
-        case "video_unavailable": message = "Сервер не смог получить или подготовить видео. Обнови серверную службу и повтори запрос."
+        case "video_worker_failed": message = "Процесс обработки видео на VPS завершился с ошибкой. Проверь установку и журнал серверной службы."
+        case "video_worker_killed": message = "ОС остановила процесс обработки видео на VPS. Проверь журнал службы и доступные ресурсы сервера."
+        case "video_invalid_result": message = "VPS не передал корректный готовый MP4 после обработки. Проверь журнал серверной службы."
+        case "video_unsupported_link": message = "VPS не распознал перенаправление ссылки. Открой ролик и попробуй его прямую ссылку."
+        case "video_extraction_failed": message = "VPS не смог разобрать страницу видео. Проверь доступность сайта с сервера и диагностику ниже."
+        case "video_unavailable": message = "Сервер не смог получить или подготовить видео и не уточнил причину. Проверь версию службы и диагностику ниже."
         default: return nil
         }
         return CodeGramVPSError(message)
@@ -32,7 +54,7 @@ public struct CodeGramVPSError: LocalizedError {
         // Authentication failures retain their meaning even with a malformed body.
         if statusCode == 401 { return CodeGramVPSError("VPS отклонил ключ доступа.") }
         if statusCode == 403 { return CodeGramVPSError("На VPS подключён другой Telegram-аккаунт.") }
-        if let error = self.knownSocialVideoFailure(code: serverCode) { return error }
+        if self.knownSocialVideoFailure(code: serverCode) != nil { return self.socialVideoFailure(code: serverCode) }
         switch statusCode {
         case 400: return CodeGramVPSError("Сервер отклонил параметры. Проверь ссылку или доступность профиля.")
         case 404: return CodeGramVPSError("Функция или файл не найдены на VPS. Проверь версию серверной службы и повтори запрос.")
@@ -47,6 +69,7 @@ public struct CodeGramVPSError: LocalizedError {
         case .timedOut: return CodeGramVPSError(downloading ? "Истекло время загрузки видео с VPS на iPhone." : "VPS не ответил вовремя. Проверь состояние серверной службы.")
         case .cancelled: return CodeGramVPSError("Запрос отменён.")
         case .notConnectedToInternet: return CodeGramVPSError("На iPhone нет подключения к интернету.")
+        case .cannotFindHost, .dnsLookupFailed: return CodeGramVPSError("iPhone не может найти адрес VPS (DNS). Проверь сохранённый адрес сервера.")
         default: return CodeGramVPSError(downloading ? "Не удалось загрузить файл с VPS на iPhone. Проверь соединение." : "Нет соединения с VPS. Проверь адрес, HTTPS и состояние службы.")
         }
     }

@@ -26,8 +26,8 @@ final class CodeGramIconPickerController: ViewController {
                     guard let self else { return }
                     self.picker.setApplying(false, appliedName: choice.name, succeeded: succeeded)
                     if !succeeded {
-                        let alert = UIAlertController(title: "Иконка не изменена", message: "iOS не применила иконку. Попробуй ещё раз, когда приложение активно.", preferredStyle: .alert)
-                        alert.addAction(UIAlertAction(title: "ОК", style: .default))
+                        let alert = CodeGramPlainAlertController(title: "Иконка не изменена", message: "iOS не применила иконку. Попробуй ещё раз, когда приложение активно.", preferredStyle: .alert)
+                        alert.addAction(CodeGramPlainAlertAction(title: "ОК", style: .default))
                         self.present(alert, animated: true)
                     }
                 }
@@ -52,3 +52,4 @@ final class CodeGramIconPickerController: ViewController {
         self.displayNode.backgroundColor = self.picker.backgroundColor
     }
 }
+

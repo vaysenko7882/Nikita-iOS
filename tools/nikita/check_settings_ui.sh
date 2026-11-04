@@ -54,26 +54,43 @@ for path in pathlib.Path('submodules/SettingsUI/Sources').glob('CodeGram*.swift'
     names.update(re.findall(r'return "([a-z][a-z0-9.]*)"', text))
 names.discard('codegram.ghost')
 (app / 'icons.json').write_text(json.dumps(sorted(names)))
-pathlib.Path(sys.argv[2], 'expected-frames.txt').write_text('''These are native controls from production sources in an isolated test host.
-Appearance/privacy: every multiline title and description fits inside its own glass card. No overlaps or clipped text. Switches keep the native size. Black backdrop, distinct monochrome symbols.
-Voice: title/value/slider stay inside one material; no squashed symbols or gray icon chips.
-Dashboard: artwork and labels share the material content hierarchy. Glass appears on the first displayed cards without a custom fade or a late flat-to-glass swap.
-Scroll/return: content and its material move together, upward then downward, and settle without a detached label or stale material. Only native scroll animation runs.
-Media actions: native system sheet slides up and settles; Save and Start countdown are legible, aligned and inside the safe area; dismissal uses the native Cancel action or an outside tap when iOS presents a popover. After a countdown starts, Save and Cancel remain and Start is absent. No overlapping timer/action labels. The presenting controls stay in place; a tiny transparent anchor prevents UIKit from morphing the entire source screen. The gallery and audio integration still require a real account and received media.
-Search: the real UISearchBar stays inside the material, with aligned icons, editing controls and keyboard. No effects injected into private field subviews.
+pathlib.Path(sys.argv[2], 'expected-frames.txt').write_text('''These are production controls in an isolated test host, recorded in both light and dark appearances. The host calls the actual ClassicDesign startup appearance installer before its window is created. Each phase name ends in -dark or -light.
+Appearance/privacy: every multiline title and description fits inside its opaque solid card. No overlaps or clipped text. Switches keep the native size and have solid thumbs. Dark appearance has a black backdrop; light appearance has a light grouped backdrop. Symbols and labels retain readable contrast. No background image, refraction, blur or glass highlight shows through the cards.
+Voice: title/value/slider stay inside one solid surface; no squashed symbols or gray icon chips. The slider thumb remains opaque.
+Dashboard: artwork and labels share the solid content hierarchy. Cards are opaque on the first frame, with no fade, late material swap or glass elasticity.
+Scroll/return: content and its opaque surface move together, upward then downward, and settle without a detached label or stale background. Only native scroll animation runs.
+Text entry: the plain preset dialog opens above the keyboard when it is shown; its focused field contains «Радио». Save closes the panel once and its handler still reads that text after dismissal. Both buttons and all text remain inside the opaque panel.
+Video error: the production plain alert has an opaque panel, complete readable diagnostic footer and separate Copy error/Keep draft buttons. Longer content remains reachable by scrolling, with no horizontal clipping. Copy error runs once with the shown diagnostic after dismissal. The panel and its content cross-fade together once on opening and once on closing, without refraction, liquid highlights or background morphing.
+Media actions: the production plain action panel and its content cross-fade together and settle; Save and Start countdown are legible, aligned and inside the safe area; dismissal uses Cancel or a dimmed-area tap. After a countdown starts, Save and Cancel remain and Start is absent. No overlapping timer/action labels. The presenting controls stay in place; the plain panel must not morph the source screen or introduce glass during its transition. The custom-surface checks do not prove every full-app system component is opaque. Gallery/audio integration still requires a real account and received media.
+Search: a plain UITextField, magnifier and cancel button stay inside the solid host, with aligned editing controls and keyboard. The field is readable on opaque surfaces in light and dark. Focus, text entry and cancellation use public controls; no native search material or private field subviews are used.
 Icon carousel: the installed icon is initially centered. Artwork moves horizontally and scales together inside its clipping shape; labels, page dots and the explicit Apply button stay aligned below. Background interpolates with scrolling; Paper uses a cream backdrop with dark text, Chrome a red backdrop. Each animation settles once without a loop, late image or text overlap. Scrolling alone never applies an icon.
 The recording does not establish physical-device frame rate, heat, or finger-driven elasticity; those need a full app device check.
 ''')
 PY
+CODEGRAM_UI_SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+CODEGRAM_UI_OBJC_OBJECTS=()
+for CODEGRAM_UI_OBJC_SOURCE in \
+    submodules/ObjCRuntimeUtils/Source/ObjCRuntimeUtils/RuntimeUtils.m \
+    submodules/UIKitRuntimeUtils/Source/UIKitRuntimeUtils/NSBag.m \
+    submodules/UIKitRuntimeUtils/Source/UIKitRuntimeUtils/NSWeakReference.m \
+    submodules/UIKitRuntimeUtils/Source/UIKitRuntimeUtils/UINavigationItem+Proxy.m; do
+    CODEGRAM_UI_OBJECT="$CODEGRAM_UI_OUT/$(basename "$CODEGRAM_UI_OBJC_SOURCE" .m).o"
+    xcrun --sdk iphonesimulator clang -c -fobjc-arc -fblocks -fmodules \
+        -target "$(uname -m)-apple-ios26.0-simulator" -isysroot "$CODEGRAM_UI_SDK" \
+        -I submodules/ObjCRuntimeUtils/Source -I submodules/UIKitRuntimeUtils/Source/UIKitRuntimeUtils \
+        "$CODEGRAM_UI_OBJC_SOURCE" -o "$CODEGRAM_UI_OBJECT"
+    CODEGRAM_UI_OBJC_OBJECTS+=("$CODEGRAM_UI_OBJECT")
+done
 xcrun --sdk iphonesimulator swiftc -parse-as-library -warnings-as-errors \
     -target "$(uname -m)-apple-ios26.0-simulator" \
     -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+    submodules/Display/Source/ClassicDesign.swift \
     submodules/SettingsUI/Sources/CodeGramSettingsTheme.swift \
     submodules/SettingsUI/Sources/CodeGramSettingsCells.swift \
     submodules/SettingsUI/Sources/CodeGramIconPickerView.swift \
     submodules/SettingsUI/Sources/CodeGramDashboardComponents.swift \
     submodules/Display/Source/CodeGramMediaActions.swift \
-    tools/nikita/tests/SettingsUIHarness.swift -o "$CODEGRAM_UI_APP/SettingsHarness"
+    tools/nikita/tests/SettingsUIHarness.swift "${CODEGRAM_UI_OBJC_OBJECTS[@]}" -framework QuartzCore -o "$CODEGRAM_UI_APP/SettingsHarness"
 cp Telegram/Telegram-iOS/CodeGramIconPreviews/*.png "$CODEGRAM_UI_APP/"
 codesign --force --sign - "$CODEGRAM_UI_APP"
 CODEGRAM_UI_SIM=$(xcrun simctl create "CodeGram UI ${GITHUB_RUN_ID:-local}" "$CODEGRAM_UI_DEVICE" "$CODEGRAM_UI_RUNTIME")
@@ -103,8 +120,12 @@ while time.monotonic() - start < 600:
     phase = phase_path.read_text() if phase_path.exists() else ''
     if phase and phase not in seen:
         seen.add(phase)
-        timeline.append({'phase': phase, 'seconds_after_launch': round(time.monotonic() - start, 3)})
+        detected = round(time.monotonic() - start, 3)
+        # The video preserves the whole transition. Capture the named still after
+        # the first rendering pass rather than during the previous phase's frame.
+        time.sleep(.5)
         subprocess.run(['xcrun', 'simctl', 'io', sim, 'screenshot', str(output / (phase + '.png'))], check=True)
+        timeline.append({'phase': phase, 'phase_seen_after_launch': detected, 'seconds_after_launch': round(time.monotonic() - start, 3)})
         (documents / ('captured-' + phase)).touch()
     result = documents / 'result.json'
     if result.exists():
@@ -113,7 +134,15 @@ while time.monotonic() - start < 600:
         report = json.loads(result.read_text())
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if report['failures'] or report['checks'] < 500: raise SystemExit('Native settings UI regression checks failed')
+        phases = {'appearance', 'privacy', 'voice', 'text-entry', 'video-error', 'media-actions', 'media-actions-started', 'dashboard', 'scroll', 'return', 'search', 'icons-original', 'icons-clip', 'icons-paper', 'icons-pixel', 'icons-chrome', 'icons-stairs', 'icons-applied'}
+        required = {phase + '-' + style for phase in phases for style in ('dark', 'light')}
+        missing = sorted(required - seen)
+        if missing or report.get('recorded_styles') != ['dark', 'light']:
+            raise SystemExit('Missing light/dark recorded phases: ' + ', '.join(missing))
+        if any(not (output / (phase + '.png')).is_file() for phase in required):
+            raise SystemExit('A required phase screenshot was not saved')
         break
     time.sleep(.25)
 else: raise SystemExit('Native settings harness did not finish')
 PY
+

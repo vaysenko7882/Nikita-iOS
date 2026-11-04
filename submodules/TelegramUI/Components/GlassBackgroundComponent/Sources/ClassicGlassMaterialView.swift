@@ -3,24 +3,19 @@ import UIKit
 import Display
 import ComponentFlow
 
+/// The shared classic surface is matte. It never samples or refracts content
+/// behind it; all glass consumers retain their existing content/shape hosts.
 final class ClassicGlassMaterialView: UIView {
-    private static let isReduceTransparencyEnabled = UIAccessibility.isReduceTransparencyEnabled
-
-    private var effectView: UIVisualEffectView?
     private let colorView: UIView
-
     private var color: UIColor?
 
     override init(frame: CGRect) {
         self.colorView = UIView()
         self.colorView.isUserInteractionEnabled = false
-
         super.init(frame: frame)
-
         self.isUserInteractionEnabled = false
         self.clipsToBounds = true
         self.layer.cornerCurve = .circular
-
         self.addSubview(self.colorView)
     }
 
@@ -28,82 +23,15 @@ final class ClassicGlassMaterialView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    var shapeFollowingViews: [UIView] {
-        var result: [UIView] = []
-        if let effectView = self.effectView {
-            result.append(effectView)
-            result.append(contentsOf: effectView.subviews)
-        }
-        result.append(self.colorView)
-        return result
-    }
+    var shapeFollowingViews: [UIView] { return [self.colorView] }
 
     func update(size: CGSize, color: UIColor, transition: ComponentTransition) {
-        if self.color != color {
-            let previousColor = self.color
-            self.color = color
-
-            let needsBlur = !ClassicGlassMaterialView.isReduceTransparencyEnabled && color.alpha > .ulpOfOne && color.alpha < 0.95
-            let effectiveColor = ClassicGlassMaterialView.isReduceTransparencyEnabled && color.alpha > .ulpOfOne ? color.withAlphaComponent(1.0) : color
-            if previousColor == nil {
-                self.colorView.backgroundColor = effectiveColor
-            } else {
-                transition.setBackgroundColor(view: self.colorView, color: effectiveColor)
-            }
-
-            if needsBlur {
-                if self.effectView == nil {
-                    let effectView = ClassicGlassMaterialView.makeBlurView()
-                    effectView.frame = CGRect(origin: CGPoint(), size: size)
-                    self.effectView = effectView
-                    self.insertSubview(effectView, at: 0)
-                }
-            } else if let effectView = self.effectView {
-                self.effectView = nil
-                effectView.removeFromSuperview()
-            }
+        let effectiveColor: UIColor = color.alpha > .ulpOfOne ? color.withAlphaComponent(1.0) : .clear
+        if self.color != effectiveColor {
+            self.color = effectiveColor
+            transition.setBackgroundColor(view: self.colorView, color: effectiveColor)
         }
-
-        let contentFrame = CGRect(origin: CGPoint(), size: size)
-        transition.setFrame(view: self.colorView, frame: contentFrame)
-        if let effectView = self.effectView {
-            transition.setFrame(view: effectView, frame: contentFrame)
-            for subview in effectView.subviews {
-                transition.setFrame(view: subview, frame: contentFrame)
-            }
-        }
-    }
-
-    private static func makeBlurView() -> UIVisualEffectView {
-        let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .light))
-        effectView.isUserInteractionEnabled = false
-
-        for subview in effectView.subviews {
-            if subview.description.contains("VisualEffectSubview") {
-                subview.isHidden = true
-            }
-        }
-
-        if let sublayer = effectView.layer.sublayers?[0], let filters = sublayer.filters {
-            sublayer.backgroundColor = nil
-            sublayer.isOpaque = false
-            let allowedKeys: [String] = [
-                "colorSaturate",
-                "gaussianBlur"
-            ]
-            sublayer.filters = filters.filter { filter in
-                guard let filter = filter as? NSObject else {
-                    return true
-                }
-                let filterName = String(describing: filter)
-                if !allowedKeys.contains(filterName) {
-                    return false
-                }
-                return true
-            }
-        }
-
-        return effectView
+        transition.setFrame(view: self.colorView, frame: CGRect(origin: .zero, size: size))
     }
 }
 

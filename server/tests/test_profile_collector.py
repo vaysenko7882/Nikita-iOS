@@ -43,6 +43,8 @@ class Client:
         if isinstance(request,functions.stories.GetPeerStoriesRequest):
             if self.fail_stories: raise RuntimeError("Private collection")
             return NS(stories=NS(stories=[]))
+        if isinstance(request,functions.photos.GetUserPhotosRequest):
+            return types.photos.Photos(photos=[],users=[])
         if isinstance(request,functions.payments.GetSavedStarGiftsRequest):
             if request.offset: raise RuntimeError("Interrupted page")
             sender=NS(id=7,first_name="Sender",last_name=None,username="sender")
@@ -310,3 +312,108 @@ class ProfileCollectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["payload"]["after"]["caption"],"Brief story")
         self.assertEqual(event["payload"]["after"]["media_capture_error"],"ValueError")
         self.assertNotIn("private file reference",json.dumps(event))
+
+    async def test_story_poll_records_new_story_while_gift_collection_is_blocked(self):
+        gift_started=asyncio.Event();release_gift=asyncio.Event()
+        published=[False]
+        story_calls=[]
+        async def request(value,**kwargs):
+            if isinstance(value,functions.payments.GetSavedStarGiftsRequest):
+                gift_started.set()
+                await release_gift.wait()
+            if isinstance(value,functions.stories.GetPeerStoriesRequest):
+                story_calls.append(value.peer.user_id)
+                return NS(stories=NS(stories=[self.story()] if published[0] else []))
+            return await self.client(value,**kwargs)
+        self.observer.request=request
+        self.observer.story_poll_interval=0.02
+        task=asyncio.create_task(self.observer.run())
+        try:
+            await asyncio.wait_for(gift_started.wait(),2)
+            self.assertFalse(any(e["kind"]=="stories.added" for e in self.events()))
+            published[0]=True
+            async def received():
+                while not any(e["kind"]=="stories.added" for e in self.events()):
+                    await asyncio.sleep(0.01)
+            await asyncio.wait_for(received(),2)
+            self.assertFalse(release_gift.is_set())
+            self.assertFalse(task.done())
+            self.assertTrue(story_calls)
+            status=self.store.status(100)["profiles"][0]
+            self.assertGreater(status["last_story_check"],0)
+            self.assertEqual(status["story_error"],"")
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError): await task
+        self.assertIsNone(self.observer.story_poll_task)
+
+    async def test_slow_gift_rpc_does_not_hold_story_pacing_lock(self):
+        observer=ProfileCollector(self.client,self.store)
+        gift_started=asyncio.Event();release=asyncio.Event();started=[]
+        async def client(value,**kwargs):
+            started.append(time.monotonic())
+            if isinstance(value,functions.payments.GetSavedStarGiftsRequest):
+                gift_started.set()
+                await release.wait()
+            return NS(stories=NS(stories=[]))
+        observer.client=client
+        gift=asyncio.create_task(observer.request(functions.payments.GetSavedStarGiftsRequest(types.InputPeerUser(100,456),"",100)))
+        try:
+            await asyncio.wait_for(gift_started.wait(),2)
+            await asyncio.wait_for(observer.request(functions.stories.GetPeerStoriesRequest(types.InputPeerUser(100,456))),3)
+            self.assertFalse(gift.done())
+            self.assertGreaterEqual(started[1]-started[0],0.9)
+        finally:
+            release.set()
+            await gift
+            await observer.close()
+
+    async def test_story_poll_backoff_is_separate_from_full_profile_status(self):
+        self.client.flood=True
+        task=asyncio.create_task(self.observer.poll_stories())
+        try:
+            async def paused():
+                while not self.observer.pause_until>time.monotonic():
+                    await asyncio.sleep(0.01)
+            await asyncio.wait_for(paused(),2)
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(self.client.calls),1)
+            status=self.store.status(100)["profiles"][0]
+            self.assertIn("ограничил",status["story_error"])
+            self.assertEqual(status["error"],"")
+            self.assertEqual(status["last_story_check"],0)
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError): await task
+
+    async def test_avatar_pagination_uses_paced_requests_and_keeps_collection_on_failure(self):
+        self.store.collection(100,"avatars",{"existing":{"id":"existing"}})
+        calls=[]
+        photo=self.story().media.photo
+        async def request(value,**kwargs):
+            calls.append(value)
+            if value.offset:
+                raise errors.FloodWaitError(value,capture=35)
+            return NS(photos=[photo]*100,count=101)
+        self.observer.request=request
+        with self.assertRaises(errors.FloodWaitError):
+            await self.observer.avatars(100,types.InputPeerUser(100,456),(11,),[])
+        self.assertTrue(all(isinstance(call,functions.photos.GetUserPhotosRequest) for call in calls))
+        self.assertEqual([call.offset for call in calls],[0,100])
+        self.assertFalse(any(e["kind"]=="avatars.no_longer_visible" for e in self.events()))
+
+    async def test_profile_wait_never_shortens_a_longer_story_backoff(self):
+        async def request(value):
+            self.observer.pause_until=time.monotonic()+300
+            raise errors.FloodWaitError(value,capture=35)
+        self.observer.request=request
+        task=asyncio.create_task(self.observer.run_profiles())
+        try:
+            async def paused():
+                while not self.observer.pause_until>time.monotonic():
+                    await asyncio.sleep(0.01)
+            await asyncio.wait_for(paused(),2)
+            self.assertGreater(self.observer.pause_until-time.monotonic(),290)
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError): await task

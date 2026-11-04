@@ -116,75 +116,119 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
     private var loaded = false
     private var message = "Проверяю настройки VPS…"
     private var lastCheck: Any?
-    private var events: [[String: Any]] = []
-    private var before = 0
-    private var hasMore = false
-    private var showsLatestPage = true
-    private var refreshTimer: Timer?
+    private var lastStoryCheck: Any?
+    private var storyPollingInterval: Double?
+    private var renderedHistory = CodeGramProfileHistorySnapshot()
+    private var events: [[String: Any]] { self.renderedHistory.events }
+    private var historyScreenVisible = false
+    private var pendingRender = false
+    private var renderRetry: DispatchWorkItem?
+    private var resetToTop = false
+    private lazy var feed = CodeGramProfileHistoryFeed(fetch: { [weak self] before, completion in
+        guard let self else { return nil }
+        let task = self.client.json(path: "profiles/\(self.peerId)/history", query: ["before":String(before)]) { result in
+            completion(result.mapError { $0 as Error })
+        }
+        return { task?.cancel() }
+    })
     init(context: AccountContext, peerId: String, accessHash: Int64?, title: String) {
         self.peerId = peerId; self.accessHash = accessHash; self.peerTitle = title
         super.init(context: context,title: "История профиля")
     }
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    deinit { self.refreshTimer?.invalidate(); self.client.close() }
-    override func loadDisplayNode() { super.loadDisplayNode(); self.load(reset: true) }
+    deinit { self.renderRetry?.cancel(); self.feed.setVisible(false); self.client.close() }
+    override func loadDisplayNode() {
+        super.loadDisplayNode()
+        self.feed.updated = { [weak self] value, automatic in
+            guard let self else { return }
+            self.applyStatus(value)
+            self.renderHistory(automatic: automatic)
+        }
+        self.feed.failed = { [weak self] error, automatic in
+            guard let self else { return }
+            self.message = error.localizedDescription
+            self.renderHistory(automatic: automatic)
+        }
+        self.load(reset: true)
+    }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        self.refreshTimer?.invalidate()
-        self.refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            guard let self, self.showsLatestPage, self.enabled,
-                UIApplication.shared.applicationState == .active,
-                !self.tableView.isDragging, !self.tableView.isDecelerating,
-                self.tableView.contentOffset.y <= -self.tableView.contentInset.top + 40 else { return }
-            self.load(reset: true)
-        }
-        if self.showsLatestPage { self.load(reset: true) }
+        self.historyScreenVisible = true
+        if self.pendingRender { self.renderHistory(automatic: true) }
+        self.feed.setVisible(true)
     }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        self.refreshTimer?.invalidate(); self.refreshTimer = nil
+        self.historyScreenVisible = false
+        self.renderRetry?.cancel(); self.renderRetry = nil
+        self.feed.setVisible(false)
     }
     private func load(reset: Bool) {
         guard !self.busy else { return }
-        self.showsLatestPage = reset
-        self.busy = true
-        self.client.json(path: "profiles/\(self.peerId)/history", query: ["before":reset ? "0" : String(self.before)]) { [weak self] result in
-            guard let self else { return }
-            self.busy = false
-            switch result {
-            case let .failure(error): self.message = error.message
-            case let .success(value):
-                self.applyStatus(value)
-                if reset { self.events = [] }
-                let existing = Set(self.events.compactMap { ($0["seq"] as? NSNumber)?.int64Value })
-                self.events.append(contentsOf: (value["events"] as? [[String: Any]] ?? []).filter { !existing.contains(($0["seq"] as? NSNumber)?.int64Value ?? -1) })
-                self.before = value["next_before"] as? Int ?? 0
-                self.hasMore = value["has_more"] as? Bool ?? false
-            }
-            self.reloadContent()
+        if reset {
+            self.resetToTop = true
+            self.feed.refresh()
+        } else {
+            self.feed.loadOlder()
         }
+        self.reloadContent()
+    }
+    private func renderHistory(automatic: Bool) {
+        if automatic && (!self.historyScreenVisible || self.tableView.isDragging || self.tableView.isDecelerating) {
+            self.pendingRender = true
+            self.renderRetry?.cancel()
+            if self.historyScreenVisible {
+                let work = DispatchWorkItem { [weak self] in self?.renderHistory(automatic: true) }
+                self.renderRetry = work
+                DispatchQueue.main.asyncAfter(deadline: .now()+0.2,execute: work)
+            }
+            return
+        }
+        self.pendingRender = false
+        self.renderRetry?.cancel(); self.renderRetry = nil
+        let anchor = CodeGramProfileHistoryScrollAnchor(table: self.tableView,events: self.events)
+        self.renderedHistory = self.feed.snapshot
+        UIView.performWithoutAnimation {
+            self.reloadContent()
+            self.tableView.layoutIfNeeded()
+            anchor.restore(table: self.tableView,events: self.events,resetToTop: self.resetToTop)
+        }
+        self.resetToTop = false
     }
     private func applyStatus(_ value: [String: Any]) {
         guard let item = (value["profiles"] as? [[String: Any]])?.first else { return }
         self.enabled = item["enabled"] as? Bool ?? false
         self.loaded = true
         self.lastCheck = item["last_check"]
+        self.lastStoryCheck = item["last_story_check"]
+        if let interval = (value["story_poll_interval"] as? NSNumber)?.doubleValue, interval.isFinite, interval >= 1, interval <= 3600 {
+            self.storyPollingInterval = interval
+        } else {
+            self.storyPollingInterval = nil
+        }
         let error = item["error"] as? String ?? ""
         self.message = error.isEmpty ? (self.enabled ? "Отслеживание включено. Работает на VPS." : "Отслеживание выключено. Прежняя история сохранена.") : "Последняя проверка не завершилась: \(error)"
         if let lastEvent = item["last_event_at"] as? NSNumber, lastEvent.doubleValue > 0 {
             self.message += "\nПоследнее полученное событие: \(profileDate(lastEvent))"
+        }
+        if let storyError = item["story_error"] as? String, !storyError.isEmpty {
+            self.message += "\nПроверка сторис: \(storyError)"
+        }
+        if self.storyPollingInterval == nil {
+            self.message += "\nДля отдельной быстрой проверки сторис обнови службу VPS до 5.2.0."
         }
         if NikitaSettingsStore.shared.isProfileTracked(account: self.accountKey, peerId: self.peerId) != self.enabled {
             NikitaSettingsStore.shared.setProfileTracked(self.enabled, account: self.accountKey, peerId: self.peerId)
         }
     }
     private func setEnabled(_ enabled: Bool) {
-        guard !self.busy else { return }
+        guard !self.busy, !self.feed.isUserLoading else { return }
         if enabled && self.accessHash == nil {
             self.notice("Открой этот профиль в Telegram и включи отслеживание оттуда: серверу нужен доступ к пользователю от текущего аккаунта.")
             self.reloadContent(); return
         }
         self.busy = true
+        self.feed.setVisible(false)
         var body: [String: Any] = ["enabled":enabled,"title":self.peerTitle]
         if let accessHash = self.accessHash { body["access_hash"] = String(accessHash) }
         self.client.json(path: "profiles/\(self.peerId)",method: "PUT",body: body) { [weak self] result in
@@ -194,40 +238,127 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
             case let .success(value): self.applyStatus(value); self.load(reset: true)
             case let .failure(error): self.message = error.message
             }
+            if self.historyScreenVisible { self.feed.setVisible(true) }
             self.reloadContent()
         }
         self.reloadContent()
     }
     override func makeSections() -> [CodeGramSettingsSection] {
-        var sections = [CodeGramSettingsSection(title: self.peerTitle, footer: "Полученные события профиля и сторис записываются сразу. Фоновая сверка на обновлённом VPS — от 15 секунд для профиля, от минуты для подарков; лимиты Telegram и очередь могут увеличить интервал. Короткую сторис можно сохранить, только если Telegram успел передать событие и содержимое. Telegram не раскрывает, кто добавил тебя в ЧС или убрал из него: изменения доступности отмечаются отдельно и не доказывают блокировку.", rows: [
-            self.switchRow("Отслеживание профиля",value: self.enabled,detail: self.message,icon: "person.crop.circle.badge.clock",enabled: self.loaded && !self.busy,changed: { [weak self] in self?.setEnabled($0) }),
+        let storyTiming = self.storyPollingInterval.map { "Сторис проверяются отдельной очередью от \(Int($0)) секунд." } ?? "Отдельная быстрая проверка сторис требует обновления службы VPS до 5.2.0."
+        var sections = [CodeGramSettingsSection(title: self.peerTitle, footer: "Полученные события профиля и сторис записываются сразу. \(storyTiming) Профиль — от 15 секунд, подарки — от минуты. Это минимальные интервалы: очередь профилей, сеть и лимиты Telegram могут увеличить задержку. Удалённую до получения события и файла сторис восстановить нельзя. Telegram не раскрывает чужой статус ЧС.", rows: [
+            self.switchRow("Отслеживание профиля",value: self.enabled,detail: self.message,icon: "person.crop.circle.badge.clock",enabled: self.loaded && !self.busy && !self.feed.isUserLoading,changed: { [weak self] in self?.setEnabled($0) }),
             self.textRow("Последняя успешная проверка",detail: (self.lastCheck as? NSNumber)?.int64Value == 0 ? "Ещё не проверен" : profileDate(self.lastCheck),icon: "clock"),
-            self.textRow(self.busy ? "Обновляю…" : "Обновить историю",icon: "arrow.clockwise",action: { [weak self] in self?.load(reset: true) })])]
-        var rows = self.events.map { event in
+            self.textRow("Последняя успешная проверка сторис",detail: ((self.lastStoryCheck as? NSNumber)?.int64Value ?? 0) == 0 ? "Ещё не проверены" : profileDate(self.lastStoryCheck),icon: "clock.arrow.circlepath"),
+            self.textRow(self.busy || self.feed.isUserLoading ? "Обновляю…" : "Обновить историю",icon: "arrow.clockwise",action: { [weak self] in self?.load(reset: true) })])]
+        let rendered = self.renderedHistory
+        var rows = rendered.events.enumerated().map { index, event in
             self.textRow(profileEventTitle(event),detail: profileDate(event["observed_at"]),icon: "clock.arrow.circlepath",action: { [weak self] in
                 guard let self else { return }
-                self.push(CodeGramProfileEventController(context: self.context,event: event))
+                guard let selected = rendered.event(at: index,currentServerId: self.feed.serverId) else {
+                    self.notice("Архив обновился. Дождись обновления списка и открой запись ещё раз.")
+                    return
+                }
+                self.push(CodeGramProfileEventController(context: self.context,peerId: self.peerId,event: selected,serverId: rendered.serverId))
             })
         }
-        if self.hasMore { rows.append(self.textRow("Загрузить ещё",icon: "ellipsis",action: { [weak self] in self?.load(reset: false) })) }
+        if self.feed.hasMore { rows.append(self.textRow("Загрузить ещё",icon: "ellipsis",action: { [weak self] in self?.load(reset: false) })) }
         if rows.isEmpty { rows.append(self.textRow("История пока пуста",detail: "После включения дождись первой проверки VPS.",icon: "tray")) }
-        sections.append(CodeGramSettingsSection(title: "История изменений",footer: "Свежая страница обновляется каждые 5 секунд, пока экран открыт на её начале. При просмотре старых записей автообновление приостановлено; нажми «Обновить историю», чтобы вернуться к новым. Дата события — время обнаружения на VPS; исходные даты Telegram находятся внутри события.",rows: rows))
+        sections.append(CodeGramSettingsSection(title: "История изменений",footer: "Полученные VPS события добавляются автоматически, пока экран открыт. История обновляется и при просмотре старых записей, сохраняя место чтения. Проверка iPhone — каждые 2 секунды; скорость получения самой сторис зависит от Telegram и очереди VPS. Дата события — время обнаружения на VPS.",rows: rows))
         return sections
     }
 }
 
 private final class CodeGramProfileEventController: CodeGramTableController, QLPreviewControllerDataSource {
     private let event: [String: Any]
+    private let peerId: String
+    private var archiveId: String?
+    private var media: [[String: Any]]
+    private var mediaNote: String?
+    private var mediaDeadline = Date.distantPast
+    private var eventScreenVisible = false
     private lazy var client = CodeGramVPSClient(configuration: NikitaSettingsStore.shared.server(account: self.accountKey), accountId: self.accountKey)
+    private lazy var mediaFeed = CodeGramProfileHistoryFeed(fetch: { [weak self] _, completion in
+        guard let self else { return nil }
+        guard Date() < self.mediaDeadline else {
+            completion(.failure(CodeGramVPSError("VPS ещё не закончил загрузку файла. История сохранена; проверку можно повторить.")))
+            return nil
+        }
+        guard let seq = (self.event["seq"] as? NSNumber)?.int64Value, seq > 0, seq < Int64.max else {
+            completion(.failure(CodeGramVPSError("Некорректный номер события."))); return nil
+        }
+        let task = self.client.json(path: "profiles/\(self.peerId)/history",query: ["before":String(seq+1),"limit":"1"]) { result in
+            completion(result.mapError { $0 as Error })
+        }
+        return { task?.cancel() }
+    })
     private var files: [URL] = []
     private var previewURL: URL?
     private var download: URLSessionDownloadTask?
     private var opening = false
     private var cancelledDownload = false
     private var expanded = false
-    init(context: AccountContext,event: [String: Any]) { self.event = event; super.init(context: context,title: profileEventTitle(event)) }
+    init(context: AccountContext,peerId: String,event: [String: Any],serverId: String?) {
+        self.event = event; self.peerId = peerId; self.archiveId = serverId
+        self.media = event["media"] as? [[String: Any]] ?? []
+        super.init(context: context,title: profileEventTitle(event))
+    }
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    deinit { self.client.close(); for file in self.files { try? FileManager.default.removeItem(at: file) } }
+    deinit { self.mediaFeed.setVisible(false); self.client.close(); for file in self.files { try? FileManager.default.removeItem(at: file) } }
+    override func loadDisplayNode() {
+        super.loadDisplayNode()
+        self.mediaFeed.updated = { [weak self] page, _ in
+            guard let self else { return }
+            guard let epoch = page["server_id"] as? String, self.archiveId == nil || self.archiveId == epoch,
+                let received = (page["events"] as? [[String: Any]])?.first,
+                (received["seq"] as? NSNumber)?.int64Value == (self.event["seq"] as? NSNumber)?.int64Value else {
+                self.mediaNote = "Архив изменился или эта запись недоступна. Вернись в историю профиля."
+                self.mediaFeed.setVisible(false); self.reloadContent(); return
+            }
+            self.archiveId = epoch
+            let original = self.event["media"] as? [[String: Any]] ?? []
+            let available = received["media"] as? [[String: Any]] ?? []
+            let media = original.map { asset -> [String: Any] in
+                if let id = asset["blob_id"] as? String, let current = available.first(where: { $0["blob_id"] as? String == id }) { return current }
+                var unavailable = asset
+                unavailable["state"] = "failed"
+                return unavailable
+            }
+            let changed = !(self.media as NSArray).isEqual(media as NSArray) || self.mediaNote != nil
+            self.media = media; self.mediaNote = nil
+            if !self.hasPendingMedia { self.mediaFeed.setVisible(false) }
+            if changed { self.reloadContent() }
+        }
+        self.mediaFeed.failed = { [weak self] error, _ in
+            guard let self else { return }
+            let message = error.localizedDescription
+            let changed = self.mediaNote != message
+            self.mediaNote = message
+            if Date() >= self.mediaDeadline { self.mediaFeed.setVisible(false) }
+            if changed { self.reloadContent() }
+        }
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        self.eventScreenVisible = true
+        self.checkMedia()
+    }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        self.eventScreenVisible = false
+        self.mediaFeed.setVisible(false)
+    }
+    private var hasPendingMedia: Bool {
+        self.media.contains { asset in
+            let state = asset["state"] as? String ?? "pending"
+            return state != "ready" && state != "failed"
+        }
+    }
+    private func checkMedia() {
+        guard self.eventScreenVisible, self.hasPendingMedia else { return }
+        self.mediaDeadline = Date().addingTimeInterval(120)
+        self.mediaNote = nil
+        self.mediaFeed.setVisible(true)
+    }
     override func makeSections() -> [CodeGramSettingsSection] {
         let payload = self.event["payload"] as? [String: Any] ?? [:]
         var sections = [CodeGramSettingsSection(title: "Обнаружено на VPS",footer: nil,rows: [self.textRow(profileDate(self.event["observed_at"]),icon: "clock")])]
@@ -236,12 +367,15 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
                 sections.append(CodeGramSettingsSection(title: title,footer: nil,rows: [self.textRow(profileReadable(value),icon: "text.alignleft")]))
             }
         }
-        let assets = self.event["media"] as? [[String: Any]] ?? []
+        let assets = self.media
         if !assets.isEmpty {
-            sections.append(CodeGramSettingsSection(title: "Сохранённые файлы",footer: "Файл скачивается на iPhone при открытии.",rows: assets.enumerated().map { index,asset in
+            sections.append(CodeGramSettingsSection(title: "Сохранённые файлы",footer: self.mediaNote ?? "Статус загрузки на VPS обновляется автоматически до двух минут, пока эта запись открыта. Полученный файл скачивается на iPhone при открытии.",rows: assets.enumerated().map { index,asset in
                 let ready = asset["state"] as? String == "ready"
-                return self.textRow("Файл \(index+1)",detail: "\(asset["mime"] as? String ?? "медиа") · \(ready ? "сохранён" : "ещё не готов")",icon: "doc",action: ready ? { [weak self] in self?.open(asset) } : nil)
-            }))
+                let status = ready ? "сохранён" : asset["state"] as? String == "failed" ? "байты недоступны" : "ожидает загрузки VPS"
+                return self.textRow("Файл \(index+1)",detail: "\(asset["mime"] as? String ?? "медиа") · \(status)",icon: "doc",action: ready ? { [weak self] in self?.open(asset) } : nil)
+            } + (self.hasPendingMedia ? [self.textRow("Проверить файлы",icon: "arrow.clockwise",action: { [weak self] in self?.checkMedia() })] : [])))
+        } else if let after = payload["after"] as? [String: Any], after["content_state"] as? String == "not_loaded" {
+            sections.append(CodeGramSettingsSection(title: "Содержимое сторис",footer: "Эта запись хранит первоначальное уведомление Telegram. Полное содержимое, если сервер успеет его получить, появится отдельным событием истории.",rows: [self.textRow("Пока получено только уведомление",icon: "info.circle")]))
         }
         sections.append(CodeGramSettingsSection(title: "Полные данные события",footer: "Если Telegram не передал имя отправителя подарка, журнал не может его восстановить.",rows: [self.textRow(self.expanded ? "Скрыть полные данные" : "Показать все данные и атрибуты",icon: "list.bullet.rectangle",action: { [weak self] in guard let self else { return }; self.expanded.toggle(); self.reloadContent() })] + (self.expanded ? [self.textRow(profileJSON(payload),icon: "text.alignleft")] : [])))
         return sections
@@ -253,15 +387,18 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
         self.cancelledDownload = false
         self.client.json(path: "profiles",completion: { [weak self] result in
             guard let self else { return }
-            guard case let .success(value) = result, let epoch = value["server_id"] as? String else {
+            guard case let .success(value) = result, let epoch = value["server_id"] as? String,
+                self.archiveId == nil || self.archiveId == epoch else {
                 self.opening = false
-                if case let .failure(error) = result { self.notice(error.message) }; return
+                if case let .failure(error) = result { self.notice(error.message) }
+                else { self.notice("Архив изменился. Вернись в историю профиля.") }
+                return
             }
             let mime = asset["mime"] as? String ?? ""
             let ext = mime == "video/mp4" ? "mp4" : mime == "image/jpeg" ? "jpg" : mime == "image/png" ? "png" : mime.contains("ogg") ? "ogg" : mime.contains("webp") ? "webp" : "bin"
             let destination = FileManager.default.temporaryDirectory.appendingPathComponent("CodeGram-profile-\(UUID().uuidString).\(ext)")
-            let alert = UIAlertController(title: "Загрузка файла",message: "Файл из истории профиля скачивается на iPhone…",preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Отменить",style: .cancel,handler: { [weak self] _ in self?.cancelledDownload = true; self?.download?.cancel() }))
+            let alert = CodeGramPlainAlertController(title: "Загрузка файла",message: "Файл из истории профиля скачивается на iPhone…",preferredStyle: .alert)
+            alert.addAction(CodeGramPlainAlertAction(title: "Отменить",style: .cancel,handler: { [weak self] _ in self?.cancelledDownload = true; self?.download?.cancel() }))
             self.present(alert,animated: true)
             self.download = self.client.download(path: "media/\(id)",epoch: epoch,size: size.int64Value,destination: destination,completion: { [weak self,weak alert] result in
                 guard let self else {
@@ -270,7 +407,7 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
                 }
                 self.download = nil
                 self.opening = false
-                if self.cancelledDownload {
+                if self.cancelledDownload || alert?.isBeingDismissed == true {
                     if case let .success(url) = result { try? FileManager.default.removeItem(at: url) }
                     return
                 }

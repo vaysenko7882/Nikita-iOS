@@ -1,5 +1,6 @@
 import AccountContext
 import ChatTextInputPanelNode
+import Display
 import Foundation
 import TelegramCore
 import UIKit
@@ -66,7 +67,7 @@ final class CodeGramSocialVideoConversion {
                 }
                 self.pending = work
                 DispatchQueue.main.asyncAfter(deadline: .now()+1,execute: work)
-            case "failed": self.completion(.failure(CodeGramVPSError.socialVideoFailure(code: value["error"] as? String)))
+            case "failed": self.completion(.failure(CodeGramVPSError.socialVideoFailure(code: value["error"] as? String, serviceVersion: value["service_version"] as? String, stage: value["error_stage"] as? String, workerExitCode: value["worker_exit_code"] as? Int, exceptionType: value["exception_type"] as? String)))
             default: self.completion(.failure(CodeGramVPSError("VPS вернул неизвестное состояние подготовки видео.")))
             }
         }
@@ -78,13 +79,21 @@ extension ChatControllerNode {
         guard NikitaSettingsStore.shared.sendsSocialLinksAsVideo, let url = CodeGramSocialVideoLink.url(in: text), let controller else { return false }
         if self.codegramVideoConversion != nil { return true }
         let reply = self.chatPresentationInterfaceState.interfaceState.replyMessageSubject
-        let alert = UIAlertController(title: "Видео вместо ссылки",message: "Получаю видео…",preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Отменить",style: .cancel,handler: { [weak self] _ in
+        let alert = CodeGramPlainAlertController(title: "Видео вместо ссылки",message: "Получаю видео…",preferredStyle: .alert)
+        alert.addAction(CodeGramPlainAlertAction(title: "Отменить",style: .cancel,handler: { [weak self] _ in
             self?.codegramVideoConversion?.cancel(); self?.codegramVideoConversion = nil
         }))
         let operation = CodeGramSocialVideoConversion(context: self.context,progress: { [weak alert] in alert?.message = $0 },completion: { [weak self,weak alert,weak controller] result in
             guard let self else {
                 if case let .success((_,url)) = result { try? FileManager.default.removeItem(at: url) }
+                return
+            }
+            // A cancel action dismisses the matte dialog before running its
+            // handler. A result arriving during that transition must not send.
+            if alert?.isBeingDismissed == true {
+                if case let .success((_,url)) = result { try? FileManager.default.removeItem(at: url) }
+                self.codegramVideoConversion?.cancel()
+                self.codegramVideoConversion = nil
                 return
             }
             self.codegramVideoConversion = nil
@@ -101,8 +110,9 @@ extension ChatControllerNode {
                 switch result {
                 case let .success((file,_)): resume(file)
                 case let .failure(error):
-                    let failure = UIAlertController(title: "Видео не отправлено",message: error.message + "\n\nСсылка сохранена в черновике.",preferredStyle: .alert)
-                    failure.addAction(UIAlertAction(title: "Оставить черновик",style: .cancel))
+                    let failure = CodeGramPlainAlertController(title: "Видео не отправлено",message: error.message + "\n\nСсылка сохранена в черновике.",preferredStyle: .alert)
+                    failure.addAction(CodeGramPlainAlertAction(title: "Скопировать ошибку",style: .default,handler: { _ in UIPasteboard.general.string = error.message }))
+                    failure.addAction(CodeGramPlainAlertAction(title: "Оставить черновик",style: .cancel))
                     controller.present(failure,animated: true)
                 }
             }

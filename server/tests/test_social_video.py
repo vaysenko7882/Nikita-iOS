@@ -1,23 +1,64 @@
 import http.client
+import io
 import functools
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import socket
+import signal
 import shutil
 import subprocess
 import tempfile
+import sys
 import threading
 import time
 import unittest
 from unittest.mock import patch
 from nikita_archive.archive import Archive
 from nikita_archive.http_api import make_server
-from nikita_archive.social_video import MAX_VIDEO_BYTES, SocialVideoStore, VideoFailure, social_url
+from nikita_archive.social_video import MAX_VIDEO_BYTES, MAX_DIAGNOSTIC_BYTES, SocialVideoStore, VideoFailure, social_url, run_worker, worker_failure
 from nikita_archive.video_worker import VIDEO_FORMAT, download_video, failure_code, public_addresses, resolved_url
 
 
 class SocialURLTests(unittest.TestCase):
+    def test_tiktok_head_fallback_preserves_method_specific_share_endpoints(self):
+        from unittest.mock import MagicMock
+        from yt_dlp.networking import Response
+        from yt_dlp.networking.exceptions import HTTPError
+        short="https://vt.tiktok.com/Abcd12/"
+        target="https://www.tiktok.com/@owner/video/123456"
+        def context(url):
+            value=MagicMock();value.__enter__.return_value.url=url;return value
+        for initial in [context(short),HTTPError(Response(io.BytesIO(),short,{},405))]:
+            downloader=MagicMock()
+            downloader.urlopen.side_effect=[initial,context(target)]
+            self.assertEqual(resolved_url(downloader,short),target)
+            self.assertEqual([call.args[0].method for call in downloader.urlopen.call_args_list],["GET","HEAD"])
+        downloader=MagicMock()
+        downloader.urlopen.side_effect=[HTTPError(Response(io.BytesIO(),short,{},405)),context(short)]
+        with self.assertRaises(VideoFailure):resolved_url(downloader,short)
+        self.assertEqual(downloader.urlopen.call_count,2)
+
+    def test_tiktok_short_links_use_get_and_revalidate_the_public_video_target(self):
+        from unittest.mock import MagicMock
+        downloader = MagicMock()
+        response = downloader.urlopen.return_value.__enter__.return_value
+        response.url = "https://www.tiktok.com/@owner/video/123456?share=private"
+        self.assertEqual(resolved_url(downloader,"https://vt.tiktok.com/ZSp8radxX/"),
+                         "https://www.tiktok.com/@owner/video/123456")
+        self.assertEqual(downloader.urlopen.call_args.args[0].method,"GET")
+        response.url = "https://m.tiktok.com/v/123456.html?share=private"
+        self.assertEqual(resolved_url(downloader,"https://vm.tiktok.com/Abcd12/"),
+                         "https://www.tiktok.com/share/video/123456")
+        for target in ["https://vt.tiktok.com/Abcd12/","https://127.0.0.1/video/123456",
+                       "https://instagram.com/reel/abc/","https://www.tiktok.com/@owner/photo/123456"]:
+            response.url = target
+            with self.assertRaises(VideoFailure) as failure:
+                resolved_url(downloader,"https://vt.tiktok.com/Abcd12/")
+            self.assertEqual(failure.exception.code,"video_unsupported_link")
+            self.assertEqual(failure.exception.stage,"resolve")
+
     def test_shared_and_username_routes_are_normalized_to_supported_extractors(self):
         from yt_dlp.extractor.instagram import InstagramIE
         from yt_dlp.extractor.tiktok import TikTokIE
@@ -34,8 +75,8 @@ class SocialURLTests(unittest.TestCase):
         response.url = "https://www.instagram.com/owner/reel/abc/?igsh=secret"
         self.assertEqual(resolved_url(downloader, "https://instagram.com/share/reel/xyz/"), "https://www.instagram.com/reel/abc/")
         for url, code in [("https://instagram.com/accounts/login/?next=secret", "video_login_required"),
-                          ("https://127.0.0.1/reel/abc/", "video_source_unavailable"),
-                          ("https://instagram.com/share/reel/xyz/", "video_source_unavailable")]:
+                          ("https://127.0.0.1/reel/abc/", "video_unsupported_link"),
+                          ("https://instagram.com/share/reel/xyz/", "video_unsupported_link")]:
             response.url = url
             with self.assertRaises(VideoFailure) as failure:
                 resolved_url(downloader, "https://instagram.com/share/reel/xyz/")
@@ -117,7 +158,7 @@ class SocialVideoTests(unittest.TestCase):
             (directory/"result.json").write_text(json.dumps(dict(duration=2,width=720,height=1280)))
             class Result: returncode=0
             return Result()
-        with patch("nikita_archive.social_video.subprocess.run",side_effect=worker) as process:
+        with patch("nikita_archive.social_video.run_worker",side_effect=worker) as process:
             self.store.run(identifier,"https://instagram.com/reel/abc/")
             args=process.call_args.args[0]
             self.assertIsInstance(args,list)
@@ -128,9 +169,9 @@ class SocialVideoTests(unittest.TestCase):
     def test_failed_or_missing_output_is_never_published(self):
         identifier="2"*32
         self.store.jobs[identifier] = dict(key="x",state="queued",created=time.time())
-        with patch("nikita_archive.social_video.subprocess.run",side_effect=RuntimeError("private URL/cookie must not reach response")):
+        with patch("nikita_archive.social_video.run_worker",side_effect=RuntimeError("private URL/cookie must not reach response")):
             self.store.run(identifier,"https://instagram.com/reel/abc/")
-        self.assertEqual(self.store.status(identifier)["error"],"video_unavailable")
+        self.assertEqual(self.store.status(identifier)["error"],"video_worker_failed")
         self.assertNotIn("private",json.dumps(self.store.status(identifier)))
         self.assertFalse((self.store.root/identifier).exists())
 
@@ -141,16 +182,153 @@ class SocialVideoTests(unittest.TestCase):
             def worker(args, **kwargs):
                 (Path(args[-1])/"error.json").write_text(json.dumps({"error":code,"detail":"private cookies"}))
                 return subprocess.CompletedProcess(args, 1)
-            with patch("nikita_archive.social_video.subprocess.run",side_effect=worker):
+            with patch("nikita_archive.social_video.run_worker",side_effect=worker):
                 self.store.run(identifier,"https://instagram.com/reel/abc/")
-            self.assertEqual(self.store.status(identifier)["error"],code if index<3 else "video_unavailable")
+            self.assertEqual(self.store.status(identifier)["error"],code if index<3 else "video_worker_failed")
             self.assertNotIn("private",json.dumps(self.store.status(identifier)))
             self.assertFalse((self.store.root/identifier).exists())
         identifier="e"*32
         self.store.jobs[identifier]=dict(key="x",state="queued",created=time.time())
-        with patch("nikita_archive.social_video.subprocess.run",side_effect=subprocess.TimeoutExpired("private URL",180)):
+        with patch("nikita_archive.social_video.run_worker",side_effect=subprocess.TimeoutExpired("private URL",180)):
             self.store.run(identifier,"https://instagram.com/reel/abc/")
         self.assertEqual(self.store.status(identifier)["error"],"video_timeout")
+
+    def test_real_worker_stderr_is_drained_but_only_bounded_bytes_are_kept(self):
+        result = run_worker([sys.executable,"-c","import sys; sys.stderr.buffer.write(b'x'*(2*1024*1024)); sys.exit(7)"],timeout=10)
+        self.assertEqual(result.returncode,7)
+        self.assertEqual(len(result.stderr),MAX_DIAGNOSTIC_BYTES)
+
+    def test_real_worker_timeout_is_killed_without_waiting_for_the_child_sleep(self):
+        start=time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run_worker([sys.executable,"-c","import time; time.sleep(30)"],timeout=0.1)
+        self.assertLess(time.monotonic()-start,5)
+
+    @unittest.skipUnless(os.name=="posix","POSIX process groups required")
+    def test_worker_exit_terminates_real_descendant_before_closing_its_stderr(self):
+        pid_file=self.root/"exited-worker-child.pid"
+        group_file=self.root/"exited-worker-group.pid"
+        error_file=self.root/"error.json"
+        child="import os,time; from pathlib import Path; Path("+repr(str(pid_file))+").write_text(str(os.getpid())); time.sleep(30)"
+        parent=("import os,subprocess,sys,time; from pathlib import Path; "
+                "Path("+repr(str(group_file))+").write_text(str(os.getpid())); "
+                "subprocess.Popen([sys.executable,'-c',"+repr(child)+"]); "
+                "\nwhile not Path("+repr(str(pid_file))+").is_file(): time.sleep(0.01)\n"
+                "Path("+repr(str(error_file))+").write_text('{\"error\":\"video_network_error\",\"stage\":\"download\"}'); "
+                "sys.stderr.write('worker finished\\n'); sys.stderr.flush(); os._exit(7)")
+        watchdog_fired=threading.Event()
+        def cleanup():
+            if group_file.is_file():
+                try:os.killpg(int(group_file.read_text()),signal.SIGKILL)
+                except ProcessLookupError:pass
+        def watchdog():
+            watchdog_fired.set()
+            cleanup()
+        guard=threading.Timer(2,watchdog)
+        guard.start()
+        start=time.monotonic()
+        try:
+            result=run_worker([sys.executable,"-c",parent],timeout=0.5)
+            self.assertLess(time.monotonic()-start,3)
+            self.assertFalse(watchdog_fired.is_set(),"Exited worker's descendant held stderr until watchdog cleanup")
+            self.assertEqual(result.returncode,7)
+            self.assertEqual(result.stderr,b"worker finished\n")
+            self.assertEqual(worker_failure(result,self.root).code,"video_network_error")
+            self.assertTrue(pid_file.is_file(),"Descendant must have actually started")
+            pid=int(pid_file.read_text())
+            deadline=time.monotonic()+1
+            while True:
+                state=subprocess.run(["ps","-o","stat=","-p",str(pid)],capture_output=True,text=True,check=False).stdout.strip()
+                if not state or state.startswith("Z"):break
+                if time.monotonic()>=deadline:self.fail("Worker descendant survived leader exit: "+state)
+                time.sleep(0.02)
+        finally:
+            guard.cancel()
+            cleanup()
+
+    @unittest.skipUnless(os.name=="posix","POSIX process groups required")
+    def test_worker_timeout_terminates_its_real_descendant_and_releases_stderr(self):
+        pid_file=self.root/"descendant.pid"
+        child="import os,time; from pathlib import Path; Path("+repr(str(pid_file))+").write_text(str(os.getpid())); time.sleep(30)"
+        parent="import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',"+repr(child)+"]); time.sleep(30)"
+        start=time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run_worker([sys.executable,"-c",parent],timeout=2)
+        self.assertLess(time.monotonic()-start,8)
+        self.assertTrue(pid_file.is_file(),"Descendant must have actually started")
+        pid=int(pid_file.read_text())
+        # A container init can retain an already-exited orphan as a zombie until
+        # its next reap. Such a record cannot execute or retain an open pipe.
+        deadline=time.monotonic()+2
+        while True:
+            result=subprocess.run(["ps","-o","stat=","-p",str(pid)],capture_output=True,text=True,check=False)
+            state=result.stdout.strip()
+            if not state or state.startswith("Z"):
+                break
+            if time.monotonic()>=deadline:
+                self.fail("Worker descendant survived timeout: "+state)
+            time.sleep(0.02)
+
+    def test_startup_killed_and_missing_worker_result_are_distinct_and_safe(self):
+        cases = [(subprocess.CompletedProcess([],1,stderr=b"ModuleNotFoundError: no module secret_token"),"video_dependency_missing"),
+                 (subprocess.CompletedProcess([],1,stderr=b"private URL and cookies"),"video_worker_failed"),
+                 (subprocess.CompletedProcess([],-signal.SIGKILL,stderr=b""),"video_worker_killed"),
+                 (subprocess.CompletedProcess([],-signal.SIGXCPU,stderr=b""),"video_timeout"),
+                 (subprocess.CompletedProcess([],-signal.SIGXFSZ,stderr=b""),"video_too_large"),
+                 (subprocess.CompletedProcess([],0,stderr=b""),"video_invalid_result")]
+        for index,(result,code) in enumerate(cases):
+            identifier=f"{100+index:032x}"
+            self.store.jobs[identifier]=dict(key="x",state="queued",created=time.time())
+            with patch("nikita_archive.social_video.run_worker",return_value=result):
+                self.store.run(identifier,"https://vt.tiktok.com/ZSp8radxX/")
+            value=self.store.status(identifier)
+            self.assertEqual(value["error"],code)
+            self.assertEqual(value["worker_exit_code"],result.returncode)
+            if code=="video_worker_failed":self.assertEqual(value["error_stage"],"worker")
+            self.assertNotIn("secret",json.dumps(value))
+            self.assertNotIn("cookies",json.dumps(value))
+            self.assertIn("service_version",value)
+
+    def test_typed_worker_stage_and_exception_are_sanitized_before_http(self):
+        identifier="f"*32
+        self.store.jobs[identifier]=dict(key="x",state="queued",created=time.time())
+        def worker(args,**kwargs):
+            (Path(args[-1])/"error.json").write_text(json.dumps({"error":"video_dns_error","stage":"resolve",
+                "exception_type":"DownloadError","detail":"secret cookies https://private.example"}))
+            return subprocess.CompletedProcess(args,1,stderr=b"secret cookies")
+        with patch("nikita_archive.social_video.run_worker",side_effect=worker):
+            self.store.run(identifier,"https://vt.tiktok.com/ZSp8radxX/")
+        value=self.store.status(identifier)
+        self.assertEqual((value["error"],value["error_stage"],value["exception_type"]),
+                         ("video_dns_error","resolve","DownloadError"))
+        self.assertNotIn("secret",json.dumps(value))
+
+    def test_wrapped_dns_and_transport_errors_never_become_generic_unavailable(self):
+        from yt_dlp.utils import DownloadError, ExtractorError
+        from yt_dlp.networking.exceptions import TransportError, CertificateVerifyError
+        transport=TransportError(cause=socket.gaierror(-3,"Temporary failure in name resolution"))
+        extraction=ExtractorError("Unable to download webpage",cause=transport)
+        error=DownloadError("wrapped error",exc_info=(ExtractorError,extraction,None))
+        self.assertEqual(failure_code(error),"video_dns_error")
+        for message in ["Name or service not known","nodename nor servname provided, or not known","getaddrinfo failed"]:
+            self.assertEqual(failure_code(DownloadError(message)),"video_dns_error")
+        self.assertEqual(failure_code(DownloadError("wrapper",exc_info=(CertificateVerifyError,CertificateVerifyError("bad TLS"),None))),"video_network_error")
+        self.assertEqual(failure_code(DownloadError("No suitable extractor found for URL private")),"video_unsupported_link")
+
+    def test_real_worker_reports_dns_stage_without_contacting_the_internet(self):
+        # Run the actual isolated module, not a mocked extractor. Controlled DNS
+        # fails before any destination connection; this matches the supplied URL's
+        # reproducible failure in the restricted build environment.
+        custom=self.root/"dns-fixture";custom.mkdir()
+        (custom/"sitecustomize.py").write_text("import socket\ndef fail(*args,**kwargs):\n raise socket.gaierror(-3,'Temporary failure in name resolution')\nsocket.getaddrinfo=fail\n")
+        output=self.root/"worker-output";output.mkdir()
+        env={**os.environ,"PYTHONPATH":str(custom)+os.pathsep+os.environ.get("PYTHONPATH","")}
+        result=subprocess.run([sys.executable,"-m","nikita_archive.video_worker","https://vt.tiktok.com/ZSp8radxX/",str(output)],
+                              env=env,capture_output=True,timeout=15)
+        self.assertEqual(result.returncode,1)
+        error=json.loads((output/"error.json").read_text())
+        self.assertEqual((error["error"],error["stage"]),("video_dns_error","resolve"))
+        self.assertNotIn("ZSp8",json.dumps(error))
 
     def test_failure_classifier_retains_cause_without_disclosing_messages(self):
         from yt_dlp.utils import DownloadError, ExtractorError
@@ -237,7 +415,7 @@ class VideoWorkerMediaTests(unittest.TestCase):
 
     def format(self, filename, **values):
         return dict(format_id=filename,url=f"http://127.0.0.1:{self.server.server_address[1]}/{filename}",
-                    ext=filename.split(".")[-1],protocol="https",**values)
+                    ext=filename.split(".")[-1],protocol="http",**values)
 
     def packets(self, path):
         result=subprocess.run(["ffprobe","-v","error","-show_packets","-show_data_hash","sha256","-of","json",str(path)],check=True,capture_output=True,timeout=20)
@@ -255,7 +433,7 @@ class VideoWorkerMediaTests(unittest.TestCase):
         output=self.pipeline([self.format("combined.mp4",vcodec="h264",acodec="aac",height=96)],self.root/"progressive")
         self.assert_playable_copy(output)
 
-    def test_separate_https_h264_and_aac_are_merged_without_reencoding(self):
+    def test_public_http_h264_and_aac_are_merged_without_reencoding(self):
         formats=[self.format("audio.m4a",vcodec="none",acodec="mp4a.40.2"),
                  self.format("video.mp4",vcodec="avc1.640028",acodec="none",height=96)]
         output=self.pipeline(formats,self.root/"separate")

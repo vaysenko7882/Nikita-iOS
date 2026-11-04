@@ -8,7 +8,7 @@ import TelegramPresentationData
 import TelegramUIPreferences
 import UIKit
 
-final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
+final class CodeGramDashboardController: ViewController {
     private let context: AccountContext
     private let scrollView = UIScrollView()
     private let contentView = UIView()
@@ -16,7 +16,7 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
     private let subtitleLabel = UILabel()
     private let logo = UIImageView(image: codegramBrandMark())
     private let searchSurface = CodeGramSearchView()
-    private var searchBar: UISearchBar { self.searchSurface.searchBar }
+    private var searchField: UITextField { self.searchSurface.textField }
     private let ghost = CodeGramQuickCard(title: "Призрак", symbol: "codegram.ghost")
     private let archive = CodeGramQuickCard(title: "Архив", symbol: "archivebox")
     private let privacy = CodeGramDashboardTile(destination: .privacy)
@@ -34,7 +34,6 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
     private var layoutSize = CGSize.zero
     private var safeInsets = UIEdgeInsets.zero
     private var dark = true
-    private var classicDesign = false
     private var ghostEnabled = false
     private var archiveEnabled = false
     private var ghostBusy = false
@@ -65,8 +64,7 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
         self.titleLabel.adjustsFontSizeToFitWidth = true; self.titleLabel.minimumScaleFactor = 0.7
         self.subtitleLabel.text = "Твой стиль. Твои настройки."; self.subtitleLabel.textColor = .secondaryLabel; self.subtitleLabel.numberOfLines = 2
         self.logo.contentMode = .scaleAspectFit; self.logo.isAccessibilityElement = false
-        self.searchBar.delegate = self
-        self.searchBar.searchTextField.accessibilityLabel = "Поиск по настройкам CodeGram"
+        self.searchSurface.onTextChanged = { [weak self] text in self?.query = text; self?.rebuildSearch() }
         self.footer.text = "На этом iPhone"; self.footer.textColor = .tertiaryLabel; self.footer.textAlignment = .center
         self.emptyLabel.text = "Ничего не найдено\nПопробуй «голос», «архив» или «плашка»."; self.emptyLabel.numberOfLines = 0; self.emptyLabel.textAlignment = .center; self.emptyLabel.textColor = .secondaryLabel
         for view in [self.titleLabel, self.subtitleLabel, self.logo, self.searchSurface, self.ghost, self.archive, self.privacy, self.messages, self.appearance, self.voice, self.bottomSurface, self.footer, self.emptyLabel] { self.contentView.addSubview(view) }
@@ -107,9 +105,6 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
             self.archiveEnabled = settings.isEnabled
             self.archive.update(isOn: self.archiveEnabled, busy: self.archiveBusy)
         }))
-        self.subscriptions.add((interfaceTuningSettingsSignal() |> deliverOnMainQueue).start(next: { [weak self] settings in
-            guard let self else { return }; self.classicDesign = settings.classicDesign; self.refreshAppearanceDetail(); self.layoutContent()
-        }))
         self.refreshVoice()
     }
 
@@ -141,7 +136,7 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
     private func refreshFonts() {
         self.titleLabel.font = codegramDashboardFont(36, weight: .bold, style: .largeTitle)
         self.subtitleLabel.font = codegramDashboardFont(15, style: .subheadline)
-        self.searchBar.searchTextField.font = UIFont.preferredFont(forTextStyle: .body)
+        self.searchField.font = UIFont.preferredFont(forTextStyle: .body)
         self.footer.font = codegramDashboardFont(12, style: .caption1); self.emptyLabel.font = codegramDashboardFont(16)
         for tile in [self.privacy, self.messages, self.appearance, self.voice] { tile.refreshFonts() }
         self.ghost.refreshFonts(); self.archive.refreshFonts(); self.storage.refreshFonts(); self.additional.refreshFonts()
@@ -154,11 +149,12 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
         self.logo.image = codegramBrandMark()?.withRenderingMode(.alwaysTemplate)
         self.separator.backgroundColor = .clear
         for surface in [self.ghost, self.archive, self.privacy, self.messages, self.appearance, self.voice] as [CodeGramDashboardSurface] { surface.applyPalette(dark: dark) }
+        self.searchSurface.refreshPalette()
         self.refreshAppearanceDetail()
         self.layoutContent()
     }
 
-    private func refreshAppearanceDetail() { self.appearance.setDetail(self.classicDesign ? "Классический стиль" : (self.dark ? "Тёмная · Glass" : "Светлая · Glass")) }
+    private func refreshAppearanceDetail() { self.appearance.setDetail(self.dark ? "Тёмная · без стекла" : "Светлая · без стекла") }
 
     private func layoutContent() {
         guard self.layoutSize.width > 0 else { return }
@@ -219,10 +215,6 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
         self.scrollView.contentSize = CGSize(width: self.layoutSize.width, height: y)
     }
 
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) { self.query = searchText; self.rebuildSearch() }
-    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) { searchBar.setShowsCancelButton(true, animated: !UIAccessibility.isReduceMotionEnabled) }
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) { self.query = ""; searchBar.text = nil; searchBar.resignFirstResponder(); searchBar.setShowsCancelButton(false, animated: !UIAccessibility.isReduceMotionEnabled); self.rebuildSearch() }
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) { searchBar.resignFirstResponder() }
     private func rebuildSearch() {
         for row in self.searchRows { row.removeFromSuperview() }; self.searchRows.removeAll()
         if !self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -235,7 +227,7 @@ final class CodeGramDashboardController: ViewController, UISearchBarDelegate {
         self.scrollView.setContentOffset(CGPoint(x: 0, y: -self.scrollView.contentInset.top), animated: false)
     }
     private func open(_ destination: CodeGramDestination) {
-        self.searchBar.resignFirstResponder()
+        self.searchField.resignFirstResponder()
         let controller: ViewController
         switch destination {
         case .privacy: controller = codegramSectionSettingsController(context: self.context, section: .privacy)
@@ -278,5 +270,6 @@ private final class CodeGramOrganizedSectionController: CodeGramTableController 
         }
     }
 }
+
 
 

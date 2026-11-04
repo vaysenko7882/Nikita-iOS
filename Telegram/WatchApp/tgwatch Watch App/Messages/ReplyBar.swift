@@ -19,7 +19,7 @@ struct ReplyBar: View {
                     .font(.system(size: 16, weight: .semibold))
                     .frame(width: Self.pillHeight, height: Self.pillHeight)
                     .contentShape(Circle())
-                    .glassEffect(in: Circle())
+                    .background(Color(white: 0.16), in: Circle())
             }
             .buttonStyle(.plain)
             .padding(.leading, 11)
@@ -28,7 +28,7 @@ struct ReplyBar: View {
             // TextFieldLink renders an arbitrary label and, when tapped,
             // presents the watchOS system text input UI (QuickboardViewService).
             // It returns the committed string in onSubmit. The label IS our
-            // glassy pill — fully styled, no double-chrome artifacts.
+            // matte pill — fully styled, no double-chrome artifacts.
             //
             // Limitation: TextFieldLink does not accept an initial value, so
             // the input UI opens blank every time. Existing server-side drafts
@@ -45,7 +45,7 @@ struct ReplyBar: View {
                 .padding(.horizontal, 12)
                 .frame(height: Self.pillHeight)
                 .contentShape(Rectangle())
-                .glassEffect()
+                .background(Color(white: 0.16), in: Capsule())
             } onSubmit: { newText in
                 let snapshot = newText.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !snapshot.isEmpty else { return }
@@ -61,7 +61,7 @@ struct ReplyBar: View {
 #if DEBUG
 // Side-by-side reference for the round "+" button. SnapshotPreviews doesn't
 // render NavigationStack chrome, so the watchOS-26 system back chevron is
-// mocked (same glass-Circle shape) at its in-app position (15pt leading,
+// mocked (same solid circle shape) at its in-app position (15pt leading,
 // 6pt top) for a direct visual compare against the "+" button at the
 // ReplyBar's in-app position (15pt leading, 19pt bottom). Frame matches
 // the 46mm canvas (208×248 logical pts).
@@ -73,7 +73,7 @@ private struct ReplyBarGeometryPreviewHost: View {
             Image(systemName: "chevron.left")
                 .font(.system(size: 16, weight: .semibold))
                 .frame(width: 35, height: 35)
-                .glassEffect(in: Circle())
+                .background(Color(white: 0.16), in: Circle())
                 .padding(.leading, 15)
                 .padding(.top, 6)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

@@ -293,8 +293,8 @@ public final class SecretMediaPreviewController: ViewController {
     private func saveMedia(_ message: Message) {
         exportCodeGramDisappearingMedia(context: self.context, message: EngineMessage(message), sourceView: self.view, failed: { [weak self] in
             guard let self else { return }
-            let alert = UIAlertController(title: nil, message: self.presentationData.strings.localFeatures.disappearingMedia.exportFailed, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
+            let alert = CodeGramPlainAlertController(title: nil, message: self.presentationData.strings.localFeatures.disappearingMedia.exportFailed, preferredStyle: .alert)
+            alert.addAction(CodeGramPlainAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
             self.context.sharedContext.applicationBindings.presentNativeController(alert)
         })
     }

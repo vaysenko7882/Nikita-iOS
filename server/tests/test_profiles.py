@@ -29,6 +29,26 @@ class ProfileTests(unittest.TestCase):
     def history(self):
         return self.store.history(100,limit=100)["events"]
 
+    def test_story_diagnostics_migrate_without_changing_profile_state(self):
+        legacy=Archive(Path(self.temp.name)/"legacy.sqlite3")
+        with legacy.connect() as db:
+            db.execute("""CREATE TABLE tracked_profiles(peer_id INTEGER PRIMARY KEY,access_hash TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,title TEXT NOT NULL DEFAULT '',next_check INTEGER NOT NULL DEFAULT 0,
+                last_check INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',fields TEXT NOT NULL DEFAULT '{}')""")
+            db.execute("INSERT INTO tracked_profiles(peer_id,access_hash,title,error) VALUES(100,'456','Kept','ProfileError')")
+        restored=ProfileStore(legacy)
+        self.assertEqual(restored.watching(),[(100,'456')])
+        status=restored.status(100)["profiles"][0]
+        self.assertEqual((status["last_story_check"],status["story_error"]),(0,""))
+        restored.story_checked(100,"StoryError")
+        restored.story_checked(100)
+        status=restored.status(100)["profiles"][0]
+        self.assertGreater(status["last_story_check"],0)
+        self.assertEqual(status["story_error"],"")
+        self.assertEqual(status["error"],"ProfileError")
+        self.assertEqual(status["title"],"Kept")
+        self.assertNotIn("access_hash",json.dumps(restored.status()))
+
     def test_opt_in_is_required_and_disabled_history_survives(self):
         self.store.fields(200,{"first_name":"Untracked"})
         self.assertEqual(self.store.history(200)["events"],[])

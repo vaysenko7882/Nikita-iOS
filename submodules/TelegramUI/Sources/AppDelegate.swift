@@ -367,6 +367,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         let launchStartTime = CFAbsoluteTimeGetCurrent()
         
         ClassicDesign.isEnabled = InterfaceTuningSettingsStore.shared.current.classicDesign
+        ClassicDesign.installOpaqueSystemAppearance()
         
         if ClassicDesign.isEnabled {
             defaultNavigationBarImpl = { presentationData in
@@ -794,8 +795,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         }
         
         if !writeAbilityTestSuccess {
-            let alertController = UIAlertController(title: nil, message: "The device does not have sufficient free space.", preferredStyle: .alert)
-            alertController.addAction(UIAlertAction(title: "OK", style: .default, handler: { _ in
+            let alertController = CodeGramPlainAlertController(title: nil, message: "The device does not have sufficient free space.", preferredStyle: .alert)
+            alertController.addAction(CodeGramPlainAlertAction(title: "OK", style: .default, handler: { _ in
                 preconditionFailure()
             }))
             self.mainWindow?.presentNative(alertController)

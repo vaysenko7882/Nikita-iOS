@@ -77,5 +77,21 @@ final class CodeGramSocialVideoTests: XCTestCase {
         XCTAssertTrue(CodeGramVPSError.connection(URLError(.notConnectedToInternet)).message.contains("интернету"))
         XCTAssertTrue(CodeGramVPSError.connection(URLError(.cancelled)).message.contains("отменён"))
     }
+    func testVideoDiagnosticReportsVersionAndWorkerWithoutShowingRawOutput() {
+        let message = CodeGramVPSError.socialVideoFailure(code: "video_dns_error", serviceVersion: "5.2.0", stage: "resolve", workerExitCode: 1, exceptionType: "TransportError").message
+        for expected in ["DNS", "video_dns_error", "VPS: 5.2.0", "Этап: ссылка и DNS", "Процесс: 1", "TransportError"] {
+            XCTAssertTrue(message.contains(expected), expected)
+        }
+        for code in ["video_worker_failed", "video_worker_killed", "video_invalid_result", "video_unsupported_link", "video_extraction_failed"] {
+            XCTAssertTrue(CodeGramVPSError.socialVideoFailure(code: code, serviceVersion: "5.2.0").message.contains("Код: \(code)"))
+        }
+        let privateValue = "https://private.example/?token=secret"
+        let unknown = CodeGramVPSError.socialVideoFailure(code: privateValue, serviceVersion: privateValue, workerExitCode: 100000, exceptionType: privateValue).message
+        XCTAssertFalse(unknown.contains(privateValue))
+        XCTAssertFalse(unknown.contains("100000"))
+        XCTAssertTrue(unknown.contains("версия не передана"))
+        XCTAssertFalse(CodeGramVPSError.socialVideoFailure(code: "video_dns_error", serviceVersion: "5.2.0\nsecret").message.contains("secret"))
+        XCTAssertTrue(CodeGramVPSError.connection(URLError(.dnsLookupFailed)).message.contains("адрес VPS"))
+    }
 }
 

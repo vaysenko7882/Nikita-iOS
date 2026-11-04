@@ -233,6 +233,7 @@ final class CodeGramQuickCard: CodeGramDashboardSurface {
         self.detail.text = "Загрузка…"; self.detail.textColor = .secondaryLabel
         self.icon.tintColor = .label; self.icon.contentMode = .scaleAspectFit
         self.toggle.onTintColor = UIColor(white: 0.78, alpha: 1)
+        self.toggle.thumbTintColor = .white
         self.toggle.isEnabled = false; self.toggle.accessibilityLabel = title
         self.toggle.addTarget(self, action: #selector(self.changedToggle), for: .valueChanged)
         for view in [self.icon, self.caption, self.detail, self.toggle] { self.contentView.addSubview(view) }
@@ -301,4 +302,5 @@ final class CodeGramDashboardRow: CodeGramDashboardSurface {
         self.accessibilityLabel = "\(self.caption.text ?? ""), \(self.detail.text ?? "")"
     }
 }
+
 

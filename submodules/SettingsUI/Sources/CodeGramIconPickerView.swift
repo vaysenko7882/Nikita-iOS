@@ -65,6 +65,8 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
             self.scrollView.addSubview(button)
         }
         self.pageControl.numberOfPages = self.images.count
+        self.pageControl.backgroundStyle = .minimal
+        self.pageControl.allowsContinuousInteraction = false
         self.pageControl.addTarget(self, action: #selector(self.pageChanged), for: .valueChanged)
         self.brandLabel.text = "CodeGram"
         self.brandLabel.font = UIFontMetrics(forTextStyle: .largeTitle).scaledFont(for: .systemFont(ofSize: 34, weight: .bold))
@@ -183,6 +185,8 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
             self.buttonState = buttonState
             var configuration = self.applyButton.configuration
             configuration?.baseBackgroundColor = choice.light ? .black : .white
+            configuration?.background.visualEffect = nil
+            configuration?.background.backgroundColor = choice.light ? .black : .white
             configuration?.baseForegroundColor = choice.background
             configuration?.title = self.busy ? "Применяю…" : choice.name == self.appliedName ? "Установлена" : "Использовать эту иконку"
             self.applyButton.configuration = configuration
@@ -201,3 +205,4 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
         }
     }
 }
+

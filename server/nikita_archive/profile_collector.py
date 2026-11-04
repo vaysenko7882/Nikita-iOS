@@ -16,24 +16,31 @@ class ProfileCollector:
         self.avatar_ids = {}
         self.pause_until = 0
         self.request_lock = asyncio.Lock()
+        self.rpc_slots = asyncio.Semaphore(3)
+        self.hydration_lock = asyncio.Lock()
         self.last_request = 0
         self.pending_stories = set()
         self.story_tasks = set()
         self.dirty_profiles = set()
+        self.story_poll_interval = store.STORY_INTERVAL
+        self.story_poll_task = None
+        self.story_deadlines = {}
 
     async def request(self, value):
-        async with self.request_lock:
-            while True:
-                now = time.monotonic()
-                delay = max(0,self.pause_until-now,1-(now-self.last_request))
-                if delay <= 0:
-                    break
-                await asyncio.sleep(delay)
-                # Other operations (e.g. profile-photo pagination) can extend
-                # FLOOD_WAIT while this RPC is sleeping. Recheck before sending.
-            self.last_request = time.monotonic()
+        async with self.rpc_slots:
+            async with self.request_lock:
+                while True:
+                    now = time.monotonic()
+                    delay = max(0,self.pause_until-now,1-(now-self.last_request))
+                    if delay <= 0:
+                        break
+                    await asyncio.sleep(delay)
+                    # Recheck a FLOOD_WAIT extended by another in-flight RPC.
+                self.last_request = time.monotonic()
             try:
-                return await self.client(value,flood_sleep_threshold=0)
+                # The pacing lock protects start times, not a slow network
+                # response. One gift request must not hold up story delivery.
+                return await asyncio.wait_for(self.client(value,flood_sleep_threshold=0),30)
             except errors.FloodWaitError as error:
                 # Every caller, including background skipped-story hydration,
                 # obeys this same deadline before making its next RPC.
@@ -183,17 +190,29 @@ class ProfileCollector:
         for role,photo in extra:
             if isinstance(photo,types.Photo):
                 photos[str(photo.id)] = dict(id=str(photo.id),date=public_value(photo.date),media=self.photo(peer_id,"avatars",photo))
-        async for photo in self.client.iter_profile_photos(input_peer):
-            order.append(str(photo.id))
-            photos[str(photo.id)] = dict(id=str(photo.id),date=public_value(photo.date),media=self.photo(peer_id,"avatars",photo))
-            if len(order)%100==0:
-                await asyncio.sleep(0.5)
-            if not self.store.enabled(peer_id):
-                return
+        offset, pages = 0, set()
+        while True:
+            # Telethon's generic iterator issues its own RPCs; use the same
+            # request gate as stories/gifts so pagination cannot bypass backoff.
+            page = await self.request(functions.photos.GetUserPhotosRequest(
+                types.InputUser(input_peer.user_id,input_peer.access_hash),offset,0,100))
+            current = list(page.photos)
+            signature_ids = tuple(photo.id for photo in current)
+            if current and signature_ids in pages:
+                raise ValueError("Repeated avatar page")
+            pages.add(signature_ids)
+            for photo in current:
+                order.append(str(photo.id))
+                photos[str(photo.id)] = dict(id=str(photo.id),date=public_value(photo.date),media=self.photo(peer_id,"avatars",photo))
+                if not self.store.enabled(peer_id):
+                    return
+            offset += len(current)
+            if len(current)<100 or not hasattr(page,"count") or offset>=page.count:
+                break
         self.store.collection(peer_id,"avatars",photos)
         self.avatar_ids[peer_id] = signature
 
-    async def scan(self, peer_id, access_hash):
+    async def scan(self, peer_id, access_hash, *, include_stories=True):
         input_peer = types.InputPeerUser(peer_id,int(access_hash))
         full = await self.request(functions.users.GetFullUserRequest(types.InputUser(peer_id,int(access_hash))))
         user = next(user for user in full.users if user.id==peer_id)
@@ -221,7 +240,7 @@ class ProfileCollector:
         )},complete=False)
         # Active stories first: fetch only what this session can actually see.
         warnings = []
-        operations = [("Сторис",lambda: self.stories(peer_id,input_peer))]
+        operations = [("Сторис",lambda: self.stories(peer_id,input_peer))] if include_stories else []
         if peer_id not in self.avatar_ids or self.avatar_ids[peer_id] != signature:
             operations.append(("Аватарки",lambda: self.avatars(peer_id,input_peer,signature,extra_photos)))
         if (old_gift_count != fields.get("stargifts_count") or
@@ -262,12 +281,15 @@ class ProfileCollector:
 
     async def resolve_story(self, peer_id, story_id):
         try:
-            access_hash = self.store.access_hash(peer_id)
-            if access_hash is None or time.monotonic()<self.pause_until:
-                return
-            peer = types.InputPeerUser(peer_id,int(access_hash))
-            response = await self.request(functions.stories.GetStoriesByIDRequest(peer,[story_id]))
-            await self.stories(peer_id,peer,list(response.stories))
+            # Only one hydration is in flight; a burst of skipped updates must
+            # leave an RPC slot for the dedicated active-story poller.
+            async with self.hydration_lock:
+                access_hash = self.store.access_hash(peer_id)
+                if access_hash is None or time.monotonic()<self.pause_until:
+                    return
+                peer = types.InputPeerUser(peer_id,int(access_hash))
+                response = await self.request(functions.stories.GetStoriesByIDRequest(peer,[story_id]))
+                await self.stories(peer_id,peer,list(response.stories))
         except errors.FloodWaitError as error:
             self.pause_until = max(self.pause_until,time.monotonic()+int(error.seconds)+2)
         except Exception:
@@ -278,11 +300,58 @@ class ProfileCollector:
 
     async def close(self):
         tasks = list(self.story_tasks)
+        if self.story_poll_task is not None:
+            tasks.append(self.story_poll_task)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks,return_exceptions=True)
 
+    async def poll_stories(self):
+        """Poll active stories independently of full profile/gift pagination."""
+        while True:
+            now = time.monotonic()
+            if now < self.pause_until:
+                await asyncio.sleep(min(1,self.pause_until-now))
+                continue
+            enabled = dict(self.store.watching())
+            self.story_deadlines = {peer:deadline for peer,deadline in self.story_deadlines.items() if peer in enabled}
+            due = sorted(((self.story_deadlines.get(peer,0),peer,access_hash)
+                          for peer,access_hash in enabled.items()),key=lambda item:(item[0],item[1]))
+            for deadline,peer_id,access_hash in due:
+                if deadline > time.monotonic():
+                    break
+                if not self.store.enabled(peer_id):
+                    continue
+                delay = self.story_poll_interval
+                try:
+                    await self.stories(peer_id,types.InputPeerUser(peer_id,int(access_hash)))
+                    self.store.story_checked(peer_id)
+                except errors.FloodWaitError as error:
+                    delay = max(self.story_poll_interval,int(error.seconds)+2)
+                    self.pause_until = max(self.pause_until,time.monotonic()+delay)
+                    self.store.story_checked(peer_id,"Telegram временно ограничил запросы")
+                except Exception as error:
+                    # A missing/private story collection never erases history
+                    # or changes the separate full-profile check status.
+                    self.store.story_checked(peer_id,type(error).__name__)
+                    delay = max(self.story_poll_interval,self.store.POLL_INTERVAL)
+                self.story_deadlines[peer_id] = time.monotonic()+delay
+                if time.monotonic() < self.pause_until:
+                    break
+                await asyncio.sleep(0)
+            next_due = min(self.story_deadlines.values(),default=time.monotonic()+1)
+            await asyncio.sleep(max(0.05,min(1,next_due-time.monotonic())))
+
     async def run(self):
+        self.story_poll_task = asyncio.create_task(self.poll_stories())
+        try:
+            await self.run_profiles()
+        finally:
+            self.story_poll_task.cancel()
+            await asyncio.gather(self.story_poll_task,return_exceptions=True)
+            self.story_poll_task = None
+
+    async def run_profiles(self):
         while True:
             if time.monotonic() < self.pause_until:
                 await asyncio.sleep(min(30,self.pause_until-time.monotonic()))
@@ -290,11 +359,11 @@ class ProfileCollector:
             for peer_id,access_hash in self.store.due():
                 self.dirty_profiles.discard(peer_id)
                 try:
-                    warning = await self.scan(peer_id,access_hash)
+                    warning = await self.scan(peer_id,access_hash,include_stories=False)
                     self.store.checked(peer_id,warning or "")
                 except errors.FloodWaitError as error:
                     delay = max(30,int(error.seconds)+2)
-                    self.pause_until = time.monotonic()+delay
+                    self.pause_until = max(self.pause_until,time.monotonic()+delay)
                     self.store.checked(peer_id,"Telegram временно ограничил запросы",delay=delay)
                     break
                 except Exception as error:

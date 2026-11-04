@@ -16,7 +16,7 @@ private final class RestingBackgroundView: UIVisualEffectView {
     }
 
     init() {
-        let effect = UIBlurEffect(style: .light)
+        let effect = ClassicDesign.isEnabled ? nil : UIBlurEffect(style: .light)
         super.init(effect: effect)
         
         for subview in self.subviews {
@@ -33,6 +33,10 @@ private final class RestingBackgroundView: UIVisualEffectView {
     }
 
     func update(isDark: Bool) {
+        if ClassicDesign.isEnabled {
+            self.effect = nil
+            return
+        }
         if self.isDark == isDark {
             return
         }
@@ -195,7 +199,7 @@ public final class LiquidLensView: UIView {
         }
         self.containerView.isUserInteractionEnabled = false
         
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), !ClassicDesign.isEnabled {
             if let viewClass = NSClassFromString("_UILiquidLensView") as AnyObject as? NSObjectProtocol {
                 let allocSelector = NSSelectorFromString("alloc")
                 let initSelector = NSSelectorFromString("initWithRestingBackground:")

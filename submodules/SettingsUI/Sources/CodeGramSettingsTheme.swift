@@ -5,6 +5,12 @@ enum CodeGramSettingsTheme {
     static var background: UIColor {
         UIColor { $0.userInterfaceStyle == .dark ? .black : .systemGroupedBackground }
     }
+    static var surface: UIColor {
+        UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.09, alpha: 1) : .secondarySystemGroupedBackground }
+    }
+    static var selectedSurface: UIColor {
+        UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.16, alpha: 1) : .systemGray5 }
+    }
     static func symbol(_ name: String) -> UIImage? {
         if let image = self.icons.object(forKey: name as NSString) { return image }
         guard let image = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular))?.withRenderingMode(.alwaysTemplate) else { return nil }
@@ -16,7 +22,7 @@ enum CodeGramSettingsTheme {
         cell.backgroundColor = .clear
         cell.contentView.backgroundColor = .clear
         cell.tintColor = .label
-        // The glass owns feedback. A separate selection overlay hides it.
+        // The cell updates its opaque surface directly for selection feedback.
         cell.selectionStyle = .none
     }
     static func configure(_ table: UITableView) {
@@ -29,54 +35,92 @@ enum CodeGramSettingsTheme {
     }
 }
 
-/// Install native glass synchronously, once. UIKit handles accessibility and
-/// adaptation; archive power policy must not remove the user's interface.
-class CodeGramMaterialView: UIVisualEffectView {
+/// A solid, theme-aware content host. No blur, refraction or interactive material.
+class CodeGramSurfaceView: UIView {
+    let contentView = UIView()
     init(radius: CGFloat = 24) {
-        if #available(iOS 26.0, *) {
-            let glass = UIGlassEffect(style: .regular)
-            glass.isInteractive = true
-            super.init(effect: glass)
-            self.cornerConfiguration = .corners(radius: .fixed(radius))
-        } else {
-            super.init(effect: UIBlurEffect(style: .systemMaterial))
-            self.layer.cornerRadius = radius
-            self.layer.cornerCurve = .continuous
-            self.clipsToBounds = true
-        }
-        // Host labels/controls in contentView. Do not clip, scale or fade the
-        // native interactive surface, or detach its content from the effect.
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
-/// The search field stays a system UISearchBar. Its public background-image API
-/// makes room for one real glass surface, with the field hosted inside its content.
-final class CodeGramSearchView: CodeGramMaterialView {
-    let searchBar = UISearchBar()
-    init() {
-        super.init(radius: 26)
-        self.searchBar.placeholder = "Поиск"
-        self.searchBar.searchBarStyle = .minimal
-        self.searchBar.backgroundImage = UIImage()
-        self.searchBar.setSearchFieldBackgroundImage(UIImage(), for: .normal)
-        self.searchBar.searchTextField.backgroundColor = .clear
-        self.searchBar.searchTextField.font = .preferredFont(forTextStyle: .body)
-        self.searchBar.searchTextField.adjustsFontForContentSizeCategory = true
-        self.searchBar.searchTextField.autocorrectionType = .no
-        self.searchBar.tintColor = .label
-        self.contentView.addSubview(self.searchBar)
+        super.init(frame: .zero)
+        self.isOpaque = true
+        self.backgroundColor = CodeGramSettingsTheme.surface
+        self.layer.cornerRadius = radius
+        self.layer.cornerCurve = .continuous
+        self.clipsToBounds = true
+        self.contentView.backgroundColor = .clear
+        self.addSubview(self.contentView)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func layoutSubviews() {
         super.layoutSubviews()
-        self.searchBar.frame = self.bounds
+        self.contentView.frame = self.bounds
     }
 }
 
-/// A custom control uses the glass's own elasticity, including its content.
-/// Taps on embedded switches remain independent of the card's navigation action.
-class CodeGramDashboardSurface: CodeGramMaterialView, UIGestureRecognizerDelegate {
+/// A plain text field keeps editing/accessibility without a system search material.
+final class CodeGramSearchView: CodeGramSurfaceView, UITextFieldDelegate {
+    let textField = UITextField()
+    let cancelButton = UIButton(type: .system)
+    private let icon = UIImageView(image: UIImage(systemName: "magnifyingglass"))
+    private var showsCancelButton = false
+    var onTextChanged: ((String) -> Void)?
+    var onSubmit: (() -> Void)?
+    init() {
+        super.init(radius: 26)
+        self.textField.placeholder = "Поиск"
+        self.textField.borderStyle = .none
+        self.textField.backgroundColor = .clear
+        self.textField.textColor = .label
+        self.textField.tintColor = .label
+        self.textField.font = .preferredFont(forTextStyle: .body)
+        self.textField.adjustsFontForContentSizeCategory = true
+        self.textField.autocorrectionType = .no
+        self.textField.autocapitalizationType = .none
+        self.textField.returnKeyType = .search
+        self.textField.clearButtonMode = .whileEditing
+        self.textField.accessibilityLabel = "Поиск по настройкам CodeGram"
+        self.textField.accessibilityIdentifier = "CodeGram.searchField"
+        self.textField.delegate = self
+        self.textField.addTarget(self, action: #selector(self.changed), for: .editingChanged)
+        self.icon.tintColor = .secondaryLabel
+        self.icon.contentMode = .scaleAspectFit
+        self.icon.isUserInteractionEnabled = false
+        self.icon.isAccessibilityElement = false
+        self.cancelButton.configuration = nil
+        self.cancelButton.setTitle("Отмена", for: .normal)
+        self.cancelButton.setTitleColor(.label, for: .normal)
+        self.cancelButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
+        self.cancelButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        self.cancelButton.accessibilityIdentifier = "CodeGram.cancelSearch"
+        self.cancelButton.isHidden = true
+        self.cancelButton.addTarget(self, action: #selector(self.cancelled), for: .touchUpInside)
+        for view in [self.icon, self.textField, self.cancelButton] { self.contentView.addSubview(view) }
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let cancelWidth = self.showsCancelButton ? max(44, self.cancelButton.intrinsicContentSize.width + 12) : 0
+        self.icon.frame = CGRect(x: 16, y: (self.bounds.height - 22) / 2, width: 22, height: 22)
+        self.cancelButton.frame = CGRect(x: self.bounds.width - cancelWidth - 12, y: 0, width: cancelWidth, height: self.bounds.height)
+        self.textField.frame = CGRect(x: 48, y: 0, width: max(1, self.bounds.width - 64 - (self.showsCancelButton ? cancelWidth + 8 : 0)), height: self.bounds.height)
+    }
+    func refreshPalette() { self.backgroundColor = CodeGramSettingsTheme.surface; self.setNeedsLayout() }
+    func setShowsCancelButton(_ show: Bool, animated: Bool) {
+        self.showsCancelButton = show
+        self.cancelButton.isHidden = !show
+        self.setNeedsLayout()
+    }
+    func textFieldDidBeginEditing(_ textField: UITextField) { self.setShowsCancelButton(true, animated: false) }
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool { textField.resignFirstResponder(); self.onSubmit?(); return true }
+    @objc private func changed() { self.onTextChanged?(self.textField.text ?? "") }
+    @objc private func cancelled() {
+        self.textField.text = nil
+        self.textField.resignFirstResponder()
+        self.setShowsCancelButton(false, animated: false)
+        self.onTextChanged?("")
+    }
+}
+
+/// Embedded switches keep their own actions; the rest of the card navigates.
+class CodeGramDashboardSurface: CodeGramSurfaceView, UIGestureRecognizerDelegate {
     var action: (() -> Void)?
     init() {
         super.init(radius: 24)
@@ -85,7 +129,7 @@ class CodeGramDashboardSurface: CodeGramMaterialView, UIGestureRecognizerDelegat
         self.addGestureRecognizer(tap)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    func applyPalette(dark: Bool) { /* The native effect follows interface traits. */ }
+    func applyPalette(dark: Bool) { self.backgroundColor = CodeGramSettingsTheme.surface }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         var view = touch.view
         while let current = view, current !== self {
@@ -99,4 +143,5 @@ class CodeGramDashboardSurface: CodeGramMaterialView, UIGestureRecognizerDelegat
     }
     @objc private func pressed() { self.action?() }
 }
+
 

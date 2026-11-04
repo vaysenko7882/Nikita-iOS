@@ -38,6 +38,7 @@ class ProfileStore:
     MAX_PROFILES = 50
     POLL_INTERVAL = 15
     GIFT_INTERVAL = 60
+    STORY_INTERVAL = 2
 
     def __init__(self, archive):
         self.archive = archive
@@ -63,6 +64,11 @@ class ProfileStore:
                     peer_id INTEGER NOT NULL, blob_id TEXT NOT NULL,
                     PRIMARY KEY(peer_id,blob_id));
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(tracked_profiles)")}
+            if "last_story_check" not in columns:
+                db.execute("ALTER TABLE tracked_profiles ADD COLUMN last_story_check INTEGER NOT NULL DEFAULT 0")
+            if "story_error" not in columns:
+                db.execute("ALTER TABLE tracked_profiles ADD COLUMN story_error TEXT NOT NULL DEFAULT ''")
 
     @staticmethod
     def identifier(value):
@@ -106,24 +112,37 @@ class ProfileStore:
 
     def status(self, peer_id=None):
         with self.archive.connect() as db:
-            columns = "peer_id,enabled,title,last_check,error"
+            columns = "peer_id,enabled,title,last_check,error,last_story_check,story_error"
             if peer_id is None:
                 rows = db.execute("SELECT " + columns + " FROM tracked_profiles ORDER BY enabled DESC,title,peer_id").fetchall()
             else:
                 rows = db.execute("SELECT " + columns + " FROM tracked_profiles WHERE peer_id=?", (self.identifier(peer_id),)).fetchall()
-            profiles = [dict(peer_id=str(p), enabled=bool(e), title=t, last_check=last, error=error) for p,e,t,last,error in rows]
+            profiles = [dict(peer_id=str(p), enabled=bool(e), title=t, last_check=last, error=error,
+                             last_story_check=story_last,story_error=story_error)
+                        for p,e,t,last,error,story_last,story_error in rows]
             if peer_id is not None and not profiles:
-                profiles = [dict(peer_id=str(peer_id),enabled=False,title="",last_check=0,error="")]
+                profiles = [dict(peer_id=str(peer_id),enabled=False,title="",last_check=0,error="",last_story_check=0,story_error="")]
             for item in profiles:
                 event_count,last_event = db.execute("SELECT COUNT(*),MAX(observed_at) FROM profile_events WHERE peer_id=?", (int(item["peer_id"]),)).fetchone()
                 item["event_count"] = event_count
                 item["last_event_at"] = last_event or 0
         return {"profiles": profiles, "poll_interval": self.POLL_INTERVAL, "gift_interval": self.GIFT_INTERVAL,
+                "story_poll_interval": self.STORY_INTERVAL,
                 "push_updates": True, "target_block_status": "not_exposed_by_telegram"}
 
     def due(self):
         with self.archive.connect() as db:
             return db.execute("SELECT peer_id,access_hash FROM tracked_profiles WHERE enabled=1 AND next_check<=? ORDER BY next_check,peer_id", (int(time.time()),)).fetchall()
+
+    def watching(self):
+        with self.archive.connect() as db:
+            return db.execute("SELECT peer_id,access_hash FROM tracked_profiles WHERE enabled=1 ORDER BY peer_id").fetchall()
+
+    def story_checked(self, peer_id, error=""):
+        now = int(time.time())
+        with self.archive.connect() as db:
+            db.execute("UPDATE tracked_profiles SET last_story_check=CASE WHEN ?='' THEN ? ELSE last_story_check END,story_error=? WHERE peer_id=? AND enabled=1",
+                       (error,now,error[:128],peer_id))
 
     def access_hash(self, peer_id):
         with self.archive.connect() as db:

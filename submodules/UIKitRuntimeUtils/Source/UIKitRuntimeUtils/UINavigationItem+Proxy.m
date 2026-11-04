@@ -21,6 +21,16 @@ static const void *animationOffsetKey = &animationOffsetKey;
 static const void *animationScaleKey = &animationScaleKey;
 static const void *ringSelectionKey = &ringSelectionKey;
 
+// The fork's matte policy also covers legacy controllers that still use a
+// native navigation bar. These are public item properties, not a mutation of
+// UIKit's private visual-effect hierarchy or an unsupported appearance proxy.
+static void codeGramMakeBarButtonMatte(UIBarButtonItem *item) {
+    if (@available(iOS 26.0, *)) {
+        item.hidesSharedBackground = YES;
+        item.sharesBackground = NO;
+    }
+}
+
 @implementation UINavigationItem (Proxy)
 
 + (void)load
@@ -32,6 +42,8 @@ static const void *ringSelectionKey = &ringSelectionKey;
         [RuntimeUtils swizzleInstanceMethodOfClass:[UINavigationItem class] currentSelector:@selector(setTitleView:) newSelector:@selector(_ac91f40f_setTitleView:)];
         [RuntimeUtils swizzleInstanceMethodOfClass:[UINavigationItem class] currentSelector:@selector(setLeftBarButtonItem:) newSelector:@selector(_ac91f40f_setLeftBarButtonItem:)];
         [RuntimeUtils swizzleInstanceMethodOfClass:[UINavigationItem class] currentSelector:@selector(setLeftBarButtonItem:animated:) newSelector:@selector(_ac91f40f_setLeftBarButtonItem:animated:)];
+        [RuntimeUtils swizzleInstanceMethodOfClass:[UINavigationItem class] currentSelector:@selector(setLeftBarButtonItems:) newSelector:@selector(_ac91f40f_setLeftBarButtonItems:)];
+        [RuntimeUtils swizzleInstanceMethodOfClass:[UINavigationItem class] currentSelector:@selector(setLeftBarButtonItems:animated:) newSelector:@selector(_ac91f40f_setLeftBarButtonItems:animated:)];
         [RuntimeUtils swizzleInstanceMethodOfClass:[UINavigationItem class] currentSelector:@selector(setRightBarButtonItem:) newSelector:@selector(_ac91f40f_setRightBarButtonItem:)];
         [RuntimeUtils swizzleInstanceMethodOfClass:[UINavigationItem class] currentSelector:@selector(setRightBarButtonItem:animated:) newSelector:@selector(_ac91f40f_setRightBarButtonItem:animated:)];
         [RuntimeUtils swizzleInstanceMethodOfClass:[UINavigationItem class] currentSelector:@selector(setRightBarButtonItems:) newSelector:@selector(_ac91f40f_setRightBarButtonItems:)];
@@ -87,6 +99,7 @@ static const void *ringSelectionKey = &ringSelectionKey;
 
 - (void)_ac91f40f_setLeftBarButtonItem:(UIBarButtonItem *)leftBarButtonItem animated:(BOOL)animated
 {
+    codeGramMakeBarButtonMatte(leftBarButtonItem);
     UIBarButtonItem *previousItem = self.leftBarButtonItem;
     
     [self _ac91f40f_setLeftBarButtonItem:leftBarButtonItem animated:animated];
@@ -101,12 +114,28 @@ static const void *ringSelectionKey = &ringSelectionKey;
     }
 }
 
+- (void)_ac91f40f_setLeftBarButtonItems:(NSArray<UIBarButtonItem *> *)leftBarButtonItems {
+    [self setLeftBarButtonItems:leftBarButtonItems animated:false];
+}
+
+- (void)_ac91f40f_setLeftBarButtonItems:(NSArray<UIBarButtonItem *> *)leftBarButtonItems animated:(BOOL)animated {
+    for (UIBarButtonItem *item in leftBarButtonItems) {
+        codeGramMakeBarButtonMatte(item);
+    }
+    [self _ac91f40f_setLeftBarButtonItems:leftBarButtonItems animated:animated];
+    UINavigationItem *targetItem = [self associatedObjectForKey:targetItemKey];
+    if (targetItem != nil) {
+        [targetItem setLeftBarButtonItems:leftBarButtonItems animated:animated];
+    }
+}
+
 - (void)_ac91f40f_setRightBarButtonItem:(UIBarButtonItem *)rightBarButtonItem {
     [self setRightBarButtonItem:rightBarButtonItem animated:false];
 }
 
 - (void)_ac91f40f_setRightBarButtonItem:(UIBarButtonItem *)rightBarButtonItem animated:(BOOL)animated
 {
+    codeGramMakeBarButtonMatte(rightBarButtonItem);
     UIBarButtonItem *previousItem = self.rightBarButtonItem;
     
     [self _ac91f40f_setRightBarButtonItem:rightBarButtonItem animated:animated];
@@ -127,6 +156,9 @@ static const void *ringSelectionKey = &ringSelectionKey;
 
 - (void)_ac91f40f_setRightBarButtonItems:(NSArray<UIBarButtonItem *> *)rightBarButtonItems animated:(BOOL)animated
 {
+    for (UIBarButtonItem *item in rightBarButtonItems) {
+        codeGramMakeBarButtonMatte(item);
+    }
     [self _ac91f40f_setRightBarButtonItems:rightBarButtonItems animated:animated];
     
     UINavigationItem *targetItem = [self associatedObjectForKey:targetItemKey];
@@ -141,6 +173,7 @@ static const void *ringSelectionKey = &ringSelectionKey;
 
 - (void)_ac91f40f_setBackBarButtonItem:(UIBarButtonItem *)backBarButtonItem
 {
+    codeGramMakeBarButtonMatte(backBarButtonItem);
     UIBarButtonItem *previousItem = self.backBarButtonItem;
     
     [self _ac91f40f_setBackBarButtonItem:backBarButtonItem];
