@@ -253,7 +253,9 @@ private final class HistoryHarnessController: UIViewController, UITableViewDataS
     private func background() {
         self.phase("08-background-request") {
             let result = self.output.appendingPathComponent("foreground-result.json")
-            self.wait("host background/foreground", timeout: 120, condition: { FileManager.default.fileExists(atPath: result.path) }) {
+            self.wait("host background/foreground", timeout: 120, condition: {
+                UIApplication.shared.applicationState == .active && FileManager.default.fileExists(atPath: result.path)
+            }) {
                 let data = try! JSONSerialization.jsonObject(with: Data(contentsOf: result)) as! [String: Any]
                 self.check(data["background_requests"] as? Int == 0,"Background screen must not keep polling")
                 let expected = (data["latest"] as! NSNumber).int64Value
@@ -286,7 +288,7 @@ private final class HistoryHarnessController: UIViewController, UITableViewDataS
         self.detailFeed?.setVisible(false)
         let result: [String: Any] = ["checks": self.checks,"failures": self.failures,"http_refreshes": self.refreshes,"manual_refreshes": 0]
         let bytes = try! JSONSerialization.data(withJSONObject: result,options: [.prettyPrinted,.sortedKeys])
-        try! bytes.write(to: self.output.appendingPathComponent("result.json"))
+        try! bytes.write(to: self.output.appendingPathComponent("result.json"), options: .atomic)
     }
 
     func numberOfSections(in tableView: UITableView) -> Int { 2 }

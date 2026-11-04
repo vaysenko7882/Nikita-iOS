@@ -148,8 +148,13 @@ while time.monotonic() - start < 600:
             latest = request('/publish', 'POST')['latest']
             time.sleep(1)
             after = request('/stats')['requests']
-            (documents / 'foreground-result.json').write_text(json.dumps({'latest': latest, 'background_requests': after-before}))
             subprocess.run(['xcrun', 'simctl', 'launch', sim, 'com.codegram.ProfileHistoryRegression'], check=True)
+            # The app's HTTP deadline starts only after the host launch command
+            # completes, not while a slow Simulator is still foregrounding it.
+            foreground = documents / 'foreground-result.json'
+            temporary = foreground.with_suffix('.tmp')
+            temporary.write_text(json.dumps({'latest': latest, 'background_requests': after-before}))
+            temporary.replace(foreground)
     result = documents / 'result.json'
     if result.exists():
         shutil.copyfile(result, output / 'result.json')
