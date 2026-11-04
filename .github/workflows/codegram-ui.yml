@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [codex/codegram-14.2-native-energy, codex/codegram-14.3-catchup-media, codex/codegram-14.4-links-profile-icons]
+    paths-ignore: ['server/**', '**.md']
 permissions:
   contents: read
   actions: read
