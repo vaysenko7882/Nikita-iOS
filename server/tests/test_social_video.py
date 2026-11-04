@@ -321,11 +321,21 @@ class SocialVideoTests(unittest.TestCase):
         # reproducible failure in the restricted build environment.
         custom=self.root/"dns-fixture";custom.mkdir()
         (custom/"sitecustomize.py").write_text("import socket\ndef fail(*args,**kwargs):\n raise socket.gaierror(-3,'Temporary failure in name resolution')\nsocket.getaddrinfo=fail\n")
+        # DNS must fail before media tools run. Satisfy the worker's executable
+        # discovery on hosts without ffmpeg, and fail if that boundary changes.
+        tools=custom/"bin";tools.mkdir()
+        marker=custom/"media-tool-invoked"
+        for name in ("ffmpeg","ffprobe"):
+            sentinel=tools/name
+            sentinel.write_text('#!/bin/sh\n: > "$CODEGRAM_DNS_MEDIA_MARKER"\nexit 99\n')
+            sentinel.chmod(0o755)
         output=self.root/"worker-output";output.mkdir()
-        env={**os.environ,"PYTHONPATH":str(custom)+os.pathsep+os.environ.get("PYTHONPATH","")}
+        env={**os.environ,"PYTHONPATH":str(custom)+os.pathsep+os.environ.get("PYTHONPATH",""),
+             "PATH":str(tools)+os.pathsep+os.environ.get("PATH",""),"CODEGRAM_DNS_MEDIA_MARKER":str(marker)}
         result=subprocess.run([sys.executable,"-m","nikita_archive.video_worker","https://vt.tiktok.com/ZSp8radxX/",str(output)],
                               env=env,capture_output=True,timeout=15)
         self.assertEqual(result.returncode,1)
+        self.assertFalse(marker.exists(),"DNS resolution must fail before a media executable is invoked")
         error=json.loads((output/"error.json").read_text())
         self.assertEqual((error["error"],error["stage"]),("video_dns_error","resolve"))
         self.assertNotIn("ZSp8",json.dumps(error))
