@@ -10,16 +10,25 @@ public enum CodeGramSocialVideoLink {
             components.user == nil, components.password == nil, components.port == nil || components.port == 443,
             let host = components.host?.lowercased() else { return nil }
         let pattern: String
+        var canonicalPath = components.path
         switch host {
-        case "tiktok.com", "www.tiktok.com", "m.tiktok.com": pattern = "^(/@[A-Za-z0-9_.-]+/video/[0-9]+|/t/[A-Za-z0-9_]+)/?$"
+        case "tiktok.com", "www.tiktok.com", "m.tiktok.com": pattern = "^(/@[\\p{L}\\p{N}_.-]+/video/[0-9]+|/share/video/[0-9]+|/t/[A-Za-z0-9_]+)/?$"
         case "vm.tiktok.com", "vt.tiktok.com": pattern = "^/[A-Za-z0-9]+/?$"
-        case "instagram.com", "www.instagram.com", "m.instagram.com": pattern = "^/(reel|reels|p|tv)/[A-Za-z0-9_-]+/?$"
+        case "instagram.com", "www.instagram.com", "m.instagram.com":
+            pattern = "^/((?:[A-Za-z0-9_.]+/)?(?:reel|reels|p|tv)|share/(?:reel|p))/[A-Za-z0-9_-]+/?$"
+            let parts = components.path.split(separator: "/").map(String.init)
+            if parts.first != "share", parts.count >= 2 {
+                let kind = parts[parts.count - 2] == "reels" ? "reel" : parts[parts.count - 2]
+                canonicalPath = "/\(kind)/\(parts[parts.count - 1])/"
+            }
         default: return nil
         }
         guard components.path.range(of: pattern, options: .regularExpression) != nil else { return nil }
         var normalized = components
+        normalized.path = canonicalPath
         normalized.host = host == "m.instagram.com" ? "www.instagram.com" : ["tiktok.com", "m.tiktok.com"].contains(host) ? "www.tiktok.com" : host
         normalized.query = nil; normalized.fragment = nil
         return normalized.url
     }
 }
+

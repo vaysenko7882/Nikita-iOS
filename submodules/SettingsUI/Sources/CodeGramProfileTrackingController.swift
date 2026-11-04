@@ -26,6 +26,8 @@ private func profileEventTitle(_ event: [String: Any]) -> String {
     case "avatars.no_longer_visible": return "Аватарка больше не отображается"
     case "stories.added": return "Обнаружена сторис"
     case "stories.changed": return "Изменилась сторис"
+    case "stories.deleted": return "Сторис удалена"
+    case "stories.content_recovered": return "Сохранено содержимое удалённой сторис"
     case "stories.no_longer_visible": return "Сторис больше не доступна в списке"
     case "availability.added": return "Исходная доступность профиля"
     case "availability.changed": return "Изменилась доступность профиля"
@@ -61,8 +63,9 @@ private func profileReadable(_ value: Any?) -> String {
         lines.append("Изменение доступности может быть связано с настройками приватности.")
         return lines.joined(separator: "\n")
     }
-    if object["caption"] != nil || object["expire_date"] != nil {
-        return "Опубликовано: \(profileDate(object["date"]))\n\(object["caption"] as? String ?? "Без подписи")"
+    if object["caption"] != nil || object["expire_date"] != nil || object["content_state"] != nil {
+        let loading = object["content_state"] as? String == "not_loaded" ? "\nПолучено событие сторис; содержимое ещё не загружено." : ""
+        return "Опубликовано: \(profileDate(object["date"]))\n\(object["caption"] as? String ?? "Без подписи")\(loading)"
     }
     let fields = object.keys.sorted().compactMap { key -> String? in
         guard let title = profileFieldNames[key], let value = object[key], !(value is NSNull) else { return nil }
@@ -116,15 +119,34 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
     private var events: [[String: Any]] = []
     private var before = 0
     private var hasMore = false
+    private var showsLatestPage = true
+    private var refreshTimer: Timer?
     init(context: AccountContext, peerId: String, accessHash: Int64?, title: String) {
         self.peerId = peerId; self.accessHash = accessHash; self.peerTitle = title
         super.init(context: context,title: "История профиля")
     }
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    deinit { self.client.close() }
+    deinit { self.refreshTimer?.invalidate(); self.client.close() }
     override func loadDisplayNode() { super.loadDisplayNode(); self.load(reset: true) }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        self.refreshTimer?.invalidate()
+        self.refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            guard let self, self.showsLatestPage, self.enabled,
+                UIApplication.shared.applicationState == .active,
+                !self.tableView.isDragging, !self.tableView.isDecelerating,
+                self.tableView.contentOffset.y <= -self.tableView.contentInset.top + 40 else { return }
+            self.load(reset: true)
+        }
+        if self.showsLatestPage { self.load(reset: true) }
+    }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        self.refreshTimer?.invalidate(); self.refreshTimer = nil
+    }
     private func load(reset: Bool) {
         guard !self.busy else { return }
+        self.showsLatestPage = reset
         self.busy = true
         self.client.json(path: "profiles/\(self.peerId)/history", query: ["before":reset ? "0" : String(self.before)]) { [weak self] result in
             guard let self else { return }
@@ -149,7 +171,12 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
         self.lastCheck = item["last_check"]
         let error = item["error"] as? String ?? ""
         self.message = error.isEmpty ? (self.enabled ? "Отслеживание включено. Работает на VPS." : "Отслеживание выключено. Прежняя история сохранена.") : "Последняя проверка не завершилась: \(error)"
-        NikitaSettingsStore.shared.setProfileTracked(self.enabled, account: self.accountKey, peerId: self.peerId)
+        if let lastEvent = item["last_event_at"] as? NSNumber, lastEvent.doubleValue > 0 {
+            self.message += "\nПоследнее полученное событие: \(profileDate(lastEvent))"
+        }
+        if NikitaSettingsStore.shared.isProfileTracked(account: self.accountKey, peerId: self.peerId) != self.enabled {
+            NikitaSettingsStore.shared.setProfileTracked(self.enabled, account: self.accountKey, peerId: self.peerId)
+        }
     }
     private func setEnabled(_ enabled: Bool) {
         guard !self.busy else { return }
@@ -172,7 +199,7 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
         self.reloadContent()
     }
     override func makeSections() -> [CodeGramSettingsSection] {
-        var sections = [CodeGramSettingsSection(title: self.peerTitle, footer: "События профиля и сторис записываются сразу после получения от Telegram. Очередь проверок профиля — от 30 секунд, подарков — от 5 минут; при лимитах Telegram проверки замедляются. Изменения между проверками могут быть пропущены. Telegram не раскрывает, кто добавил тебя в ЧС: изменения доступности фото и описания отмечаются отдельно и не считаются подтверждением блокировки.", rows: [
+        var sections = [CodeGramSettingsSection(title: self.peerTitle, footer: "Полученные события профиля и сторис записываются сразу. Фоновая сверка на обновлённом VPS — от 15 секунд для профиля, от минуты для подарков; лимиты Telegram и очередь могут увеличить интервал. Короткую сторис можно сохранить, только если Telegram успел передать событие и содержимое. Telegram не раскрывает, кто добавил тебя в ЧС или убрал из него: изменения доступности отмечаются отдельно и не доказывают блокировку.", rows: [
             self.switchRow("Отслеживание профиля",value: self.enabled,detail: self.message,icon: "person.crop.circle.badge.clock",enabled: self.loaded && !self.busy,changed: { [weak self] in self?.setEnabled($0) }),
             self.textRow("Последняя успешная проверка",detail: (self.lastCheck as? NSNumber)?.int64Value == 0 ? "Ещё не проверен" : profileDate(self.lastCheck),icon: "clock"),
             self.textRow(self.busy ? "Обновляю…" : "Обновить историю",icon: "arrow.clockwise",action: { [weak self] in self?.load(reset: true) })])]
@@ -184,7 +211,7 @@ private final class CodeGramProfileTrackingController: CodeGramTableController {
         }
         if self.hasMore { rows.append(self.textRow("Загрузить ещё",icon: "ellipsis",action: { [weak self] in self?.load(reset: false) })) }
         if rows.isEmpty { rows.append(self.textRow("История пока пуста",detail: "После включения дождись первой проверки VPS.",icon: "tray")) }
-        sections.append(CodeGramSettingsSection(title: "История изменений",footer: "Дата события в списке — время обнаружения на VPS. Исходные даты Telegram и все полученные данные находятся внутри события.",rows: rows))
+        sections.append(CodeGramSettingsSection(title: "История изменений",footer: "Свежая страница обновляется каждые 5 секунд, пока экран открыт на её начале. При просмотре старых записей автообновление приостановлено; нажми «Обновить историю», чтобы вернуться к новым. Дата события — время обнаружения на VPS; исходные даты Telegram находятся внутри события.",rows: rows))
         return sections
     }
 }
@@ -264,3 +291,4 @@ private final class CodeGramProfileEventController: CodeGramTableController, QLP
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int { self.previewURL == nil ? 0 : 1 }
     func previewController(_ controller: QLPreviewController,previewItemAt index: Int) -> QLPreviewItem { self.previewURL! as NSURL }
 }
+

@@ -17,17 +17,60 @@ class ProfileCollector:
         self.pause_until = 0
         self.request_lock = asyncio.Lock()
         self.last_request = 0
+        self.pending_stories = set()
+        self.story_tasks = set()
+        self.dirty_profiles = set()
 
     async def request(self, value):
         async with self.request_lock:
-            await asyncio.sleep(max(0,1-(time.monotonic()-self.last_request)))
+            while True:
+                now = time.monotonic()
+                delay = max(0,self.pause_until-now,1-(now-self.last_request))
+                if delay <= 0:
+                    break
+                await asyncio.sleep(delay)
+                # Other operations (e.g. profile-photo pagination) can extend
+                # FLOOD_WAIT while this RPC is sleeping. Recheck before sending.
             self.last_request = time.monotonic()
-            return await self.client(value,flood_sleep_threshold=0)
+            try:
+                return await self.client(value,flood_sleep_threshold=0)
+            except errors.FloodWaitError as error:
+                # Every caller, including background skipped-story hydration,
+                # obeys this same deadline before making its next RPC.
+                self.pause_until = max(self.pause_until,time.monotonic()+int(error.seconds)+2)
+                raise
 
     def user_update(self, update):
-        peer_id = getattr(update,"user_id",None)
+        peer_id = getattr(update,"user_id",None) or getattr(getattr(update,"peer_id",None),"user_id",None)
         if peer_id and self.store.enabled(peer_id):
             self.store.collection(peer_id,"notifications",{"_"+type(update).__name__:public_value(update)},complete=False)
+            # These values are the event itself: do not wait for another full
+            # scan, which could already contain a later name/photo again.
+            fields = {}
+            entity = getattr(update,"_entities",{}).get(peer_id)
+            if isinstance(update,types.UpdateUser) and isinstance(entity,types.User) and not entity.min:
+                fields = {name:public_value(getattr(entity,name,None)) for name in
+                          ("first_name","last_name","username","usernames","premium","verified","scam","fake","emoji_status","color","profile_color")}
+                photo_id = getattr(getattr(entity,"photo",None),"photo_id",None)
+                fields["current_photo_id"] = str(photo_id) if photo_id else None
+            elif isinstance(update,types.UpdateUserName):
+                fields = dict(first_name=update.first_name,last_name=update.last_name,
+                              username=next((name.username for name in update.usernames if name.active),None),
+                              usernames=public_value(update.usernames))
+            elif isinstance(update,getattr(types,"UpdateUserPhoto",type(None))):
+                photo_id = getattr(getattr(update,"photo",None),"photo_id",None)
+                fields = dict(current_photo_id=str(photo_id) if photo_id else None)
+            elif isinstance(update,getattr(types,"UpdateUserEmojiStatus",type(None))):
+                fields = dict(emoji_status=public_value(update.emoji_status))
+            if fields:
+                self.store.fields(peer_id,fields,partial=True)
+            # updatePeerBlocked describes OUR blocklist, never the target's.
+            if isinstance(update,getattr(types,"UpdatePeerBlocked",type(None))):
+                self.store.collection(peer_id,"notifications",{"_my_blocklist":dict(
+                    blocked_by_me=bool(update.blocked),
+                    blocked_my_stories_from=bool(getattr(update,"blocked_my_stories_from",False)),
+                    blocked_by_target="unknown_not_exposed_by_telegram")},complete=False)
+            self.dirty_profiles.add(peer_id)
             self.store.nudge(peer_id)
 
     def source(self, peer_id, section, item_id):
@@ -48,26 +91,38 @@ class ProfileCollector:
         values, missing = {}, []
         for story in stories:
             if isinstance(story,types.StoryItemSkipped):
+                self.store.skipped_story(peer_id,public_value(story))
                 missing.append(story.id)
+            elif isinstance(story,types.StoryItemDeleted):
+                self.store.deleted_story(peer_id,story.id)
         if missing:
             response = await self.request(functions.stories.GetStoriesByIDRequest(input_peer,missing))
             stories = [s for s in stories if not isinstance(s,types.StoryItemSkipped)] + list(response.stories)
         for story in stories:
+            if isinstance(story,types.StoryItemDeleted):
+                self.store.deleted_story(peer_id,story.id)
             if not isinstance(story,types.StoryItem):
                 continue
             self.source(peer_id,"stories",story.id)
             media = story.media
-            descriptor = None
-            if getattr(media,"photo",None):
-                descriptor = self.capture.photo(media.photo,1000)
-            elif getattr(media,"document",None):
-                descriptor = self.capture.document(media.document,1000)
-            self.store.associate(peer_id,descriptor)
+            descriptor, capture_error = None, None
+            try:
+                if getattr(media,"photo",None):
+                    descriptor = self.capture.photo(media.photo,1000)
+                elif getattr(media,"document",None):
+                    descriptor = self.capture.document(media.document,1000)
+                self.store.associate(peer_id,descriptor)
+            except Exception as error:
+                # A media-reference problem must not discard the received story.
+                capture_error = type(error).__name__
+
             # Views/reactions are volatile counters; retain stable story metadata.
             item = public_value(story)
             for name in ("views","sent_reaction","media"):
                 item.pop(name,None)
             item["media"] = descriptor
+            if capture_error:
+                item["media_capture_error"] = capture_error
             values[str(story.id)] = item
         # A skipped/private item is not evidence that a saved story was deleted.
         self.store.collection(peer_id,"stories",values,complete=selected is None and not missing)
@@ -153,6 +208,7 @@ class ProfileCollector:
         signature = (photo_id,)+tuple(getattr(photo,"id",None) for _,photo in extra_photos)
         fields["fallback_photo_id"] = str(signature[2]) if signature[2] else None
         fields["personal_photo_id"] = str(signature[3]) if signature[3] else None
+        old_gift_count = self.store.field_value(peer_id,"stargifts_count")
         self.store.fields(peer_id,fields)
         status = type(getattr(user,"status",None)).__name__
         last_seen = "visible" if status in ("UserStatusOnline","UserStatusOffline") else status
@@ -168,7 +224,8 @@ class ProfileCollector:
         operations = [("Сторис",lambda: self.stories(peer_id,input_peer))]
         if peer_id not in self.avatar_ids or self.avatar_ids[peer_id] != signature:
             operations.append(("Аватарки",lambda: self.avatars(peer_id,input_peer,signature,extra_photos)))
-        if time.monotonic()-self.gift_checks.get(peer_id,-100000)>=300:
+        if (old_gift_count != fields.get("stargifts_count") or
+                time.monotonic()-self.gift_checks.get(peer_id,-100000)>=self.store.GIFT_INTERVAL):
             operations.append(("Подарки",lambda: self.gifts(peer_id,input_peer)))
         for name,operation in operations:
             if not self.store.enabled(peer_id):
@@ -185,10 +242,45 @@ class ProfileCollector:
     async def pushed_story(self, update):
         peer = getattr(update,"peer",None)
         peer_id = getattr(peer,"user_id",None)
-        if peer_id and self.store.enabled(peer_id):
-            story = getattr(update,"story",None)
-            if isinstance(story,types.StoryItem):
-                await self.stories(peer_id,None,[story])
+        if not peer_id or not self.store.enabled(peer_id):
+            return
+        story = getattr(update,"story",None)
+        if isinstance(story,types.StoryItemDeleted):
+            self.store.deleted_story(peer_id,story.id)
+        elif isinstance(story,types.StoryItem):
+            # No network wait: persist and queue media before processing the
+            # next raw update, even when deletion follows seconds later.
+            await self.stories(peer_id,None,[story])
+        elif isinstance(story,types.StoryItemSkipped):
+            self.store.skipped_story(peer_id,public_value(story))
+            key = (peer_id,story.id)
+            if key not in self.pending_stories and len(self.pending_stories)<128:
+                self.pending_stories.add(key)
+                task = asyncio.create_task(self.resolve_story(peer_id,story.id))
+                self.story_tasks.add(task)
+                task.add_done_callback(self.story_tasks.discard)
+
+    async def resolve_story(self, peer_id, story_id):
+        try:
+            access_hash = self.store.access_hash(peer_id)
+            if access_hash is None or time.monotonic()<self.pause_until:
+                return
+            peer = types.InputPeerUser(peer_id,int(access_hash))
+            response = await self.request(functions.stories.GetStoriesByIDRequest(peer,[story_id]))
+            await self.stories(peer_id,peer,list(response.stories))
+        except errors.FloodWaitError as error:
+            self.pause_until = max(self.pause_until,time.monotonic()+int(error.seconds)+2)
+        except Exception:
+            # The durable stub remains when content disappeared or was private.
+            pass
+        finally:
+            self.pending_stories.discard((peer_id,story_id))
+
+    async def close(self):
+        tasks = list(self.story_tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks,return_exceptions=True)
 
     async def run(self):
         while True:
@@ -196,6 +288,7 @@ class ProfileCollector:
                 await asyncio.sleep(min(30,self.pause_until-time.monotonic()))
                 continue
             for peer_id,access_hash in self.store.due():
+                self.dirty_profiles.discard(peer_id)
                 try:
                     warning = await self.scan(peer_id,access_hash)
                     self.store.checked(peer_id,warning or "")
@@ -209,5 +302,8 @@ class ProfileCollector:
                     if type(error).__name__ in ("UserPrivacyRestrictedError","UserIdInvalidError","InputUserDeactivatedError"):
                         self.store.collection(peer_id,"availability",{"current":dict(profile_request="unavailable",reason=type(error).__name__,blocked_by_target="unknown_not_exposed_by_telegram")},complete=False)
                     self.store.checked(peer_id,type(error).__name__,delay=300)
+                if peer_id in self.dirty_profiles:
+                    self.store.nudge(peer_id)
                 await asyncio.sleep(1)
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
+

@@ -2,9 +2,11 @@
 import concurrent.futures
 import hashlib
 import json
+import logging
 from pathlib import Path
 import re
 import secrets
+import signal
 import shutil
 import subprocess
 import sys
@@ -13,6 +15,16 @@ import time
 from urllib.parse import urlsplit, urlunsplit
 
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
+VIDEO_ERRORS = frozenset({"video_unavailable", "video_source_unavailable", "video_login_required",
+    "video_rate_limited", "video_network_error", "video_timeout", "video_too_large",
+    "video_unsupported_codec", "video_processing_failed", "video_dependency_missing", "insufficient_storage"})
+_LOG = logging.getLogger(__name__)
+
+
+class VideoFailure(Exception):
+    def __init__(self, code):
+        self.code = code if isinstance(code, str) and code in VIDEO_ERRORS else "video_unavailable"
+        super().__init__(self.code)
 
 
 def social_url(value):
@@ -22,18 +34,24 @@ def social_url(value):
     if url.scheme.lower()!="https" or url.username is not None or url.password is not None or url.port not in (None,443):
         raise ValueError("A public HTTPS video link is required")
     host = (url.hostname or "").lower()
+    path = url.path
     if host in {"tiktok.com","www.tiktok.com","m.tiktok.com"}:
-        valid = re.fullmatch(r"(?:/@[A-Za-z0-9_.-]+/video/[0-9]+|/t/[A-Za-z0-9_]+)/?",url.path)
+        valid = re.fullmatch(r"(?:/@[\w.-]+/video/[0-9]+|/share/video/[0-9]+|/t/[A-Za-z0-9_]+)/?",path)
     elif host in {"vm.tiktok.com","vt.tiktok.com"}:
-        valid = re.fullmatch(r"/[A-Za-z0-9]+/?",url.path)
+        valid = re.fullmatch(r"/[A-Za-z0-9]+/?",path)
     elif host in {"instagram.com","www.instagram.com","m.instagram.com"}:
-        valid = re.fullmatch(r"/(?:reel|reels|p|tv)/[A-Za-z0-9_-]+/?",url.path)
+        shared = re.fullmatch(r"/share/(?:reel|p)/[A-Za-z0-9_-]+/?",path)
+        direct = re.fullmatch(r"/(?:[A-Za-z0-9_.]+/)?(reel|reels|p|tv)/([A-Za-z0-9_-]+)/?",path)
+        valid = shared or direct
+        if direct and not shared:
+            kind = "reel" if direct[1] == "reels" else direct[1]
+            path = f"/{kind}/{direct[2]}/"
     else:
         valid = False
     if not valid:
         raise ValueError("Only TikTok videos and Instagram video posts are supported")
     host = {"m.instagram.com":"www.instagram.com","tiktok.com":"www.tiktok.com","m.tiktok.com":"www.tiktok.com"}.get(host,host)
-    return urlunsplit(("https",host,url.path,"",""))
+    return urlunsplit(("https",host,path,"",""))
 
 
 class SocialVideoStore:
@@ -80,17 +98,28 @@ class SocialVideoStore:
 
     def run(self, identifier, url):
         directory = self.root/identifier
-        directory.mkdir(mode=0o700)
         with self.lock:
             self.jobs[identifier]["state"]="downloading"
         try:
+            directory.mkdir(mode=0o700)
             if shutil.disk_usage(self.root).free < self.reserve + 2*MAX_VIDEO_BYTES:
-                raise OSError("Not enough temporary disk space")
+                raise VideoFailure("insufficient_storage")
             result = subprocess.run([sys.executable,"-m","nikita_archive.video_worker",url,str(directory)],
                                     stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                                     timeout=180,check=False)
             if result.returncode:
-                raise RuntimeError("Video unavailable")
+                code = "video_unavailable"
+                error_path = directory/"error.json"
+                if error_path.is_file() and error_path.stat().st_size <= 1024:
+                    try:
+                        code = json.loads(error_path.read_text()).get("error", code)
+                    except (ValueError, TypeError, OSError, AttributeError):
+                        pass
+                if result.returncode == -signal.SIGXFSZ:
+                    code = "video_too_large"
+                elif result.returncode == -signal.SIGXCPU:
+                    code = "video_timeout"
+                raise VideoFailure(code)
             metadata = json.loads((directory/"result.json").read_text())
             path = directory/"video.mp4"
             if not path.is_file() or not 0<path.stat().st_size<=MAX_VIDEO_BYTES:
@@ -98,10 +127,12 @@ class SocialVideoStore:
             with self.lock:
                 self.jobs[identifier].update(state="ready",size=path.stat().st_size,
                     duration=metadata["duration"],width=metadata["width"],height=metadata["height"])
-        except Exception:
+        except Exception as error:
+            code = error.code if isinstance(error, VideoFailure) else "video_timeout" if isinstance(error, subprocess.TimeoutExpired) else "video_unavailable"
             shutil.rmtree(directory,ignore_errors=True)
             with self.lock:
-                self.jobs[identifier].update(state="failed",error="video_unavailable")
+                self.jobs[identifier].update(state="failed",error=code)
+            _LOG.warning("Public video preparation failed: %s", code)
 
     def status(self, identifier):
         if not re.fullmatch(r"[a-f0-9]{32}",identifier):
@@ -120,3 +151,4 @@ class SocialVideoStore:
 
     def close(self):
         self.executor.shutdown(wait=False,cancel_futures=True)
+

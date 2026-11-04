@@ -154,7 +154,7 @@ async def collect(config):
             profile_collector.user_update(update)
         except Exception:
             pass
-    profile_update_types = [getattr(types,name) for name in ("UpdateUser","UpdateUserName","UpdateUserPhoto") if hasattr(types,name)]
+    profile_update_types = [getattr(types,name) for name in ("UpdateUser","UpdateUserName","UpdateUserPhoto","UpdateUserEmojiStatus","UpdatePeerBlocked") if hasattr(types,name)]
     client.add_event_handler(profile_updated,events.Raw(profile_update_types))
 
     async def folders_changed(update):
@@ -185,6 +185,7 @@ async def collect(config):
     archive.set_account(me.id)
     media.recover()
     downloads = [asyncio.create_task(media.worker(client,small_only=(index==0))) for index in range(media.workers)]
+    downloads.append(asyncio.create_task(media.worker(client,story_only=True)))
     monitor = asyncio.create_task(connection_monitor())
     profiles_task = asyncio.create_task(profile_collector.run())
     metadata = asyncio.create_task(metadata_monitor())
@@ -204,5 +205,7 @@ async def collect(config):
         for task in downloads:
             task.cancel()
         await asyncio.gather(monitor,metadata,profiles_task,*downloads, return_exceptions=True)
+        await profile_collector.close()
         archive.set_connected(False)
         await client.disconnect()
+

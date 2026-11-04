@@ -56,15 +56,18 @@ final class CodeGramSocialVideoConversion {
                     }
                 })
             case "queued", "downloading":
-                guard Date().timeIntervalSince(self.started)<210 else { self.completion(.failure(CodeGramVPSError("VPS не успел получить видео. Ссылка осталась в черновике."))); return }
-                self.progress("Получаю публичное видео через VPS…")
+                // One bounded server worker can have two earlier jobs. Allow
+                // their deadlines plus this job instead of timing out in queue.
+                guard Date().timeIntervalSince(self.started)<600 else { self.completion(.failure(CodeGramVPSError("VPS не успел подготовить видео. Проверь очередь и журнал службы."))); return }
+                self.progress(value["state"] as? String == "queued" ? "Видео в очереди VPS…" : "Получаю публичное видео через VPS…")
                 let work = DispatchWorkItem { [weak self] in
                     guard let self, !self.cancelled else { return }
                     self.task = self.client.json(path: "video/\(id)",completion: { [weak self] in self?.received($0) })
                 }
                 self.pending = work
-                DispatchQueue.main.asyncAfter(deadline: .now()+2,execute: work)
-            default: self.completion(.failure(CodeGramVPSError("TikTok или Instagram не отдал видео. Оно может быть закрыто, удалено или требовать входа. Ссылка сохранена в черновике.")))
+                DispatchQueue.main.asyncAfter(deadline: .now()+1,execute: work)
+            case "failed": self.completion(.failure(CodeGramVPSError.socialVideoFailure(code: value["error"] as? String)))
+            default: self.completion(.failure(CodeGramVPSError("VPS вернул неизвестное состояние подготовки видео.")))
             }
         }
     }
@@ -98,7 +101,7 @@ extension ChatControllerNode {
                 switch result {
                 case let .success((file,_)): resume(file)
                 case let .failure(error):
-                    let failure = UIAlertController(title: "Видео не отправлено",message: error.message,preferredStyle: .alert)
+                    let failure = UIAlertController(title: "Видео не отправлено",message: error.message + "\n\nСсылка сохранена в черновике.",preferredStyle: .alert)
                     failure.addAction(UIAlertAction(title: "Оставить черновик",style: .cancel))
                     controller.present(failure,animated: true)
                 }
@@ -110,3 +113,4 @@ extension ChatControllerNode {
         return true
     }
 }
+

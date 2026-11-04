@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from nikita_archive.archive import Archive
 from nikita_archive.http_api import make_server
 from nikita_archive.media_store import MediaStore
@@ -138,3 +139,31 @@ class ProfileTests(unittest.TestCase):
             self.assertFalse(self.store.enabled(100))
         finally:
             server.shutdown();server.server_close();thread.join()
+
+
+    def test_explicit_story_tombstone_survives_restart_and_late_poll(self):
+        self.store.collection(100,"stories",{"1":{"caption":"Preserved","media":{"blob_id":"retained"}}})
+        self.store.deleted_story(100,1)
+        restored=ProfileStore(self.archive)
+        restored.collection(100,"stories",{"1":{"caption":"Stale poll"}})
+        with self.archive.connect() as db:
+            self.assertEqual(db.execute("SELECT active FROM profile_items WHERE section='stories' AND item_id='1'").fetchone()[0],0)
+        events=[e for e in self.history() if e["kind"]=="stories.deleted"]
+        self.assertEqual(len(events),1)
+        self.assertEqual(events[0]["payload"]["before"]["caption"],"Preserved")
+
+    def test_profile_nudge_rechecks_soon_without_erasing_other_fields(self):
+        with patch("nikita_archive.profiles.time.time",return_value=1000):
+            self.store.checked(100)
+            self.store.nudge(100)
+        with self.archive.connect() as db:
+            self.assertEqual(db.execute("SELECT next_check FROM tracked_profiles WHERE peer_id=100").fetchone()[0],1002)
+        self.assertEqual(self.store.status()["poll_interval"],15)
+        self.assertEqual(self.store.status()["gift_interval"],60)
+
+    def test_disabled_profile_ignores_story_push_and_tombstone(self):
+        self.store.configure(100,{"enabled":False})
+        count=len(self.history())
+        self.store.skipped_story(100,{"id":1})
+        self.store.deleted_story(100,1)
+        self.assertEqual(len(self.history()),count)

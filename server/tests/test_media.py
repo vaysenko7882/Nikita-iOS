@@ -21,6 +21,7 @@ from nikita_archive.collector import collect
 from nikita_archive.http_api import make_server
 from nikita_archive.media_capture import MediaCapture
 from nikita_archive.media_store import CHUNK, MAX_MEDIA_SIZE, MediaStore
+from nikita_archive.profiles import ProfileStore
 
 NOW = datetime.now(timezone.utc)
 
@@ -132,6 +133,57 @@ class MediaTests(unittest.TestCase):
         with patch("nikita_archive.media_store.shutil.disk_usage",return_value=shutil._ntuple_diskusage(4*1024**3,3*1024**3,1024**3)):
             self.assertEqual(self.store.claim()["id"],fits["blob_id"])
 
+    def test_story_lane_does_not_consume_avatars_or_archive_jobs(self):
+        self.archive.profiles = ProfileStore(self.archive)
+        self.archive.profiles.configure(77,{"enabled":True,"access_hash":"1"})
+        archive = self.store.register("archive",{},5,"video/mp4",2000)
+        avatar = self.store.register("avatar",{"source":dict(type="CodeGramProfile",peer_id=77,section="avatars")},5,"image/jpeg",500)
+        self.archive.profiles.associate(77,avatar)
+        self.assertIsNone(self.store.claim(story_only=True))
+        story = self.store.register("story",{"source":dict(type="CodeGramProfile",peer_id=77,section="stories")},5,"video/mp4",1000)
+        self.archive.profiles.associate(77,story)
+        self.assertEqual(self.store.claim(story_only=True)["id"],story["blob_id"])
+        self.assertIsNone(self.store.claim(story_only=True))
+        self.assertEqual(self.store.claim()["id"],archive["blob_id"])
+
+    def test_story_lane_survives_reference_refresh_and_restart_but_respects_opt_out(self):
+        self.archive.profiles = ProfileStore(self.archive)
+        self.archive.profiles.configure(77,{"enabled":True,"access_hash":"1"})
+        story = self.store.register("shared",{"source":dict(type="CodeGramProfile",peer_id=77,section="stories")},5,"video/mp4",1000)
+        self.archive.profiles.associate(77,story)
+        # The same immutable file can subsequently arrive in a normal chat;
+        # that must not lose its place in the story lane.
+        self.store.register("shared",{"source":dict(type="PeerUser",id=77,message_id=10)},5,"video/mp4",100)
+        restarted = MediaStore(self.archive,{"media_min_free_bytes":0})
+        self.archive.profiles.configure(77,{"enabled":False})
+        self.assertIsNone(restarted.claim(story_only=True))
+        self.archive.profiles.configure(77,{"enabled":True,"access_hash":"1"})
+        self.assertEqual(restarted.claim(story_only=True)["id"],story["blob_id"])
+
+    def test_reserved_lane_prioritizes_new_story_over_older_story_backlog(self):
+        self.archive.profiles = ProfileStore(self.archive)
+        self.archive.profiles.configure(77,{"enabled":True,"access_hash":"1"})
+        source=dict(type="CodeGramProfile",peer_id=77,section="stories")
+        old=self.store.register("old",{"source":source},5,"video/mp4",1000)
+        new=self.store.register("new",{"source":source},30,"video/mp4",1000)
+        self.archive.profiles.associate(77,old)
+        self.archive.profiles.associate(77,new)
+        self.assertEqual(self.store.claim(story_only=True)["id"],new["blob_id"])
+        self.assertEqual(self.store.claim(story_only=True)["id"],old["blob_id"])
+
+    def test_existing_pending_story_is_migrated_into_reserved_lane(self):
+        self.archive.profiles = ProfileStore(self.archive)
+        self.archive.profiles.configure(77,{"enabled":True,"access_hash":"1"})
+        story = self.store.register("old-story",{"source":dict(type="CodeGramProfile",peer_id=77,section="stories")},5,"video/mp4",1000)
+        self.archive.profiles.associate(77,story)
+        # Reproduce a database created by the previous release, before the
+        # new durable lane existed; the attachment and profile history remain.
+        with self.archive.connect() as db:
+            db.execute("DROP TABLE media_story_assets")
+            db.execute("DELETE FROM meta WHERE key='story_media_queue_v1'")
+        upgraded = MediaStore(self.archive,{"media_min_free_bytes":0})
+        self.assertEqual(upgraded.claim(story_only=True)["id"],story["blob_id"])
+
     def test_api_construction_does_not_reset_in_progress_downloads(self):
         asset = self.store.register("active",{},8,"text/plain",100)
         self.store.claim()
@@ -227,6 +279,83 @@ class MediaTests(unittest.TestCase):
 
 
 class CollectorMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_story_download_starts_promptly_while_archive_workers_are_busy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive=Archive(Path(directory)/"archive.sqlite3")
+            store=MediaStore(archive,{"media_min_free_bytes":0})
+            archive.media=store
+            archive.profiles=ProfileStore(archive)
+            archive.profiles.configure(77,{"enabled":True,"access_hash":"1"})
+            capture=MediaCapture(store)
+            for identifier in (700,701):
+                capture.capture(message(types.MessageMediaDocument(document=document(identifier=identifier))))
+            busy=set()
+            archive_started=asyncio.Event()
+            story_started=asyncio.Event()
+            release=asyncio.Event()
+            class Client:
+                async def iter_download(self,location,**kwargs):
+                    if location.id in (700,701):
+                        busy.add(location.id)
+                        if len(busy)==2: archive_started.set()
+                        await release.wait()
+                    else:
+                        story_started.set()
+                    yield b"x"*17
+            client=Client()
+            tasks=[asyncio.create_task(store.worker(client)) for _ in range(2)]
+            tasks.append(asyncio.create_task(store.worker(client,story_only=True)))
+            try:
+                await asyncio.wait_for(archive_started.wait(),3)
+                capture.source=dict(type="CodeGramProfile",peer_id=77,section="stories",item_id="99")
+                story=capture.document(document(identifier=799),1000)
+                archive.profiles.associate(77,story)
+                # An idle worker previously slept for a whole second. It must
+                # wake when this media arrives, while both archive jobs wait.
+                await asyncio.wait_for(story_started.wait(),0.8)
+                identifier=story["asset"]["blob_id"]
+                for _ in range(100):
+                    if store.ready(identifier)[0]=="ready": break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(store.ready(identifier)[0],"ready")
+                self.assertEqual(store.path(identifier).read_bytes(),b"x"*17)
+                self.assertFalse(release.is_set())
+                self.assertEqual(len(busy),2)
+            finally:
+                for task in tasks: task.cancel()
+                await asyncio.gather(*tasks,return_exceptions=True)
+
+    async def test_unavailable_story_reference_keeps_failure_without_publishing_bytes(self):
+        from telethon.errors import FileReferenceExpiredError
+        with tempfile.TemporaryDirectory() as directory:
+            archive=Archive(Path(directory)/"archive.sqlite3")
+            store=MediaStore(archive,{"media_min_free_bytes":0})
+            archive.media=store
+            archive.profiles=ProfileStore(archive)
+            archive.profiles.configure(77,{"enabled":True,"access_hash":"1"})
+            capture=MediaCapture(store)
+            capture.source=dict(type="CodeGramProfile",peer_id=77,section="stories",item_id="99")
+            story=capture.document(document(identifier=799),1000)
+            archive.profiles.associate(77,story)
+            identifier=story["asset"]["blob_id"]
+            class Client:
+                async def iter_download(self,*args,**kwargs):
+                    raise FileReferenceExpiredError(None)
+                    yield b"unreachable"
+            task=asyncio.create_task(store.worker(Client(),story_only=True))
+            try:
+                for _ in range(100):
+                    if store.ready(identifier)[0]=="failed": break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(store.ready(identifier)[0],"failed")
+                self.assertFalse(store.path(identifier).exists())
+                with archive.connect() as db:
+                    self.assertEqual(db.execute("SELECT error,attempts FROM media_assets WHERE id=?",(identifier,)).fetchone(),("FileReferenceExpiredError",1))
+                self.assertTrue(archive.profiles.permits_asset(identifier))
+            finally:
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
+
     async def test_collector_records_deletion_while_independent_download_is_busy(self):
         with tempfile.TemporaryDirectory() as directory:
             config={"database_path":str(Path(directory)/"archive.sqlite3"),"media_min_free_bytes":0}
@@ -305,3 +434,4 @@ class CollectorMediaTests(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__=="__main__": unittest.main()
+

@@ -36,6 +36,8 @@ def blob_ids(value):
 
 class ProfileStore:
     MAX_PROFILES = 50
+    POLL_INTERVAL = 15
+    GIFT_INTERVAL = 60
 
     def __init__(self, archive):
         self.archive = archive
@@ -54,6 +56,9 @@ class ProfileStore:
                     peer_id INTEGER NOT NULL, section TEXT NOT NULL, item_id TEXT NOT NULL,
                     payload TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
                     PRIMARY KEY(peer_id,section,item_id));
+                CREATE TABLE IF NOT EXISTS profile_story_deletions(
+                    peer_id INTEGER NOT NULL, story_id TEXT NOT NULL,
+                    PRIMARY KEY(peer_id,story_id));
                 CREATE TABLE IF NOT EXISTS profile_media(
                     peer_id INTEGER NOT NULL, blob_id TEXT NOT NULL,
                     PRIMARY KEY(peer_id,blob_id));
@@ -110,26 +115,39 @@ class ProfileStore:
             if peer_id is not None and not profiles:
                 profiles = [dict(peer_id=str(peer_id),enabled=False,title="",last_check=0,error="")]
             for item in profiles:
-                item["event_count"] = db.execute("SELECT COUNT(*) FROM profile_events WHERE peer_id=?", (int(item["peer_id"]),)).fetchone()[0]
-        return {"profiles": profiles, "poll_interval": 30, "gift_interval": 300}
+                event_count,last_event = db.execute("SELECT COUNT(*),MAX(observed_at) FROM profile_events WHERE peer_id=?", (int(item["peer_id"]),)).fetchone()
+                item["event_count"] = event_count
+                item["last_event_at"] = last_event or 0
+        return {"profiles": profiles, "poll_interval": self.POLL_INTERVAL, "gift_interval": self.GIFT_INTERVAL,
+                "push_updates": True, "target_block_status": "not_exposed_by_telegram"}
 
     def due(self):
         with self.archive.connect() as db:
             return db.execute("SELECT peer_id,access_hash FROM tracked_profiles WHERE enabled=1 AND next_check<=? ORDER BY next_check,peer_id", (int(time.time()),)).fetchall()
 
+    def access_hash(self, peer_id):
+        with self.archive.connect() as db:
+            row = db.execute("SELECT access_hash FROM tracked_profiles WHERE peer_id=? AND enabled=1", (peer_id,)).fetchone()
+            return row[0] if row else None
+
+    def field_value(self, peer_id, field):
+        with self.archive.connect() as db:
+            row = db.execute("SELECT fields FROM tracked_profiles WHERE peer_id=? AND enabled=1", (peer_id,)).fetchone()
+            return json.loads(row[0]).get(field) if row else None
+
     def enabled(self, peer_id):
         with self.archive.connect() as db:
             return bool(db.execute("SELECT 1 FROM tracked_profiles WHERE peer_id=? AND enabled=1", (peer_id,)).fetchone())
 
-    def checked(self, peer_id, error="", delay=30):
+    def checked(self, peer_id, error="", delay=POLL_INTERVAL):
         now = int(time.time())
         with self.archive.connect() as db:
             db.execute("UPDATE tracked_profiles SET next_check=?,last_check=CASE WHEN ?='' THEN ? ELSE last_check END,error=? WHERE peer_id=?",
-                       (now + max(30, int(delay)), error, now, error[:128], peer_id))
+                       (now + max(self.POLL_INTERVAL, int(delay)), error, now, error[:128], peer_id))
 
     def nudge(self, peer_id):
         with self.archive.connect() as db:
-            db.execute("UPDATE tracked_profiles SET next_check=MIN(next_check,MAX(?,last_check+15)) WHERE peer_id=? AND enabled=1",(int(time.time()),peer_id))
+            db.execute("UPDATE tracked_profiles SET next_check=MIN(next_check,MAX(?,last_check+2)) WHERE peer_id=? AND enabled=1",(int(time.time()),peer_id))
 
     def associate(self, peer_id, descriptor):
         with self.archive.connect() as db:
@@ -139,7 +157,7 @@ class ProfileStore:
         with self.archive.connect() as db:
             return bool(db.execute("SELECT 1 FROM profile_media m JOIN tracked_profiles p ON p.peer_id=m.peer_id WHERE m.blob_id=? AND p.enabled=1 LIMIT 1", (identifier,)).fetchone())
 
-    def fields(self, peer_id, values):
+    def fields(self, peer_id, values, *, partial=False):
         values = public_value(values)
         with self.archive.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -147,6 +165,8 @@ class ProfileStore:
             if not row or not row[1]:
                 return
             previous = json.loads(row[0])
+            if partial:
+                values = {**previous, **values}
             if not previous:
                 self._event(db, peer_id, "profile.baseline", {"after": values})
             else:
@@ -169,6 +189,19 @@ class ProfileStore:
             for key, item in items.items():
                 key, item = str(key), public_value(item)
                 previous = old.get(key)
+                # A late answer may contain real content received just before
+                # deletion. Retain it in the archive, but never reactivate the
+                # story or rewrite the earlier append-only deletion event.
+                if section == "stories" and db.execute(
+                        "SELECT 1 FROM profile_story_deletions WHERE peer_id=? AND story_id=?",
+                        (peer_id,key)).fetchone():
+                    if previous is None or previous[0] != item:
+                        self._event(db,peer_id,"stories.content_recovered",{
+                            "item_id":key,"before":previous[0] if previous else None,
+                            "after":item,"source":"late_telegram_result"})
+                        db.execute("INSERT INTO profile_items VALUES(?,?,?,?,0) ON CONFLICT(peer_id,section,item_id) DO UPDATE SET payload=excluded.payload,active=0",
+                                   (peer_id,section,key,json.dumps(item,ensure_ascii=False,sort_keys=True)))
+                    continue
                 if previous is None or not previous[1] or previous[0] != item:
                     kind = "added" if previous is None or not previous[1] else "changed"
                     self._event(db, peer_id, section + "." + kind, {"item_id":key,"before":previous[0] if previous else None,"after":item})
@@ -179,6 +212,36 @@ class ProfileStore:
                     if active and key not in items and not key.startswith("_"):
                         self._event(db, peer_id, section + ".no_longer_visible", {"item_id":key,"before":item,"after":None})
                         db.execute("UPDATE profile_items SET active=0 WHERE peer_id=? AND section=? AND item_id=?", (peer_id,section,key))
+
+    def skipped_story(self, peer_id, story):
+        """Keep evidence immediately, before a network fetch can lose the story."""
+        key = str(story["id"])
+        with self.archive.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM tracked_profiles WHERE peer_id=? AND enabled=1", (peer_id,)).fetchone():
+                return
+            if db.execute("SELECT 1 FROM profile_story_deletions WHERE peer_id=? AND story_id=?", (peer_id,key)).fetchone():
+                return
+            if db.execute("SELECT 1 FROM profile_items WHERE peer_id=? AND section='stories' AND item_id=?", (peer_id,key)).fetchone():
+                return  # Never replace a full retained story with a skipped stub.
+            item = {**public_value(story), "content_state": "not_loaded"}
+            self._event(db,peer_id,"stories.added",{"item_id":key,"before":None,"after":item})
+            db.execute("INSERT INTO profile_items VALUES(?,'stories',?,?,1)",
+                       (peer_id,key,json.dumps(item,ensure_ascii=False,sort_keys=True)))
+
+    def deleted_story(self, peer_id, story_id):
+        """An explicit Telegram tombstone is different from expiry/visibility."""
+        key = str(story_id)
+        with self.archive.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM tracked_profiles WHERE peer_id=? AND enabled=1", (peer_id,)).fetchone():
+                return
+            if db.execute("SELECT 1 FROM profile_story_deletions WHERE peer_id=? AND story_id=?", (peer_id,key)).fetchone():
+                return
+            row = db.execute("SELECT payload FROM profile_items WHERE peer_id=? AND section='stories' AND item_id=?", (peer_id,key)).fetchone()
+            self._event(db,peer_id,"stories.deleted",{"item_id":key,"before":json.loads(row[0]) if row else None,"after":None,"source":"telegram_update"})
+            db.execute("INSERT INTO profile_story_deletions VALUES(?,?)",(peer_id,key))
+            db.execute("UPDATE profile_items SET active=0 WHERE peer_id=? AND section='stories' AND item_id=?", (peer_id,key))
 
     def history(self, peer_id, before=0, limit=30):
         peer_id, before = self.identifier(peer_id), int(before)
@@ -201,3 +264,4 @@ class ProfileStore:
                 result.append(dict(seq=seq,kind=kind,observed_at=observed,payload=value,media=media))
                 size += len(payload.encode())
         return {**self.status(peer_id),"events":result,"next_before":result[-1]["seq"] if result else before,"has_more":len(rows)>len(result)}
+

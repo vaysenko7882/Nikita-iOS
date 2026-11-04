@@ -33,4 +33,49 @@ final class CodeGramSocialVideoTests: XCTestCase {
         }
         XCTAssertTrue(found)
     }
+    func testSharedVideoURLsNormalizeWithoutTrackingOrCredentials() {
+        let examples = [
+            "https://instagram.com/owner.name/reel/Ab_12/?igsh=tracking": "https://instagram.com/reel/Ab_12/",
+            "https://www.instagram.com/reels/Ab-12/": "https://www.instagram.com/reel/Ab-12/",
+            "https://m.instagram.com/owner/p/Ab123/": "https://www.instagram.com/p/Ab123/",
+            "https://instagram.com/share/reel/Ab123/?igsh=tracking": "https://instagram.com/share/reel/Ab123/",
+            "https://www.tiktok.com/share/video/123456?share=tracking": "https://www.tiktok.com/share/video/123456"
+        ]
+        for (input, expected) in examples { XCTAssertEqual(CodeGramSocialVideoLink.url(in: input)?.absoluteString, expected, input) }
+        for input in ["https://instagram.com/owner/unknown/123/", "https://instagram.com/owner/reel/123/extra", "https://instagram.com/share/stories/123/", "https://instagram.com.evil/share/reel/123/", "https://user:secret@instagram.com/share/reel/123/", "https://tiktok.com/share/video/not-a-number"] {
+            XCTAssertNil(CodeGramSocialVideoLink.url(in: input), input)
+        }
+    }
+    func testVideoFailuresIdentifyTheStageWithoutLeakingExtractorOutput() {
+        let expectedHints = [
+            "video_source_unavailable": "IP VPS",
+            "video_login_required": "входа",
+            "video_rate_limited": "ограничил",
+            "video_network_error": "подключиться",
+            "video_timeout": "время",
+            "video_too_large": "250 МБ",
+            "video_unsupported_codec": "H.264",
+            "video_processing_failed": "ffmpeg",
+            "video_dependency_missing": "компонентов",
+            "insufficient_storage": "места",
+            "video_unavailable": "получить или подготовить"
+        ]
+        for (code, hint) in expectedHints {
+            XCTAssertTrue(CodeGramVPSError.socialVideoFailure(code: code).message.contains(hint), code)
+            XCTAssertEqual(CodeGramVPSError.response(statusCode: 422, serverCode: code).message, CodeGramVPSError.socialVideoFailure(code: code).message)
+        }
+        let privateDiagnostic = "https://private.example/secret?token=secret"
+        XCTAssertEqual(CodeGramVPSError.socialVideoFailure(code: privateDiagnostic).message, CodeGramVPSError.socialVideoFailure(code: nil).message)
+        XCTAssertEqual(CodeGramVPSError.response(statusCode: 500, serverCode: privateDiagnostic).message, "Ошибка VPS (HTTP 500).")
+        XCTAssertTrue(CodeGramVPSError.response(statusCode: 401, serverCode: "video_timeout").message.contains("ключ"))
+        XCTAssertTrue(CodeGramVPSError.response(statusCode: 403, serverCode: "video_timeout").message.contains("другой Telegram-аккаунт"))
+    }
+    func testVPSConnectionErrorsDistinguishPhoneDownloadFromServerPreparation() {
+        let error = URLError(.timedOut)
+        XCTAssertTrue(CodeGramVPSError.connection(error).message.contains("не ответил"))
+        XCTAssertTrue(CodeGramVPSError.connection(error, downloading: true).message.contains("на iPhone"))
+        XCTAssertTrue(CodeGramVPSError.connection(URLError(.notConnectedToInternet)).message.contains("интернету"))
+        XCTAssertTrue(CodeGramVPSError.connection(URLError(.cancelled)).message.contains("отменён"))
+    }
 }
+

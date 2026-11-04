@@ -1,7 +1,11 @@
 import http.client
+import functools
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import socket
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -9,11 +13,34 @@ import unittest
 from unittest.mock import patch
 from nikita_archive.archive import Archive
 from nikita_archive.http_api import make_server
-from nikita_archive.social_video import MAX_VIDEO_BYTES, SocialVideoStore, social_url
-from nikita_archive.video_worker import VIDEO_FORMAT, public_addresses
+from nikita_archive.social_video import MAX_VIDEO_BYTES, SocialVideoStore, VideoFailure, social_url
+from nikita_archive.video_worker import VIDEO_FORMAT, download_video, failure_code, public_addresses, resolved_url
 
 
 class SocialURLTests(unittest.TestCase):
+    def test_shared_and_username_routes_are_normalized_to_supported_extractors(self):
+        from yt_dlp.extractor.instagram import InstagramIE
+        from yt_dlp.extractor.tiktok import TikTokIE
+        for link in ["https://instagram.com/owner/reel/abc/?igsh=private", "https://m.instagram.com/reels/abc/"]:
+            self.assertEqual(social_url(link), "https://" + ("www.instagram.com" if "m.instagram.com" in link else "instagram.com") + "/reel/abc/")
+            self.assertTrue(InstagramIE.suitable(social_url(link)))
+        self.assertTrue(TikTokIE.suitable(social_url("https://tiktok.com/share/video/123456/")))
+        self.assertEqual(social_url("https://www.instagram.com/share/reel/abc/?igsh=secret"), "https://www.instagram.com/share/reel/abc/")
+
+    def test_share_redirect_is_revalidated_and_never_accepts_an_arbitrary_endpoint(self):
+        from unittest.mock import MagicMock
+        downloader = MagicMock()
+        response = downloader.urlopen.return_value.__enter__.return_value
+        response.url = "https://www.instagram.com/owner/reel/abc/?igsh=secret"
+        self.assertEqual(resolved_url(downloader, "https://instagram.com/share/reel/xyz/"), "https://www.instagram.com/reel/abc/")
+        for url, code in [("https://instagram.com/accounts/login/?next=secret", "video_login_required"),
+                          ("https://127.0.0.1/reel/abc/", "video_source_unavailable"),
+                          ("https://instagram.com/share/reel/xyz/", "video_source_unavailable")]:
+            response.url = url
+            with self.assertRaises(VideoFailure) as failure:
+                resolved_url(downloader, "https://instagram.com/share/reel/xyz/")
+            self.assertEqual(failure.exception.code, code)
+
     def test_real_format_selector_prefers_supported_codec_over_higher_quality_hevc(self):
         from yt_dlp import YoutubeDL
         with YoutubeDL({"quiet":True}) as downloader:
@@ -107,6 +134,35 @@ class SocialVideoTests(unittest.TestCase):
         self.assertNotIn("private",json.dumps(self.store.status(identifier)))
         self.assertFalse((self.store.root/identifier).exists())
 
+    def test_worker_failures_preserve_only_known_error_codes_and_timeouts(self):
+        for index, code in enumerate(["video_login_required", "video_rate_limited", "video_unsupported_codec", "secret cookie https://private.example/"]):
+            identifier=f"{index+10:032x}"
+            self.store.jobs[identifier] = dict(key="x",state="queued",created=time.time())
+            def worker(args, **kwargs):
+                (Path(args[-1])/"error.json").write_text(json.dumps({"error":code,"detail":"private cookies"}))
+                return subprocess.CompletedProcess(args, 1)
+            with patch("nikita_archive.social_video.subprocess.run",side_effect=worker):
+                self.store.run(identifier,"https://instagram.com/reel/abc/")
+            self.assertEqual(self.store.status(identifier)["error"],code if index<3 else "video_unavailable")
+            self.assertNotIn("private",json.dumps(self.store.status(identifier)))
+            self.assertFalse((self.store.root/identifier).exists())
+        identifier="e"*32
+        self.store.jobs[identifier]=dict(key="x",state="queued",created=time.time())
+        with patch("nikita_archive.social_video.subprocess.run",side_effect=subprocess.TimeoutExpired("private URL",180)):
+            self.store.run(identifier,"https://instagram.com/reel/abc/")
+        self.assertEqual(self.store.status(identifier)["error"],"video_timeout")
+
+    def test_failure_classifier_retains_cause_without_disclosing_messages(self):
+        from yt_dlp.utils import DownloadError, ExtractorError
+        for text, code in [("You need to log in to access this content", "video_login_required"),
+                           ("HTTP Error 429 Too Many Requests", "video_rate_limited"),
+                           ("Requested format is not available", "video_unsupported_codec"),
+                           ("Connection refused", "video_network_error"),
+                           ("This video is not available", "video_source_unavailable")]:
+            self.assertEqual(failure_code(DownloadError(text)),code)
+        wrapped=DownloadError("unexpected wrapper",exc_info=(VideoFailure,VideoFailure("video_too_large"),None))
+        self.assertEqual(failure_code(wrapped),"video_too_large")
+
     def test_expiry_cleans_only_temporary_conversions(self):
         identifier="3"*32
         folder=self.store.root/identifier;folder.mkdir();(folder/"video.mp4").write_bytes(b"v")
@@ -140,3 +196,89 @@ class SocialVideoTests(unittest.TestCase):
             self.assertEqual(call("HEAD","/v1/video/"+identifier+"/file",headers=auth),(200,b""))
         finally:
             server.shutdown();server.server_close();thread.join()
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe required")
+class VideoWorkerMediaTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp=tempfile.TemporaryDirectory()
+        cls.root=Path(cls.temp.name)
+        # Generate genuine encoded packets, then prove the production pipeline copies them.
+        subprocess.run(["ffmpeg","-nostdin","-v","error","-f","lavfi","-i","color=c=blue:s=64x96:r=10:d=0.4",
+                        "-f","lavfi","-i","sine=frequency=440:duration=0.4","-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac","-shortest",str(cls.root/"combined.mp4")],check=True,capture_output=True,timeout=20)
+        for path, mapping in [("video.mp4","0:v:0"),("audio.m4a","0:a:0")]:
+            subprocess.run(["ffmpeg","-nostdin","-v","error","-i",str(cls.root/"combined.mp4"),"-map",mapping,"-c","copy",str(cls.root/path)],check=True,capture_output=True,timeout=20)
+        class QuietHandler(SimpleHTTPRequestHandler):
+            def log_message(self, *args): pass
+        cls.server=ThreadingHTTPServer(("127.0.0.1",0),functools.partial(QuietHandler,directory=str(cls.root)))
+        cls.thread=threading.Thread(target=cls.server.serve_forever,daemon=True);cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown();cls.server.server_close();cls.thread.join();cls.temp.cleanup()
+
+    def pipeline(self, formats, folder):
+        from yt_dlp import YoutubeDL
+        from yt_dlp.extractor.common import InfoExtractor
+        class FixtureIE(InfoExtractor):
+            IE_NAME="codegram_fixture"
+            _VALID_URL=r'https://instagram\.com/reel/(?P<id>[a-z]+)/'
+            def _real_extract(self, url):
+                return {"id":self._match_id(url),"title":"local fixture","formats":formats}
+        class FixtureYDL(YoutubeDL):
+            def __init__(self, options):
+                super().__init__({**options,"allowed_extractors":["codegram_fixture"]},auto_init=False)
+                self.add_info_extractor(FixtureIE())
+        folder.mkdir()
+        with patch("yt_dlp.YoutubeDL", FixtureYDL):
+            download_video("https://instagram.com/reel/test/", folder)
+        return folder/"video.mp4"
+
+    def format(self, filename, **values):
+        return dict(format_id=filename,url=f"http://127.0.0.1:{self.server.server_address[1]}/{filename}",
+                    ext=filename.split(".")[-1],protocol="https",**values)
+
+    def packets(self, path):
+        result=subprocess.run(["ffprobe","-v","error","-show_packets","-show_data_hash","sha256","-of","json",str(path)],check=True,capture_output=True,timeout=20)
+        return [packet["data_hash"] for packet in json.loads(result.stdout)["packets"] if packet["codec_type"]=="video"]
+
+    def assert_playable_copy(self, output):
+        result=subprocess.run(["ffprobe","-v","error","-show_streams","-of","json",str(output)],check=True,capture_output=True,timeout=20)
+        codecs=[value["codec_name"] for value in json.loads(result.stdout)["streams"]]
+        self.assertEqual(codecs,["h264","aac"])
+        self.assertEqual(self.packets(output),self.packets(self.root/"combined.mp4"))
+        data=output.read_bytes()
+        self.assertLess(data.index(b"moov"),data.index(b"mdat"))
+
+    def test_real_progressive_mp4_is_remuxed_without_reencoding(self):
+        output=self.pipeline([self.format("combined.mp4",vcodec="h264",acodec="aac",height=96)],self.root/"progressive")
+        self.assert_playable_copy(output)
+
+    def test_separate_https_h264_and_aac_are_merged_without_reencoding(self):
+        formats=[self.format("audio.m4a",vcodec="none",acodec="mp4a.40.2"),
+                 self.format("video.mp4",vcodec="avc1.640028",acodec="none",height=96)]
+        output=self.pipeline(formats,self.root/"separate")
+        self.assert_playable_copy(output)
+
+    def test_real_http_source_failure_is_distinct_from_processing_failure(self):
+        with self.assertRaises(VideoFailure) as failure:
+            self.pipeline([self.format("missing.mp4",vcodec="h264",acodec="aac",height=96)],self.root/"missing")
+        self.assertEqual(failure.exception.code,"video_source_unavailable")
+
+    def test_progress_hook_enforces_combined_size_of_separate_downloads(self):
+        from unittest.mock import MagicMock
+        downloader=MagicMock()
+        def construct(options):
+            def extract(*args, **kwargs):
+                hook=options["progress_hooks"][0]
+                hook({"filename":"video.mp4","downloaded_bytes":MAX_VIDEO_BYTES})
+                hook({"filename":"audio.m4a","downloaded_bytes":1})
+            downloader.__enter__.return_value.extract_info.side_effect=extract
+            return downloader
+        folder=self.root/"oversize";folder.mkdir()
+        with patch("yt_dlp.YoutubeDL",side_effect=construct):
+            with self.assertRaises(VideoFailure) as failure:
+                download_video("https://instagram.com/reel/test/",folder)
+        self.assertEqual(failure.exception.code,"video_too_large")
+
