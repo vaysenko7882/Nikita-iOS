@@ -140,10 +140,17 @@ private final class HarnessController: UIViewController {
         self.expect(self.descendants(panel).compactMap { $0 as? UIVisualEffectView }.allSatisfy { $0.effect == nil || !self.isVisible($0, within: panel) }, "alert contains a visible visual effect: \(context)")
         let actionTitles = Set(alert.actions.compactMap { $0.title })
         for button in self.descendants(panel).compactMap({ $0 as? UIButton }).filter({ actionTitles.contains($0.currentTitle ?? "") }) {
-            for contentRect in [CGRect.zero, CGRect(x: 0, y: 0, width: 1, height: 1), CGRect(x: 0, y: 0, width: 24, height: 24), CGRect(x: 0, y: 0, width: 25, height: 48), CGRect.null, CGRect.infinite] {
-                let rect = button.titleRect(forContentRect: contentRect)
+            let originalBounds = button.bounds
+            for size in [CGSize.zero, CGSize(width: 1, height: 1), CGSize(width: 24, height: 24), CGSize(width: 25, height: 48)] {
+                button.bounds = CGRect(origin: .zero, size: size)
+                button.setNeedsLayout()
+                button.layoutIfNeeded()
+                let rect = button.titleLabel?.frame ?? .null
                 self.expect(rect.minX.isFinite && rect.minY.isFinite && rect.width.isFinite && rect.height.isFinite && rect.width >= 0 && rect.height >= 0, "dialog button returned invalid title geometry: \(context)")
             }
+            button.bounds = originalBounds
+            button.setNeedsLayout()
+            button.layoutIfNeeded()
         }
         for label in self.descendants(panel).compactMap({ $0 as? UILabel }).filter({ !($0.text ?? "").isEmpty }) {
             let rect = label.convert(label.bounds, to: panel)

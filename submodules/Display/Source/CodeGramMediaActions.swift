@@ -11,10 +11,16 @@ private final class CodeGramPlainAlertButton: UIButton {
         return CGSize(width: ceil(fitted.width) + 24, height: max(48, ceil(fitted.height) + 24))
     }
 
-    override func titleRect(forContentRect contentRect: CGRect) -> CGRect {
-        // UIButton asks for title geometry before Auto Layout has given it a
-        // size. Insetting that zero/tiny rectangle produces CGRect.null,
-        // whose infinite origin must never reach a label's layer.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let label = self.titleLabel else { return }
+        label.frame = self.titleFrame(in: self.bounds)
+    }
+
+    private func titleFrame(in contentRect: CGRect) -> CGRect {
+        // A button can lay out before Auto Layout has given it a size.
+        // Insetting that zero/tiny rectangle produces CGRect.null, whose
+        // infinite origin must never reach the label's layer.
         guard contentRect.minX.isFinite, contentRect.minY.isFinite,
             contentRect.width.isFinite, contentRect.height.isFinite,
             contentRect.width > 24, contentRect.height > 24 else { return .zero }
