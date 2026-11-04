@@ -342,7 +342,7 @@ private final class HarnessController: UIViewController {
                     }
                     save.sendActions(for: .touchUpInside)
                     save.sendActions(for: .touchUpInside)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak alert] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak alert = alert] in
                         if calls == 0 {
                             self.expect(false, "plain dialog Save action was lost")
                             if let alert, alert.presentingViewController != nil {
@@ -390,7 +390,7 @@ private final class HarnessController: UIViewController {
                 self.expect(hit === button || hit?.isDescendant(of: button) == true, "diagnostic copy button cannot receive touches")
                 button.sendActions(for: .touchUpInside)
                 button.sendActions(for: .touchUpInside)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak alert] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak alert = alert] in
                     if copies == 0 {
                         self.expect(false, "diagnostic copy action was lost")
                         if let alert, alert.presentingViewController != nil {

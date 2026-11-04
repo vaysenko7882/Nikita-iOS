@@ -23,33 +23,12 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-xcrun simctl list runtimes --json > "$CODEGRAM_HISTORY_OUT/runtimes.json"
-CODEGRAM_HISTORY_RUNTIME=$(python3 - "$CODEGRAM_HISTORY_OUT/runtimes.json" <<'PY'
-import json, sys
-rows = [r for r in json.load(open(sys.argv[1]))['runtimes'] if r.get('isAvailable') and r.get('platform') == 'iOS' and int(r['version'].split('.')[0]) >= 26]
-if not rows:
-    raise SystemExit('Native history checks need an installed iOS 26+ Simulator')
-print(max(rows, key=lambda r: tuple(map(int, r['version'].split('.'))))['identifier'])
-PY
-)
-CODEGRAM_HISTORY_DEVICE=$(python3 - "$CODEGRAM_HISTORY_OUT/runtimes.json" "$CODEGRAM_HISTORY_RUNTIME" <<'PY'
-import json, sys
-runtime = next(r for r in json.load(open(sys.argv[1]))['runtimes'] if r['identifier'] == sys.argv[2])
-for name in ['iPhone 18 Pro Max', 'iPhone 17 Pro Max', 'iPhone 17', 'iPhone 16 Pro']:
-    found = next((r for r in runtime['supportedDeviceTypes'] if r['name'] == name), None)
-    if found:
-        print(found['identifier'])
-        break
-else:
-    raise SystemExit('No supported history-fixture iPhone Simulator')
-PY
-)
 CODEGRAM_HISTORY_APP="$CODEGRAM_HISTORY_OUT/ProfileHistoryHarness.app"
 mkdir -p "$CODEGRAM_HISTORY_APP"
 python3 - "$CODEGRAM_HISTORY_APP" "$CODEGRAM_HISTORY_OUT" <<'PY'
 import json, pathlib, plistlib, sys
 app, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-plist = dict(CFBundleIdentifier='com.codegram.ProfileHistoryRegression', CFBundleExecutable='ProfileHistoryHarness', CFBundleName='History HTTP fixtures', CFBundlePackageType='APPL', CFBundleVersion='1', CFBundleShortVersionString='1.0', MinimumOSVersion='26.0', UIDeviceFamily=[1, 2], UILaunchScreen={}, UIDesignRequiresCompatibility=True, NSAppTransportSecurity={'NSAllowsLocalNetworking': True, 'NSAllowsArbitraryLoads': True}, UIApplicationSceneManifest={'UIApplicationSupportsMultipleScenes': False})
+plist = dict(CFBundleIdentifier='com.codegram.ProfileHistoryRegression', CFBundleExecutable='ProfileHistoryHarness', CFBundleName='History HTTP fixtures', CFBundlePackageType='APPL', CFBundleVersion='1', CFBundleShortVersionString='1.0', MinimumOSVersion='26.0', UIDeviceFamily=[1, 2], UILaunchScreen={}, NSAppTransportSecurity={'NSAllowsLocalNetworking': True, 'NSAllowsArbitraryLoads': True}, UIApplicationSceneManifest={'UIApplicationSupportsMultipleScenes': False})
 (app / 'Info.plist').write_bytes(plistlib.dumps(plist))
 (out / 'expected-frames.txt').write_text('''The running code is the production CodeGramProfileHistoryFeed, CodeGramProfileHistoryScrollAnchor and self-sizing CodeGramTextCell, with a loopback HTTP archive and a native UITableView reproducing the production manual navigation inset (120 pt, initial offset zero). Row descriptions vary in length to exercise real estimated-to-measured geometry.
 01 -> 02: a story published over HTTP appears automatically in the first visible history row, with no Refresh button or manual feed refresh. Offset remains zero; no inset condition can disable polling.
@@ -73,6 +52,28 @@ if ! xcrun --sdk iphonesimulator swiftc -parse-as-library -warnings-as-errors \
     exit 1
 fi
 printf '%s\n' 'Native history fixture compiled; starting loopback HTTP server'
+xcrun simctl list runtimes --json > "$CODEGRAM_HISTORY_OUT/runtimes.json"
+CODEGRAM_HISTORY_RUNTIME=$(python3 - "$CODEGRAM_HISTORY_OUT/runtimes.json" <<'PY'
+import json, sys
+models = {'iPhone 18 Pro Max', 'iPhone 17 Pro Max', 'iPhone 16 Pro Max', 'iPhone 17 Pro', 'iPhone 16 Pro', 'iPhone 17'}
+rows = [r for r in json.load(open(sys.argv[1]))['runtimes'] if r.get('isAvailable') and r.get('platform') == 'iOS' and int(r['version'].split('.')[0]) >= 26 and any(d['name'] in models for d in r.get('supportedDeviceTypes', []))]
+if not rows:
+    raise SystemExit('Native history checks need an installed iOS 26+ Simulator')
+print(max(rows, key=lambda r: tuple(map(int, r['version'].split('.'))))['identifier'])
+PY
+)
+CODEGRAM_HISTORY_DEVICE=$(python3 - "$CODEGRAM_HISTORY_OUT/runtimes.json" "$CODEGRAM_HISTORY_RUNTIME" <<'PY'
+import json, sys
+runtime = next(r for r in json.load(open(sys.argv[1]))['runtimes'] if r['identifier'] == sys.argv[2])
+for name in ['iPhone 18 Pro Max', 'iPhone 17 Pro Max', 'iPhone 16 Pro Max', 'iPhone 17 Pro', 'iPhone 16 Pro', 'iPhone 17']:
+    found = next((r for r in runtime['supportedDeviceTypes'] if r['name'] == name), None)
+    if found:
+        print(found['identifier'])
+        break
+else:
+    raise SystemExit('No supported history-fixture iPhone Simulator')
+PY
+)
 python3 -u tools/nikita/profile_history_fixture.py --port-file "$CODEGRAM_HISTORY_OUT/port.txt" > "$CODEGRAM_HISTORY_OUT/http.log" 2>&1 &
 CODEGRAM_HISTORY_SERVER=$!
 CODEGRAM_HISTORY_DEADLINE=$((SECONDS + 30))
