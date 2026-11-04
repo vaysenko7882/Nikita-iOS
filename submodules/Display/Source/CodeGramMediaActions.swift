@@ -162,6 +162,20 @@ public final class CodeGramPlainAlertController: UIViewController {
         self.updateContents()
     }
 
+    public override func viewWillAppear(_ animated: Bool) {
+        if self.overrideUserInterfaceStyle == .unspecified {
+            // An over-fullscreen modal can otherwise use the window's system
+            // appearance even when the visible app screen overrides it.
+            var source = self.presentingViewController
+            if let tabs = source as? UITabBarController { source = tabs.selectedViewController }
+            if let navigation = source as? UINavigationController { source = navigation.topViewController }
+            if let style = source?.traitCollection.userInterfaceStyle, style != .unspecified {
+                self.overrideUserInterfaceStyle = style
+            }
+        }
+        super.viewWillAppear(animated)
+    }
+
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         self.fields.first?.becomeFirstResponder()

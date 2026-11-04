@@ -189,6 +189,11 @@ final class CodeGramIconPickerView: UIView, UIScrollViewDelegate {
             configuration?.background.visualEffect = nil
             configuration?.background.backgroundColor = choice.light ? .black : .white
             configuration?.baseForegroundColor = choice.background
+            configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+                var attributes = attributes
+                attributes.foregroundColor = choice.background
+                return attributes
+            }
             configuration?.title = self.busy ? "Применяю…" : choice.name == self.appliedName ? "Установлена" : "Использовать эту иконку"
             self.applyButton.configuration = configuration
             self.applyButton.isEnabled = !self.busy && choice.name != self.appliedName

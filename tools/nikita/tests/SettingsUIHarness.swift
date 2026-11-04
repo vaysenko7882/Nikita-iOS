@@ -126,6 +126,26 @@ private final class HarnessController: UIViewController {
             self.expect([scroll.topEdgeEffect, scroll.bottomEdgeEffect, scroll.leftEdgeEffect, scroll.rightEdgeEffect].allSatisfy { $0.isHidden }, "scroll edge effect remains enabled: \(context)")
         }
     }
+    private func expectReadableApplyButton(_ button: UIButton) {
+        guard let label = button.titleLabel,
+            let background = button.configuration?.background.backgroundColor ?? button.configuration?.baseBackgroundColor ?? button.backgroundColor else {
+            self.expect(false, "Apply button is missing rendered text or background")
+            return
+        }
+        let attributedColor: UIColor?
+        if let text = label.attributedText, text.length > 0 {
+            attributedColor = text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
+        } else { attributedColor = nil }
+        let color = (attributedColor ?? label.textColor ?? .clear).resolvedColor(with: label.traitCollection)
+        var opacity: CGFloat = 1
+        var current: UIView? = label
+        while let view = current {
+            opacity *= view.alpha
+            if view === button { break }
+            current = view.superview
+        }
+        self.expect(self.contrast(color.withAlphaComponent(color.cgColor.alpha * opacity), over: background, traits: label.traitCollection) >= 4.5, "Installed icon title lacks contrast in the rendered disabled state")
+    }
     private func expectPlainAlert(_ alert: CodeGramPlainAlertController, context: String) {
         alert.view.layoutIfNeeded()
         self.expect(alert.traitCollection.userInterfaceStyle == self.recordingStyle, "alert does not follow the recorded appearance: \(context)")
@@ -573,7 +593,10 @@ private final class HarnessController: UIViewController {
                                 self.expect(!picker.applyButton.isEnabled,"Applied icon must be marked as installed")
                                 self.expect(picker.applyButton.configuration?.title == "Установлена","Applied icon must have the installed title")
                                 DispatchQueue.main.asyncAfter(deadline: .now()+0.5) {
-                                    self.phase("icons-applied",after: 2) { self.finish() }
+                                    self.phase("icons-applied",after: 2) {
+                                        self.expectReadableApplyButton(picker.applyButton)
+                                        self.finish()
+                                    }
                                 }
                             }
                         }
