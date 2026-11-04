@@ -1,5 +1,8 @@
 # Личный архив CodeGram на VPS
 
+Команды используют ветку CodeGram 14.4 с сервером версии 5. Для обновления до проверенного коммита
+используй [полный блок обновления VPS](../CODEGRAM-14.4.md#обновление-vps).
+
 Служба входит отдельной сессией **в твой собственный Telegram-аккаунт** и постоянно получает его обновления. Она сохраняет текст сообщения перед каждой замеченной правкой и последнее содержимое перед удалением. iPhone забирает журнал при открытии клиента, затем каждые 30 секунд, пока приложение на экране. В чате удалённые сообщения полупрозрачны; история открывается долгим нажатием → «История изменений».
 
 ## Установка с iPhone
@@ -10,7 +13,7 @@
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
-git clone --depth 1 --filter=blob:none --sparse https://github.com/vaysenko7882/Nikita-iOS.git nikita-install
+git clone --depth 1 --filter=blob:none --sparse --branch codex/codegram-14.4-links-profile-icons https://github.com/vaysenko7882/Nikita-iOS.git nikita-install
 git -C nikita-install sparse-checkout set server
 sudo bash nikita-install/server/install.sh
 ```
@@ -68,7 +71,7 @@ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
 apt-get update
 apt-get install -y git ca-certificates
 nikita_update_dir=$(mktemp -d /tmp/nikita-update.XXXXXX)
-git clone --depth 1 --filter=blob:none --sparse https://github.com/vaysenko7882/Nikita-iOS.git "$nikita_update_dir"
+git clone --depth 1 --filter=blob:none --sparse --branch codex/codegram-14.4-links-profile-icons https://github.com/vaysenko7882/Nikita-iOS.git "$nikita_update_dir"
 git -C "$nikita_update_dir" sparse-checkout set server
 bash "$nikita_update_dir/server/install.sh" --domain archive.mavasyaa.best --reuse-session
 NIKITA_UPDATE
@@ -132,12 +135,12 @@ SQLite-журнал и HTTP-авторизация покрыты автоном
 
 
 
-## CodeGram 14 / сервер 4: правила и память
+## CodeGram 14: правила и память
 
 На уже работающем сервере обновление сохраняет сессию, ключ, журнал и файлы. Под root:
 
 ```bash
-codegram_update_dir=$(mktemp -d /tmp/codegram-update.XXXXXX) && git clone --depth 1 --filter=blob:none --sparse https://github.com/vaysenko7882/Nikita-iOS.git "$codegram_update_dir" && git -C "$codegram_update_dir" sparse-checkout set server && bash "$codegram_update_dir/server/install.sh" --domain archive.mavasyaa.best --reuse-session
+codegram_update_dir=$(mktemp -d /tmp/codegram-update.XXXXXX) && git clone --depth 1 --filter=blob:none --sparse --branch codex/codegram-14.4-links-profile-icons https://github.com/vaysenko7882/Nikita-iOS.git "$codegram_update_dir" && git -C "$codegram_update_dir" sparse-checkout set server && bash "$codegram_update_dir/server/install.sh" --domain archive.mavasyaa.best --reuse-session
 ```
 
 В CodeGram открой «Правила сохранения VPS». По умолчанию сохраняются личные диалоги; группы, каналы и всё в папке «Архив» исключены. Исключение «Всегда» включает конкретный диалог даже в Архиве, «Никогда» исключает его при любых общих настройках. Нажми «Сохранить»: правила хранятся на VPS, поэтому действуют и при закрытом iPhone. Метаданные папки обновляются при уведомлениях Telegram и полной сверке примерно раз в минуту. Неизвестные диалоги не включаются до проверки их типа и папки. Изменение правил приостанавливает новые записи и очередь загрузок, но не удаляет старые данные. Файл, встречающийся и в разрешённом диалоге, может продолжить загрузку из него.

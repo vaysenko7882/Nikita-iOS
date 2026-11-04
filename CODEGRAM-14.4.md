@@ -43,8 +43,27 @@ CodeGram → Оформление → «Иконка приложения». К�
 
 ## Обновление VPS
 
-Использовать `server/install.sh --domain archive.mavasyaa.best --reuse-session` из этой ветки.
-Установщик сохраняет прежние конфигурацию, Telegram-сессию, ключ и базу; добавляет ffmpeg и зависимости версии 5.
+Под root на уже установленном VPS выполнить весь блок. Он загружает проверенные исходники
+`55cb132946763880dc14561edb95e0a3c654cadf` во временную папку, затем обновляет сервер до версии 5
+с прежними конфигурацией, Telegram-сессией, ключом и базой. Установщик добавляет ffmpeg и зависимости.
+
+```bash
+bash <<'CODEGRAM_UPDATE'
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
+apt-get update
+apt-get install -y git ca-certificates
+codegram_update_dir=$(mktemp -d /tmp/codegram-14.4.XXXXXX)
+git clone --depth 1 --filter=blob:none --sparse --branch codex/codegram-14.4-links-profile-icons https://github.com/vaysenko7882/Nikita-iOS.git "$codegram_update_dir"
+git -C "$codegram_update_dir" fetch --depth 1 origin 55cb132946763880dc14561edb95e0a3c654cadf
+git -C "$codegram_update_dir" sparse-checkout set server
+git -C "$codegram_update_dir" checkout --detach 55cb132946763880dc14561edb95e0a3c654cadf
+bash "$codegram_update_dir/server/install.sh" --domain archive.mavasyaa.best --reuse-session
+systemctl is-active --quiet nikita-archive
+CODEGRAM_UPDATE
+```
+
+Если используется другой домен, заменить `archive.mavasyaa.best` своим доменом архива.
 Ubuntu 22.04 с Python 3.10 использует совместимую закреплённую версию yt-dlp, Python 3.11+ — более новую.
 Не удалять приложение перед обновлением IPA; сохранить bundle ID `personal.nikita.messenger` и прежнюю подпись.
 
@@ -57,3 +76,15 @@ UIKit-проверка использует производственные к�
 Полная сборка IPA проверяет типы и линковку; упаковка отдельно проверяет наличие восьми альтернативных иконок.
 Доступ к живым аккаунтам, доступность конкретного ролика с IP владельца и поведение подписанной IPA на его iPhone
 требуют проверки на устройстве; автономные тесты их не подменяют.
+
+## Готовая сборка 14.4.0 (39)
+
+[Сборка iPhone](https://github.com/vaysenko7882/Nikita-iOS/actions/runs/41689412486) завершилась успешно.
+[Артефакт CodeGram-iPhone-39](https://github.com/vaysenko7882/Nikita-iOS/actions/runs/41689412486/artifacts/13256637616)
+содержит `CodeGram.ipa`, `CodeGram.ipa.sha256` и `Build.json`.
+Исходники приложения: `55cb132946763880dc14561edb95e0a3c654cadf`.
+SHA-256 IPA: `7f987108d902740c43f056139b1c36b29995f526e1fc4b3a6fc8d983a9051fc9`.
+Версия, build, исходный коммит и контрольная сумма сверены с манифестом и самой IPA;
+восемь новых иконок зарегистрированы для iPhone/iPad и включены в пакет.
+Для установки IPA требуется подпись владельца. Установка на физический iPhone и обновление живого VPS
+этой проверкой не подтверждены.
