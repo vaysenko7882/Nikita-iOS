@@ -36,6 +36,29 @@ private final class EagerArchiveRevisionLinksAttribute: MessageAttribute {
     }
 }
 
+private let archiveBenchmarkSeedConfiguration: SeedConfiguration = {
+    let seed = telegramPostboxSeedConfiguration
+    // Telegram uses server-side cloud search and indexes only secret chats in
+    // local FTS. Index this fixture's cloud peer so the benchmark can exercise
+    // the real Postbox search renderer with a non-empty result, without a server.
+    return SeedConfiguration(globalMessageIdsPeerIdNamespaces: seed.globalMessageIdsPeerIdNamespaces,
+        initializeChatListWithHole: seed.initializeChatListWithHole, messageHoles: seed.messageHoles,
+        upgradedMessageHoles: seed.upgradedMessageHoles, messageThreadHoles: seed.messageThreadHoles,
+        existingMessageTags: MessageTags.all, messageTagsWithSummary: seed.messageTagsWithSummary,
+        messageTagsWithThreadSummary: seed.messageTagsWithThreadSummary, existingGlobalMessageTags: seed.existingGlobalMessageTags,
+        peerNamespacesRequiringMessageTextIndex: seed.peerNamespacesRequiringMessageTextIndex + [Namespaces.Peer.CloudUser],
+        peerSummaryCounterTags: seed.peerSummaryCounterTags, peerSummaryIsThreadBased: seed.peerSummaryIsThreadBased,
+        additionalChatListIndexNamespace: seed.additionalChatListIndexNamespace,
+        messageNamespacesRequiringGroupStatsValidation: seed.messageNamespacesRequiringGroupStatsValidation,
+        defaultMessageNamespaceReadStates: seed.defaultMessageNamespaceReadStates, chatMessagesNamespaces: seed.chatMessagesNamespaces,
+        readStateExcludedMessageNamespaces: seed.readStateExcludedMessageNamespaces,
+        getGlobalNotificationSettings: seed.getGlobalNotificationSettings, defaultGlobalNotificationSettings: seed.defaultGlobalNotificationSettings,
+        mergeMessageAttributes: seed.mergeMessageAttributes, decodeMessageThreadInfo: seed.decodeMessageThreadInfo,
+        decodeAutoremoveTimeout: seed.decodeAutoremoveTimeout, decodeDisplayPeerAsRegularChat: seed.decodeDisplayPeerAsRegularChat,
+        isPeerUpgradeMessage: seed.isPeerUpgradeMessage, automaticThreadIndexInfo: seed.automaticThreadIndexInfo,
+        customTagsFromAttributes: seed.customTagsFromAttributes, displaySavedMessagesAsTopicListPreferencesKey: seed.displaySavedMessagesAsTopicListPreferencesKey)
+}()
+
 final class CodeGramArchiveCatchupTests: XCTestCase {
     private var postbox: Postbox!
     private var path: String!
@@ -51,7 +74,7 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
         let encryption = ValueBoxEncryptionParameters(forceEncryptionIfNoSet: false,
             key: ValueBoxEncryptionParameters.Key(data: Data(repeating: 0, count: 32))!,
             salt: ValueBoxEncryptionParameters.Salt(data: Data(repeating: 0, count: 16))!)
-        let opened = openPostbox(basePath: self.path, seedConfiguration: telegramPostboxSeedConfiguration,
+        let opened = openPostbox(basePath: self.path, seedConfiguration: archiveBenchmarkSeedConfiguration,
             encryptionParameters: encryption, timestampForAbsoluteTimeBasedOperations: 100,
             isMainProcess: true, isTemporary: true, isReadOnly: false, useCopy: false,
             useCaches: false, removeDatabaseOnError: false)
