@@ -262,11 +262,13 @@ final class PeerInfoStoryGridScreenComponent: Component {
                 
                 let valueNorm: Float = 1.0 / Float(sortedItems.count)
                 var progressStart: Float = 0.0
+                var savedCount = 0
                 for (_, item) in sortedItems {
                     let itemOffset = progressStart
                     progressStart += valueNorm
                     signals.append(saveToCameraRoll(context: component.context, userLocation: .other, mediaReference: .story(peer: peerReference, id: item.id, media: item.media._asMedia()))
                     |> map { progress -> Float in
+                        if progress >= 1.0 { savedCount += 1 }
                         return itemOffset + progress * valueNorm
                     })
                 }
@@ -286,6 +288,7 @@ final class PeerInfoStoryGridScreenComponent: Component {
                     guard let saveScreen else {
                         return
                     }
+                    guard savedCount == signals.count else { saveScreen.dismiss(); return }
                     saveScreen.content = .completion(strings.Story_TooltipSaved)
                     Queue.mainQueue().after(3.0, { [weak saveScreen] in
                         saveScreen?.dismiss()

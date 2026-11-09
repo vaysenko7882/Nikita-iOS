@@ -295,9 +295,13 @@ public extension TelegramEngine.Messages {
                             transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(current) })
                             return .failure("Не удалось записать весь архив. Позиция журнала сохранена для повторной попытки.")
                         }
-                        current.serverId = page.serverId
-                        current.cursor = page.nextCursor
-                        transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(current) })
+                        // A successful idle poll has no state to persist. In
+                        // particular, avoid re-encoding pending version arrays.
+                        if !page.events.isEmpty || current.serverId != page.serverId || current.cursor != page.nextCursor {
+                            current.serverId = page.serverId
+                            current.cursor = page.nextCursor
+                            transaction.updatePreferencesEntry(key: PreferencesKeys.nikitaServerArchive, { _ in PreferencesEntry(current) })
+                        }
                         return NikitaArchiveSyncResult(success: true, importedCount: count, hasMore: page.hasMore, connected: page.connected,
                             message: (page.connected ? "Архив синхронизирован. Сервер подключён к Telegram." : "Архив получен, но сессия Telegram на VPS сейчас отключена.") + (page.mediaStats?.description ?? " Обнови сервер для сохранения вложений."))
                     }

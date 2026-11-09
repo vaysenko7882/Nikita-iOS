@@ -4649,7 +4649,7 @@ func replayFinalState(
             case let .DeleteMessages(ids):
                 _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids, archiveCloudMessages: true, manualAddMessageThreadStatsDifference: { id, add, remove in
                     addMessageThreadStatsDifference(threadKey: id, remove: remove, addedMessagePeer: nil, addedMessageId: nil, isOutgoing: false)
-                })
+                }, archiveBatch: archiveBatch)
                 deletedMessageIds.append(contentsOf: ids.map { .messageId($0) })
             case let .UpdateMinAvailableMessage(id):
                 if let message = transaction.getMessage(id) {
@@ -4658,7 +4658,7 @@ func replayFinalState(
                 var archiveIds: [MessageId] = []
                 var archivedIds: [MessageId] = []
                 if id.namespace == Namespaces.Message.Cloud {
-                    transaction.withAllMessages(peerId: id.peerId, { message in
+                    transaction.withAllMessages(peerId: id.peerId, namespace: id.namespace, { message in
                         if message.id.namespace == id.namespace && message.id.id >= 1 && message.id.id <= id.id {
                             archiveIds.append(message.id)
                         }

@@ -776,7 +776,8 @@ final class ChatImageGalleryItemNode: ZoomableContentGalleryItemNode {
                         f(.default)
                                                 
                         let _ = (SaveToCameraRoll.saveToCameraRoll(context: context, userLocation: .peer(message.id.peerId), mediaReference: media)
-                        |> deliverOnMainQueue).start(completed: { [weak self] in
+                        |> filter { $0 >= 1.0 } |> take(1)
+                        |> deliverOnMainQueue).start(next: { [weak self] _ in
                             guard let strongSelf = self else {
                                 return
                             }

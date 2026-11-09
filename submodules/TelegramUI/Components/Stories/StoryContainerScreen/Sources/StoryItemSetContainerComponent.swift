@@ -6003,16 +6003,19 @@ public final class StoryItemSetContainerComponent: Component {
             let stringSaving = component.strings.Story_TooltipSaving
             let stringSaved = component.strings.Story_TooltipSaved
             
+            var didSave = false
             let disposable = (saveToCameraRoll(context: component.context, userLocation: .peer(peerReference.id), customUserContentType: .story, mediaReference: .story(peer: peerReference, id: component.slice.item.storyItem.id, media: component.slice.item.storyItem.media._asMedia()))
             |> deliverOnMainQueue).start(next: { [weak saveScreen] progress in
                 guard let saveScreen else {
                     return
                 }
+                if progress >= 1.0 { didSave = true }
                 saveScreen.content = .progress(stringSaving, progress)
             }, completed: { [weak saveScreen] in
                 guard let saveScreen else {
                     return
                 }
+                guard didSave else { saveScreen.dismiss(); return }
                 saveScreen.content = .completion(stringSaved)
                 Queue.mainQueue().after(3.0, { [weak saveScreen] in
                     saveScreen?.dismiss()

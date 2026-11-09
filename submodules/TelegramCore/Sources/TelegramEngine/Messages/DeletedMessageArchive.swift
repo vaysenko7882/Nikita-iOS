@@ -714,20 +714,32 @@ private func nikitaArchiveMediaTags(incoming: Bool, attributes: [MessageAttribut
 
 func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
     events: [NikitaRemoteArchiveEvent], accountId: Int64, serverId: String, state: inout NikitaRemoteArchiveState) -> Int? {
+    // Idle polling must not decode/rewrite the full local archive or load every
+    // archived message. The sync cursor/server state is committed by the caller.
+    guard !events.isEmpty else { return 0 }
     guard let settings = prepareDeletedMessageArchive(transaction: transaction, mediaBox: mediaBox) else { return nil }
+    let events = events.filter { event in
+        guard let originalId = event.originalId else { return false }
+        return canArchiveMessageFromChat(transaction: transaction, peerId: originalId.peerId, settings: settings)
+            && ((event.kind == "edit" && settings.saveEditedVersions) || (event.kind == "delete" && settings.saveDeletedMessages))
+    }
+    guard !events.isEmpty else { return 0 }
     var index = transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty
+    let initialIndex = index
+    let originalIds = Set(events.compactMap(\.originalId))
+    let peerIds = Set(originalIds.map { $0.peerId.toInt64() })
     var archivedByOriginal: [MessageId: MessageId] = [:]
-    for entry in index.messageIds where entry.namespace == Namespaces.Message.Archived {
-        if let message = transaction.getMessage(entry.messageId), let attribute = message.archivedMessageAttribute {
+    // Entries include the peer already; unrelated chats need no message loads.
+    for entry in index.messageIds where entry.namespace == Namespaces.Message.Archived && peerIds.contains(entry.peerId) {
+        if let message = transaction.getMessage(entry.messageId), let attribute = message.archivedMessageAttribute,
+            originalIds.contains(attribute.originalMessageId) {
             archivedByOriginal[attribute.originalMessageId] = message.id
         }
     }
     var count = 0
     var failed = false
     for event in events {
-        guard let originalId = event.originalId,
-            canArchiveMessageFromChat(transaction: transaction, peerId: originalId.peerId, settings: settings),
-            (event.kind == "edit" && settings.saveEditedVersions) || (event.kind == "delete" && settings.saveDeletedMessages) else { continue }
+        guard let originalId = event.originalId else { continue }
         let key = nikitaArchiveMessageKey(originalId)
         let current = transaction.getMessage(originalId)
         let remoteMedia: [Media] = event.media.flatMap { $0.nativeMedia(accountId: accountId, serverId: serverId) }.map { [$0] } ?? []
@@ -872,7 +884,9 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
             }
         }
     }
-    updateDeletedMessageArchiveIndex(transaction: transaction, { _ in index })
+    if index != initialIndex {
+        updateDeletedMessageArchiveIndex(transaction: transaction, { _ in index })
+    }
     if count != 0 { updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox) }
     return failed ? nil : count
 }

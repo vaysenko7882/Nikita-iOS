@@ -53,23 +53,17 @@ public final class MessageFilterSettingsStore {
     private let defaults: UserDefaults
     private let key = "messageFilterSettings.v1"
     private let lock = NSLock()
-    private var cachedValue: MessageFilterSettings
+    private var cache: CodeGramSettingsCache<MessageFilterSettings>
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(MessageFilterSettings.self, from: data) {
-            self.cachedValue = value
-        } else {
-            self.cachedValue = .defaultSettings
-        }
+        self.cache = CodeGramSettingsCache(defaultValue: .defaultSettings, data: defaults.data(forKey: self.key))
     }
 
     public var current: MessageFilterSettings {
         self.lock.lock()
-        if let data = self.defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(MessageFilterSettings.self, from: data) {
-            self.cachedValue = value
-        }
-        let value = self.cachedValue
+        self.cache.reload(data: self.defaults.data(forKey: self.key))
+        let value = self.cache.value
         self.lock.unlock()
         return value
     }
@@ -77,16 +71,11 @@ public final class MessageFilterSettingsStore {
     @discardableResult
     public func update(_ f: (MessageFilterSettings) -> MessageFilterSettings) -> MessageFilterSettings {
         self.lock.lock()
-        let currentValue: MessageFilterSettings
-        if let data = self.defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(MessageFilterSettings.self, from: data) {
-            currentValue = value
-        } else {
-            currentValue = self.cachedValue
-        }
+        self.cache.reload(data: self.defaults.data(forKey: self.key))
+        let currentValue = self.cache.value
         let updatedValue = f(currentValue)
         let changed = updatedValue != currentValue
-        self.cachedValue = updatedValue
-        if let data = try? JSONEncoder().encode(updatedValue) {
+        if let data = self.cache.store(updatedValue) {
             self.defaults.set(data, forKey: self.key)
         }
         self.lock.unlock()

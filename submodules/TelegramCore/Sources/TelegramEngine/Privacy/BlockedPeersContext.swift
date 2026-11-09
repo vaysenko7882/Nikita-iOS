@@ -40,6 +40,7 @@ public final class BlockedPeersContext {
     }
     
     private let disposable = MetaDisposable()
+    private var pagination = BlockedPeersPagination()
     
     public init(account: Account, subject: Subject) {
         assert(Queue.mainQueue().isCurrent())
@@ -66,6 +67,8 @@ public final class BlockedPeersContext {
         self._state = BlockedPeersContextState(isLoadingMore: true, canLoadMore: self._state.canLoadMore, totalCount: self._state.totalCount, peers: self._state.peers)
         let postbox = self.account.postbox
         let accountPeerId = self.account.peerId
+        let requestOffset = self.pagination.nextOffset
+        let generation = self.pagination.generation
         
         var flags: Int32 = 0
         if case .stories = self.subject {
@@ -77,13 +80,13 @@ public final class BlockedPeersContext {
             limit = 100
         }
         
-        self.disposable.set((self.account.network.request(Api.functions.contacts.getBlocked(flags: flags, offset: Int32(self._state.peers.count), limit: limit))
+        self.disposable.set((self.account.network.request(Api.functions.contacts.getBlocked(flags: flags, offset: requestOffset, limit: limit))
         |> retryRequestIfNotFrozen
-        |> mapToSignal { result -> Signal<(peers: [RenderedPeer], canLoadMore: Bool, totalCount: Int?), NoError> in
+        |> mapToSignal { result -> Signal<(peers: [RenderedPeer], returnedCount: Int, totalCount: Int?), NoError> in
             guard let result else {
-                return .single((peers: [], canLoadMore: false, totalCount: 0))
+                return .single((peers: [], returnedCount: 0, totalCount: 0))
             }
-            return postbox.transaction { transaction -> (peers: [RenderedPeer], canLoadMore: Bool, totalCount: Int?) in
+            return postbox.transaction { transaction -> (peers: [RenderedPeer], returnedCount: Int, totalCount: Int?) in
                 switch result {
                     case let .blocked(blockedData):
                         let (blocked, chats, users) = (blockedData.blocked, blockedData.chats, blockedData.users)
@@ -101,7 +104,7 @@ public final class BlockedPeersContext {
                             }
                         }
 
-                        return (renderedPeers, false, nil)
+                        return (renderedPeers, blocked.count, nil)
                     case let .blockedSlice(blockedSliceData):
                         let (count, blocked, chats, users) = (blockedSliceData.count, blockedSliceData.blocked, blockedSliceData.chats, blockedSliceData.users)
                         let parsedPeers = AccumulatedPeers(transaction: transaction, chats: chats, users: users)
@@ -118,12 +121,15 @@ public final class BlockedPeersContext {
                             }
                         }
 
-                        return (renderedPeers, true, Int(count))
+                        return (renderedPeers, blocked.count, Int(count))
                 }
             }
         }
-        |> deliverOnMainQueue).start(next: { [weak self] (peers, canLoadMore, totalCount) in
+        |> deliverOnMainQueue).start(next: { [weak self] (peers, returnedCount, totalCount) in
             guard let strongSelf = self else {
+                return
+            }
+            guard let canLoadMore = strongSelf.pagination.completePage(generation: generation, returnedCount: returnedCount, totalCount: totalCount) else {
                 return
             }
             
@@ -214,7 +220,9 @@ public final class BlockedPeersContext {
         |> mapToSignal { [weak self] peers -> Signal<Never, BlockedPeersContextAddError> in
             Queue.mainQueue().async {
                 if let strongSelf = self {
-                    strongSelf._state = BlockedPeersContextState(isLoadingMore: strongSelf._state.isLoadingMore, canLoadMore: strongSelf._state.canLoadMore, totalCount: peers.count, peers: peers.map(RenderedPeer.init))
+                    strongSelf.disposable.set(nil)
+                    strongSelf.pagination.restart()
+                    strongSelf._state = BlockedPeersContextState(isLoadingMore: false, canLoadMore: false, totalCount: peers.count, peers: peers.map(RenderedPeer.init))
                 }
             }
             let inputPeers = peers.compactMap { apiInputPeer($0) }
@@ -295,7 +303,7 @@ public final class BlockedPeersContext {
                     updatedTotalCount = nil
                 }
                 
-                strongSelf._state = BlockedPeersContextState(isLoadingMore: strongSelf._state.isLoadingMore, canLoadMore: strongSelf._state.canLoadMore, totalCount: updatedTotalCount, peers: mergedPeers)
+                strongSelf.restartPaginationAfterMutation(peers: mergedPeers, totalCount: updatedTotalCount)
                 return .complete()
             }
         }
@@ -374,9 +382,19 @@ public final class BlockedPeersContext {
                     updatedTotalCount = nil
                 }
                 
-                strongSelf._state = BlockedPeersContextState(isLoadingMore: strongSelf._state.isLoadingMore, canLoadMore: strongSelf._state.canLoadMore, totalCount: updatedTotalCount, peers: mergedPeers)
+                strongSelf.restartPaginationAfterMutation(peers: mergedPeers, totalCount: updatedTotalCount)
                 return .complete()
             }
+        }
+    }
+
+    private func restartPaginationAfterMutation(peers: [RenderedPeer], totalCount: Int?) {
+        let reload = self._state.isLoadingMore || self._state.canLoadMore
+        self.disposable.set(nil)
+        self.pagination.restart()
+        self._state = BlockedPeersContextState(isLoadingMore: false, canLoadMore: reload, totalCount: totalCount, peers: peers)
+        if reload {
+            self.loadMore()
         }
     }
 }

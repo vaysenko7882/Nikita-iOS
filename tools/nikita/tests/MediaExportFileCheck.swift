@@ -24,9 +24,24 @@ import Foundation
         let automaticURL = automatic!.url
         automatic = nil
         waitForRemoval(automaticURL.deletingLastPathComponent())
+        // Live Photo export owns both a primary copy and a generated paired
+        // MOV; disposing it must remove the output while the input copy remains
+        // available until Photos has completed its read.
+        let mainFile = CodeGramExportFile(sourcePath: source.path, fileName: "photo.jpg")!
+        let pairedInput = CodeGramExportFile(sourcePath: source.path, fileName: "paired.mp4")!
+        let pairedOutput = mainFile.url.deletingLastPathComponent().appendingPathComponent("paired.mov")
+        try bytes.write(to: pairedOutput)
+        mainFile.dispose()
+        waitForRemoval(mainFile.url.deletingLastPathComponent())
+        precondition(!fm.fileExists(atPath: pairedOutput.path), "Generated paired MOV leaked")
+        precondition(fm.fileExists(atPath: pairedInput.url.path), "Primary cleanup removed the paired input before Photos finished")
+        let pairedBytes = try Data(contentsOf: pairedInput.url)
+        precondition(pairedBytes == bytes)
+        pairedInput.dispose()
+        waitForRemoval(pairedInput.url.deletingLastPathComponent())
         let original = try Data(contentsOf: source)
         precondition(original == bytes, "Cleanup touched the original received media")
-        print("Media export: byte-exact copy, original preservation, safe filename boundaries, missing resource, explicit/idempotent cleanup and cancellation/deinit cleanup passed.")
+        print("Media export: byte-exact copy, original preservation, safe filename boundaries, missing resource, explicit/idempotent cleanup and cancellation/deinit cleanup and paired-output lifetime passed.")
     }
 
     static func waitForRemoval(_ url: URL) {

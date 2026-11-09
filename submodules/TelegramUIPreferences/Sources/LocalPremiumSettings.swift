@@ -18,23 +18,17 @@ public final class LocalPremiumSettingsStore {
     private let defaults: UserDefaults
     private let key = "localPremiumSettings.v1"
     private let lock = NSLock()
-    private var cachedValue: LocalPremiumSettings
+    private var cache: CodeGramSettingsCache<LocalPremiumSettings>
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(LocalPremiumSettings.self, from: data) {
-            self.cachedValue = value
-        } else {
-            self.cachedValue = .defaultSettings
-        }
+        self.cache = CodeGramSettingsCache(defaultValue: .defaultSettings, data: defaults.data(forKey: self.key))
     }
 
     public var current: LocalPremiumSettings {
         self.lock.lock()
-        if let data = self.defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(LocalPremiumSettings.self, from: data) {
-            self.cachedValue = value
-        }
-        let value = self.cachedValue
+        self.cache.reload(data: self.defaults.data(forKey: self.key))
+        let value = self.cache.value
         self.lock.unlock()
         return value
     }
@@ -42,15 +36,10 @@ public final class LocalPremiumSettingsStore {
     @discardableResult
     public func update(_ f: (LocalPremiumSettings) -> LocalPremiumSettings) -> LocalPremiumSettings {
         self.lock.lock()
-        let currentValue: LocalPremiumSettings
-        if let data = self.defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(LocalPremiumSettings.self, from: data) {
-            currentValue = value
-        } else {
-            currentValue = self.cachedValue
-        }
+        self.cache.reload(data: self.defaults.data(forKey: self.key))
+        let currentValue = self.cache.value
         let updatedValue = f(currentValue)
-        self.cachedValue = updatedValue
-        if let data = try? JSONEncoder().encode(updatedValue) {
+        if let data = self.cache.store(updatedValue) {
             self.defaults.set(data, forKey: self.key)
         }
         self.lock.unlock()

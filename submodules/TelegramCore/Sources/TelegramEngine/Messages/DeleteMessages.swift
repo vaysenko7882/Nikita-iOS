@@ -47,13 +47,29 @@ public func _internal_deleteMessages(
     archiveCloudMessages: Bool = false,
     manualAddMessageThreadStatsDifference: ((MessageThreadKey, Int, Int) -> Void)? = nil
 ) {
+    _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids,
+        deleteMedia: deleteMedia, archiveCloudMessages: archiveCloudMessages,
+        manualAddMessageThreadStatsDifference: manualAddMessageThreadStatsDifference, archiveBatch: nil)
+}
+
+// Replay must share its archive snapshot with edits and other deletions in the
+// same transaction. A direct write here would be overwritten by batch.finish().
+func _internal_deleteMessages(
+    transaction: Transaction,
+    mediaBox: MediaBox,
+    ids: [MessageId],
+    deleteMedia: Bool = true,
+    archiveCloudMessages: Bool = false,
+    manualAddMessageThreadStatsDifference: ((MessageThreadKey, Int, Int) -> Void)? = nil,
+    archiveBatch: DeletedMessageArchiveBatch?
+) {
     if archiveCloudMessages {
-        let archivedIds = archiveMessagesBeforeCloudDeletion(transaction: transaction, ids: ids, mediaBox: mediaBox)
+        let archivedIds = archiveMessagesBeforeCloudDeletion(transaction: transaction, ids: ids, mediaBox: mediaBox, batch: archiveBatch)
         if archivedIds.isEmpty {
-            removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: ids)
+            removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: ids, batch: archiveBatch)
         }
     } else {
-        removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: ids)
+        removeDeletedMessageArchiveForLocalDeletion(transaction: transaction, mediaBox: mediaBox, ids: ids, batch: archiveBatch)
     }
     var resourceIds: [MediaResourceId] = []
     if deleteMedia {

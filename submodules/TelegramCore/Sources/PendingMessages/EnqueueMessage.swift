@@ -860,6 +860,9 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
                             replyToStoryId = attribute.storyId
                         } else if let attribute = attribute as? OutgoingMessageInfoAttribute {
                             bubbleUpEmojiOrStickersets = attribute.bubbleUpEmojiOrStickersets
+                            if attribute.flags.contains(.requiresMediaUpload) {
+                                filteredAttributes.append(attribute)
+                            }
                             continue inner
                         } else if let attribute = attribute as? ForwardSourceInfoAttribute {
                             forwardSource = attribute.messageId
@@ -955,6 +958,15 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                     }
                 }
             case let .forward(sourceId, threadId, grouping, forwardAttributes, _):
+                if let sourceMessage = transaction.getMessage(sourceId),
+                    let copy = codeGramProtectedMessageCopy(source: sourceMessage, destination: peerId, accountPeerId: account.peerId,
+                        enabled: NikitaSettingsStore.shared.allowsProtectedExport,
+                        cachedUserData: transaction.getPeerCachedData(peerId: sourceId.peerId) as? CachedUserData,
+                        threadId: threadId, groupingKey: forwardGroupingKey(grouping: grouping, sourceGroupingKey: sourceMessage.groupingKey, generatedKeys: &localGroupingKeyBySourceKey),
+                        forwardAttributes: forwardAttributes, correlationId: message.correlationId) {
+                    updatedMessages.append((true, copy))
+                    continue outer
+                }
                 if let sourceMessage = forwardedMessageToBeReuploaded(transaction: transaction, id: sourceId) {
                     var mediaReference: AnyMediaReference?
                     if sourceMessage.id.peerId.namespace == Namespaces.Peer.SecretChat {
@@ -1016,6 +1028,12 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
             arc4random_buf(&randomId, 8)
             var infoFlags = OutgoingMessageInfoFlags()
             if transformedMedia {
+                infoFlags.insert(.transformedMedia)
+            }
+            if codeGramRequiresMediaUpload(message.attributes) {
+                infoFlags.insert(.requiresMediaUpload)
+                // These are already received bytes. Re-running the outgoing
+                // editor transform could mutate the source's shared media id.
                 infoFlags.insert(.transformedMedia)
             }
             

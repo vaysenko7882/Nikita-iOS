@@ -3,6 +3,8 @@ import UIKit
 import SwiftSignalKit
 import TelegramCore
 import Photos
+import AVFoundation
+import ImageIO
 import Display
 import UniformTypeIdentifiers
 import DeviceAccess
@@ -59,8 +61,11 @@ public func fetchMediaData(context: AccountContext, userLocation: MediaResourceU
             let fetched = context.engine.resources.fetch(
                 reference: mediaReference.resourceReference(resource),
                 userLocation: userLocation,
-                userContentType: userContentType
-            ).start()
+                userContentType: userContentType,
+                reportResultStatus: true
+            ).start(error: { _ in
+                subscriber.putCompletion()
+            })
             let status = context.engine.resources.status(resource: engineResource).start(next: { status in
                 switch status {
                     case .Local:
@@ -89,6 +94,12 @@ public func fetchMediaData(context: AccountContext, userLocation: MediaResourceU
             }
         }
         return fetchedData
+        |> take(until: { state in
+            if case let .data(data) = state, data.isComplete {
+                return SignalTakeAction(passthrough: true, complete: true)
+            }
+            return SignalTakeAction(passthrough: true, complete: false)
+        })
         |> map { data in
             return (data, isImage)
         }
@@ -115,93 +126,84 @@ public func saveToCameraRoll(context: AccountContext, userLocation: MediaResourc
         mediaData,
         videoData
     )
-    |> mapToSignal { stateAndIsImage, videoStateAndIsImage -> Signal<Float, NoError> in
+    // Stop observing MediaBox before the Photos operation starts. Status/data
+    // updates for either resource must not cancel or repeat an in-flight save.
+    |> take(until: { main, video in
+        let mainComplete: Bool
+        if case let .data(data) = main.0 { mainComplete = data.isComplete } else { mainComplete = false }
+        let videoComplete: Bool
+        if let video {
+            if case let .data(data) = video { videoComplete = data.isComplete } else { videoComplete = false }
+        } else { videoComplete = true }
+        return SignalTakeAction(passthrough: true, complete: mainComplete && videoComplete)
+    })
+    |> mapToSignal { stateAndIsImage, videoState -> Signal<Float, NoError> in
         let isImage = stateAndIsImage.1
-        var mainData: EngineMediaResource.ResourceData?
-        var videoData: EngineMediaResource.ResourceData?
-        var waitForVideo = false
-        if let videoState = videoStateAndIsImage {
-            switch videoState {
-            case let .progress(value):
-                return .single(value * 0.95)
-            case let .data(data):
-                videoData = data
-            }
-            switch stateAndIsImage.0 {
-            case let .progress(value):
-                return .single(0.95 + 0.05 * value)
-            case let .data(data):
-                mainData = data
-            }
-            waitForVideo = true
-        } else {
-            switch stateAndIsImage.0 {
-            case let .progress(value):
-                return .single(value)
-            case let .data(data):
-                mainData = data
-            }
+        guard case let .data(mainData) = stateAndIsImage.0, mainData.isComplete else {
+            if case let .progress(value) = stateAndIsImage.0 { return .single(min(0.99, value)) }
+            return .complete()
         }
-        if let mainData, mainData.isComplete, videoData != nil || !waitForVideo {
-            return Signal<Float, NoError> { subscriber in
-                DeviceAccess.authorizeAccess(to: .mediaLibrary(.save), presentationData: context.sharedContext.currentPresentationData.with { $0 }, present: { c, a in
-                    context.sharedContext.presentGlobalController(c, a)
-                }, openSettings: context.sharedContext.applicationBindings.openSettings, { authorized in
-                    if !authorized {
-                        subscriber.putCompletion()
-                        return
+        let pairedData: EngineMediaResource.ResourceData?
+        if let videoState {
+            guard case let .data(data) = videoState, data.isComplete else {
+                if case let .progress(value) = videoState { return .single(min(0.99, value)) }
+                return .complete()
+            }
+            pairedData = data
+        } else { pairedData = nil }
+
+        return Signal<Float, NoError> { subscriber in
+            let cancelled = Atomic(value: false)
+            DeviceAccess.authorizeAccess(to: .mediaLibrary(.save), presentationData: context.sharedContext.currentPresentationData.with { $0 }, present: { c, a in
+                context.sharedContext.presentGlobalController(c, a)
+            }, openSettings: context.sharedContext.applicationBindings.openSettings, { authorized in
+                guard authorized, !cancelled.with({ $0 }) else { subscriber.putCompletion(); return }
+                // File copying, JPEG metadata and large data reads must not block
+                // the UI. Photos owns reading the prepared file until completion.
+                Queue.concurrentDefaultQueue().async {
+                    guard !cancelled.with({ $0 }) else { return }
+                    let fileExtension: String
+                    if let file = mediaReference.media as? TelegramMediaFile {
+                        fileExtension = UTType(mimeType: file.mimeType)?.preferredFilenameExtension ?? (isImage ? "jpg" : "mp4")
+                    } else { fileExtension = isImage ? "jpg" : "mp4" }
+                    guard let mainFile = CodeGramExportFile(sourcePath: mainData.path, fileName: "media." + fileExtension) else {
+                        subscriber.putCompletion(); return
                     }
-
-                    let tempVideoPath = NSTemporaryDirectory() + "\(Int64.random(in: Int64.min ... Int64.max)).mp4"
-                    if isImage, let videoData, let imageData = try? Data(contentsOf: URL(fileURLWithPath: mainData.path)) {
+                    let finish: (Bool) -> Void = { success in
+                        mainFile.dispose()
+                        if success { subscriber.putNext(1.0) }
+                        subscriber.putCompletion()
+                    }
+                    if isImage, let pairedData {
+                        guard let videoFile = CodeGramExportFile(sourcePath: pairedData.path, fileName: "paired.mp4"),
+                            let imageData = try? Data(contentsOf: mainFile.url, options: .mappedIfSafe) else {
+                            finish(false); return
+                        }
                         let id = UUID().uuidString
-
-                        let jpegWithID = addAssetIdentifierToJPEG(imageData, assetIdentifier: id)!
-                        let outputVideoURL = URL(fileURLWithPath: NSTemporaryDirectory() + "\(id).mov")
-
-                        try? FileManager.default.copyItem(atPath: videoData.path, toPath: tempVideoPath)
-
-                        addAssetIdentifierToVideo(inputURL: URL(fileURLWithPath: tempVideoPath), outputURL: outputVideoURL, assetIdentifier: id) { success in
-                            guard success else { return }
-
+                        guard let jpegWithID = addAssetIdentifierToJPEG(imageData, assetIdentifier: id) else {
+                            videoFile.dispose(); finish(false); return
+                        }
+                        let outputVideoURL = mainFile.url.deletingLastPathComponent().appendingPathComponent("paired.mov")
+                        addAssetIdentifierToVideo(inputURL: videoFile.url, outputURL: outputVideoURL, assetIdentifier: id) { success in
+                            guard success, !cancelled.with({ $0 }) else { videoFile.dispose(); finish(false); return }
                             PHPhotoLibrary.shared().performChanges({
                                 let request = PHAssetCreationRequest.forAsset()
-
                                 request.addResource(with: .photo, data: jpegWithID, options: nil)
                                 request.addResource(with: .pairedVideo, fileURL: outputVideoURL, options: nil)
-                            }, completionHandler: { _, error in
-                                let _ = try? FileManager.default.removeItem(atPath: tempVideoPath)
-                                subscriber.putNext(1.0)
-                                subscriber.putCompletion()
+                            }, completionHandler: { success, _ in
+                                videoFile.dispose()
+                                finish(success)
                             })
                         }
                     } else {
+                        guard !cancelled.with({ $0 }) else { finish(false); return }
                         PHPhotoLibrary.shared().performChanges({
-                            if isImage {
-                                if let imageData = try? Data(contentsOf: URL(fileURLWithPath: mainData.path)) {
-                                    PHAssetCreationRequest.forAsset().addResource(with: .photo, data: imageData, options: nil)
-                                }
-                            } else {
-                                if let _ = try? FileManager.default.copyItem(atPath: mainData.path, toPath: tempVideoPath) {
-                                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: URL(fileURLWithPath: tempVideoPath))
-                                }
-                            }
-                        }, completionHandler: { _, error in
-                            if let error {
-                                print("\(error)")
-                            }
-                            let _ = try? FileManager.default.removeItem(atPath: tempVideoPath)
-                            subscriber.putNext(1.0)
-                            subscriber.putCompletion()
-                        })
+                            PHAssetCreationRequest.forAsset().addResource(with: isImage ? .photo : .video, fileURL: mainFile.url, options: nil)
+                        }, completionHandler: { success, _ in finish(success) })
                     }
-                })
-
-                return ActionDisposable {
                 }
-            }
-        } else {
-            return .complete()
+            })
+            return ActionDisposable { let _ = cancelled.swap(true) }
         }
     }
 }
@@ -247,7 +249,7 @@ private func addAssetIdentifierToJPEG(_ imageData: Data, assetIdentifier: String
     metadata[kCGImagePropertyMakerAppleDictionary as String] = maker
 
     CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
-    CGImageDestinationFinalize(destination)
+    guard CGImageDestinationFinalize(destination) else { return nil }
 
     return mutableData as Data
 }

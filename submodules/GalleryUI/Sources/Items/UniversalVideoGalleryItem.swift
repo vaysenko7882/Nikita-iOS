@@ -3770,16 +3770,19 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                                         let saveFileReference: AnyMediaReference = qualityFile.abstract
                                         let saveSignal = SaveToCameraRoll.saveToCameraRoll(context: self.context, userLocation: .peer(message.id.peerId), mediaReference: saveFileReference)
                                         
+                                        var didSave = false
                                         let disposable = (saveSignal
                                         |> deliverOnMainQueue).start(next: { [weak saveScreen] progress in
                                             guard let saveScreen else {
                                                 return
                                             }
+                                            if progress >= 1.0 { didSave = true }
                                             saveScreen.content = .progress(stringSaving, progress)
                                         }, completed: { [weak saveScreen] in
                                             guard let saveScreen else {
                                                 return
                                             }
+                                            guard didSave else { saveScreen.dismiss(); return }
                                             saveScreen.content = .completion(stringSaved)
                                             Queue.mainQueue().after(3.0, { [weak saveScreen] in
                                                 saveScreen?.dismiss()
@@ -3815,7 +3818,8 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                             switch self.fetchStatus {
                             case .Local:
                                 let _ = (SaveToCameraRoll.saveToCameraRoll(context: self.context, userLocation: .peer(message.id.peerId), mediaReference: .message(message: MessageReference(message), media: file))
-                                |> deliverOnMainQueue).start(completed: { [weak self] in
+                                |> filter { $0 >= 1.0 } |> take(1)
+                                |> deliverOnMainQueue).start(next: { [weak self] _ in
                                     guard let self else {
                                         return
                                     }
@@ -3872,7 +3876,8 @@ final class UniversalVideoGalleryItemNode: ZoomableContentGalleryItemNode {
                         f(.default)
                         
                         let _ = (SaveToCameraRoll.saveToCameraRoll(context: context, userLocation: .peer(message.id.peerId), mediaReference: .message(message: MessageReference(message), media: image), video: videoReference)
-                        |> deliverOnMainQueue).start(completed: { [weak self] in
+                        |> filter { $0 >= 1.0 } |> take(1)
+                        |> deliverOnMainQueue).start(next: { [weak self] _ in
                             guard let strongSelf = self else {
                                 return
                             }
