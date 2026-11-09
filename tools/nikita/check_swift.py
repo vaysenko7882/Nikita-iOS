@@ -37,6 +37,8 @@ FILES = [
     "submodules/TelegramCore/Sources/SyncCore/SyncCore_CloudFileMediaResource.swift",
     "submodules/TelegramCore/Sources/State/Fetch.swift",
     "submodules/TelegramCore/Sources/Account/AccountManager.swift",
+    "submodules/TelegramCore/Sources/Account/Account.swift",
+    "submodules/TelegramCore/Sources/Utils/AutomaticCacheEviction.swift",
     "submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift",
     "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift",
     "submodules/TelegramCore/Sources/SyncCore/SyncCore_ArchivedMessageAttribute.swift",

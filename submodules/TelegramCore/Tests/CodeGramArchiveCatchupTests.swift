@@ -265,6 +265,9 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
             return true
         }), true)
         let retention = DeletedMessageArchiveMediaRetention(postbox: self.postbox, delay: 0.02, batchDelay: 0.001)
+        let ready = Atomic<Bool>(value: false)
+        let readyDisposable = retention.initialMediaPinsRestored.start(next: { value in let _ = ready.swap(value) })
+        defer { readyDisposable.dispose() }
         let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), completed = DispatchSemaphore(value: 0)
         let result = Atomic<DeletedMessageArchiveMediaRetentionWork?>(value: nil)
         let index = DeletedMessageArchiveIndex(messageIds: [DeletedMessageArchiveIndexEntry(id)], liveMessageIds: [])
@@ -279,6 +282,7 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
         }
         retention.request(settings: .defaultSettings, index: index)
         XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        XCTAssertFalse(ready.with { $0 }, "An incomplete startup pass must keep automatic eviction parked")
         // The old row has been read and is still decoding. Queue its replacement
         // before releasing that read, then invalidate its catalogue descriptor.
         let rewrite = self.postbox.transaction { transaction -> Void in
@@ -291,15 +295,142 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
             let _ = result.swap(work)
             completed.signal()
         })
+        XCTAssertFalse(ready.with { $0 }, "Invalidating a blocked old pass must not open the startup gate")
         release.signal()
         XCTAssertEqual(completed.wait(timeout: .now() + 10), .success)
         XCTAssertEqual(result.with { $0?.messageReads }, 1, "The invalidated row must be fetched again after the stale callback")
         XCTAssertEqual(result.with { $0?.resourceStats }, 1)
+        XCTAssertTrue(ready.with { $0 }, "The replacement pass must eventually release automatic eviction")
         // A stale descriptor would pin oldFile, allowing ordinary cache cleanup
         // to delete newFile. Check the actual MediaBox keepResource behaviour.
         self.waitForCompletion(mediaBox.removeCachedResources([newFile.resource.id], force: false) |> ignoreValues)
         XCTAssertNotNil(mediaBox.completedResourcePath(id: newFile.resource.id), "The replacement resource must retain its pin")
         XCTAssertEqual(self.wait(self.postbox.transaction { transaction in transaction.getMessage(id)?.text }), "new")
+    }
+
+    func testAutomaticPeerEvictionWaitsForColdArchivePins() throws {
+        let logger = Logger(rootPath: self.path, basePath: self.path + "/cold-logs")
+        logger.logToFile = false
+        logger.logToConsole = false
+        Logger.setSharedLogger(logger)
+        let mediaBox = self.postbox.mediaBox
+        let resource = CloudDocumentMediaResource(datacenterId: 1, fileId: 8_000, accessHash: 1, size: 3,
+            fileReference: Data([1]), fileName: "archive.dat")
+        let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: 8_000), partialReference: nil,
+            resource: resource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil,
+            mimeType: "application/octet-stream", size: 3, attributes: [], alternativeRepresentations: [])
+        let archived = self.id(8_000, namespace: Namespaces.Message.Archived)
+        let control = MediaResourceId("codegram-cold-start-unprotected-control")
+        let archivedPath = mediaBox.resourcePath(resource)
+        let controlPath = mediaBox.storePathsForId(control).complete
+        mediaBox.storeResourceData(resource.id, data: Data([1, 2, 3]), synchronous: true)
+        mediaBox.storeResourceData(control, data: Data([4, 5, 6]), synchronous: true)
+        let oldDate = Date(timeIntervalSinceNow: -7 * 24 * 60 * 60)
+        for path in [archivedPath, controlPath] { try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: path) }
+        for (number, id) in [resource.id, control].enumerated() {
+            mediaBox.storageBox.add(reference: StorageBox.Reference(peerId: self.peer.toInt64(),
+                messageNamespace: UInt8(Namespaces.Message.Archived), messageId: Int32(8_000 + number)),
+                to: Data(id.stringRepresentation.utf8), contentType: MediaResourceUserContentType.file.rawValue)
+        }
+        XCTAssertEqual(self.wait(mediaBox.storageBox.allPeerIds())?.contains(self.peer), true)
+        XCTAssertEqual(self.wait(self.postbox.transaction { transaction -> Bool in
+            let _ = transaction.addMessages([self.message(archived, text: "cold archive", attributes: [UnrelatedArchiveProbeAttribute()], media: [file])], location: .Random)
+            return true
+        }), true)
+        let accountManager = AccountManager<TelegramAccountManagerTypes>(basePath: self.path + "/cold-account-manager",
+            isTemporary: true, isReadOnly: false, useCaches: false, removeDatabaseOnError: true,
+            accessChallenge: AccountManagerAccessChallenge(prepare: { _ in }, resolve: { current, _ in current }, finishInitialization: {}))
+        let _ = self.wait(updateAccountSpecificCacheStorageSettingsInteractively(postbox: self.postbox, { _ in
+            AccountSpecificCacheStorageSettings(peerStorageTimeoutExceptions: [.init(key: self.peer, value: 1)])
+        }))
+        let retention = DeletedMessageArchiveMediaRetention(postbox: self.postbox, delay: 0.02, batchDelay: 0.001)
+        let subscribed = DispatchSemaphore(value: 0), decoding = DispatchSemaphore(value: 0), releaseDecode = DispatchSemaphore(value: 0)
+        let pinsInstalled = DispatchSemaphore(value: 0), releaseEviction = DispatchSemaphore(value: 0), cleaned = DispatchSemaphore(value: 0)
+        let readiness = Signal<Bool, NoError> { subscriber in
+            subscribed.signal()
+            return retention.initialMediaPinsRestored.start(next: { ready in
+                if ready {
+                    pinsInstalled.signal()
+                    let _ = releaseEviction.wait(timeout: .now() + 10)
+                }
+                subscriber.putNext(ready)
+            })
+        }
+        let cleanupDisposable = (mediaBox.didRemoveResources
+        |> filter { !FileManager.default.fileExists(atPath: controlPath) }
+        |> take(1)).start(next: { _ in cleaned.signal() })
+        var eviction: AutomaticCacheEvictionContext? = AutomaticCacheEvictionContext(postbox: self.postbox,
+            accountManager: accountManager, initialMediaRetentionReady: readiness)
+        defer {
+            let _ = eviction
+            eviction = nil
+            cleanupDisposable.dispose()
+            let _ = UnrelatedArchiveProbeAttribute.onNextDecode.swap(nil)
+            releaseDecode.signal(); releaseEviction.signal()
+            retention.releasePins()
+        }
+        XCTAssertEqual(subscribed.wait(timeout: .now() + 5), .success)
+        // Other Postbox work remains available while only cleanup is waiting.
+        XCTAssertEqual(self.wait(self.postbox.transaction { _ in true }), true)
+        let _ = UnrelatedArchiveProbeAttribute.onNextDecode.swap({
+            decoding.signal()
+            let _ = releaseDecode.wait(timeout: .now() + 10)
+        })
+        retention.request(settings: .defaultSettings,
+            index: DeletedMessageArchiveIndex(messageIds: [DeletedMessageArchiveIndexEntry(archived)], liveMessageIds: []))
+        XCTAssertEqual(decoding.wait(timeout: .now() + 5), .success)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archivedPath))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: controlPath), "Automatic peer eviction must remain parked during restoration")
+        releaseDecode.signal()
+        XCTAssertEqual(pinsInstalled.wait(timeout: .now() + 5), .success)
+        // Keep both resources eligible: completedResourcePath may have touched
+        // the archived file while restoring it. Pinning must protect old bytes.
+        for path in [archivedPath, controlPath] { try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: path) }
+        XCTAssertEqual(self.wait(mediaBox.removeCachedResourcesWithResult([resource.id])), [], "The restored archive file must have a real MediaBox pin")
+        releaseEviction.signal()
+        XCTAssertEqual(cleaned.wait(timeout: .now() + 10), .success)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: controlPath), "The actual finite-age peer cleanup must run after restoration")
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: archivedPath)), Data([1, 2, 3]))
+    }
+
+    func testEmptyDisabledAndExplicitlyClearedArchiveReleaseInitialPinGate() {
+        for enabled in [true, false] {
+            let retention = DeletedMessageArchiveMediaRetention(postbox: self.postbox, delay: 0, batchDelay: 0)
+            var settings = DeletedMessageArchiveSettings.defaultSettings
+            settings.isEnabled = enabled
+            XCTAssertEqual(self.wait(retention.initialMediaPinsRestored |> take(1)), false)
+            retention.request(settings: settings, index: .empty)
+            XCTAssertEqual(self.wait(retention.initialMediaPinsRestored |> filter { $0 } |> take(1)), true)
+            retention.releasePins()
+        }
+        let cleared = DeletedMessageArchiveMediaRetention(postbox: self.postbox)
+        XCTAssertEqual(self.wait(cleared.initialMediaPinsRestored |> take(1)), false)
+        cleared.releasePins(markInitialPinsRestored: true)
+        XCTAssertEqual(self.wait(cleared.initialMediaPinsRestored |> filter { $0 } |> take(1)), true)
+    }
+
+    func testCancellingAutomaticEvictionReleasesItsStartupWait() {
+        let accountManager = AccountManager<TelegramAccountManagerTypes>(basePath: self.path + "/cancelled-cleanup-account-manager",
+            isTemporary: true, isReadOnly: false, useCaches: false, removeDatabaseOnError: true,
+            accessChallenge: AccountManagerAccessChallenge(prepare: { _ in }, resolve: { current, _ in current }, finishInitialization: {}))
+        let subscribed = DispatchSemaphore(value: 0), disposed = DispatchSemaphore(value: 0)
+        let ready = ValuePromise<Bool>(false, ignoreRepeated: true)
+        let readiness = Signal<Bool, NoError> { subscriber in
+            subscribed.signal()
+            let disposable = ready.get().start(next: subscriber.putNext)
+            return ActionDisposable {
+                disposable.dispose()
+                disposed.signal()
+            }
+        }
+        var eviction: AutomaticCacheEvictionContext? = AutomaticCacheEvictionContext(postbox: self.postbox,
+            accountManager: accountManager, initialMediaRetentionReady: readiness)
+        XCTAssertNotNil(eviction)
+        XCTAssertEqual(subscribed.wait(timeout: .now() + 5), .success)
+        eviction = nil
+        XCTAssertEqual(disposed.wait(timeout: .now() + 5), .success,
+            "Destroying the context must cancel its pending readiness subscription")
+        ready.set(true)
     }
 
     func testHistoryAndSearchDoNotEagerlyDecodeArchivedRevisions() {

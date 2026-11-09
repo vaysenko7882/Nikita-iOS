@@ -179,6 +179,7 @@ final class DeletedMessageArchiveMediaRetention {
     private weak var postbox: Postbox?
     private let queue = Queue(name: "CodeGram.ArchiveMediaRetention", qos: .utility)
     private let generation = Atomic<Int>(value: 0)
+    private let initialPinsRestored = ValuePromise<Bool>(false, ignoreRepeated: true)
     private let transactionDisposable = MetaDisposable()
     private let delay: Double
     private let batchDelay: Double
@@ -210,6 +211,8 @@ final class DeletedMessageArchiveMediaRetention {
     }
 
     var isAlive: Bool { self.postbox != nil }
+
+    var initialMediaPinsRestored: Signal<Bool, NoError> { self.initialPinsRestored.get() }
 
     func request(settings: DeletedMessageArchiveSettings, index: DeletedMessageArchiveIndex,
         invalidatedIds: Set<MessageId> = [], refreshSizes: Bool = false,
@@ -255,7 +258,7 @@ final class DeletedMessageArchiveMediaRetention {
         }
     }
 
-    func releasePins() {
+    func releasePins(markInitialPinsRestored: Bool = false) {
         let _ = self.generation.modify { $0 + 1 }
         self.queue.async {
             self.suspended = true
@@ -266,6 +269,9 @@ final class DeletedMessageArchiveMediaRetention {
             self.pins.removeAll()
             self.resourceSizes.removeAll()
             self.completions.removeAll()
+            // An explicit user clear removes the protected archive media too.
+            // Replacing a coordinator must not open its previous startup gate.
+            if markInitialPinsRestored { self.initialPinsRestored.set(true) }
         }
     }
 
@@ -419,6 +425,12 @@ final class DeletedMessageArchiveMediaRetention {
                 // The I/O queue may still cancel removal after a new request.
                 // Re-stat next time instead of caching an unconfirmed deletion.
                 for id in removed { self.resourceSizes.removeValue(forKey: id) }
+                // A settings/capture transaction can supersede a large pin-prune
+                // loop. Restore its newer pin set before opening the cold gate.
+                guard self.generation.with({ $0 }) == generation else { self.schedule(); return }
+                // keepResource operations were enqueued on MediaBox before this
+                // signal. Automatic peer eviction may now queue behind them.
+                self.initialPinsRestored.set(true)
                 let callbacks = self.completions
                 self.completions.removeAll()
                 for callback in callbacks { callback(self.work) }
@@ -1326,7 +1338,7 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
 }
 
 func _internal_clearDeletedMessageArchiveMedia(transaction: Transaction, mediaBox: MediaBox) {
-    deletedMessageArchiveMediaRetentions.with({ $0[mediaBox.basePath] })?.releasePins()
+    deletedMessageArchiveMediaRetentions.with({ $0[mediaBox.basePath] })?.releasePins(markInitialPinsRestored: true)
     let index = transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty
     var resourceIds = Set<MediaResourceId>()
     for entry in index.messageIds {
@@ -1387,5 +1399,9 @@ func initializeDeletedMessageArchiveSession(postbox: Postbox) -> Signal<Never, N
         updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: postbox.mediaBox)
     }
     |> ignoreValues
+}
+
+func deletedMessageArchiveInitialMediaPinsRestored(postbox: Postbox) -> Signal<Bool, NoError> {
+    return deletedMessageArchiveMediaRetentions.with({ $0[postbox.mediaBox.basePath]?.initialMediaPinsRestored }) ?? .single(true)
 }
 
