@@ -78,10 +78,10 @@ func codeGramProtectedDirectMediaMessage(_ message: EnqueueMessage, source: Mess
     accountPeerId: PeerId, enabled: Bool, cachedUserData: CachedUserData?) -> EnqueueMessage? {
     guard enabled, destination == accountPeerId, source.id.namespace == Namespaces.Message.Cloud,
         codeGramHasServerCopyProtection(source, cachedUserData: cachedUserData),
-        case let .message(text, attributes, inlineStickers, mediaReference, threadId, reply, story, groupingKey, correlationId, bubbleUp) = message,
+        case let .message(text, requestedAttributes, inlineStickers, mediaReference, threadId, reply, story, groupingKey, correlationId, bubbleUp) = message,
         let mediaReference, mediaReference.media is TelegramMediaImage || mediaReference.media is TelegramMediaFile,
         codeGramSourceMessageReference(mediaReference)?.id == source.id else { return nil }
-    var attributes = attributes
+    var attributes = requestedAttributes
     if !codeGramRequiresMediaUpload(attributes) {
         attributes.append(OutgoingMessageInfoAttribute(uniqueId: 0, flags: [.requiresMediaUpload], acknowledged: false,
             correlationId: nil, bubbleUpEmojiOrStickersets: [], partialReference: nil))
