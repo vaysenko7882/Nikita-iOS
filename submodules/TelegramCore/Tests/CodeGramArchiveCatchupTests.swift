@@ -17,6 +17,23 @@ private final class UnrelatedArchiveProbeAttribute: MessageAttribute {
     func encode(_ encoder: PostboxEncoder) {}
 }
 
+/// Reproduces the pre-14.7 archive association contract without changing Postbox.
+/// Both benchmark arms use the production renderer and the same stored revisions.
+private final class EagerArchiveRevisionLinksAttribute: MessageAttribute {
+    static let register: Void = {
+        declareEncodable(EagerArchiveRevisionLinksAttribute.self, f: { EagerArchiveRevisionLinksAttribute(decoder: $0) })
+    }()
+    let versionIds: [MessageId]
+    var associatedMessageIds: [MessageId] { self.versionIds }
+    init(versionIds: [MessageId]) { self.versionIds = versionIds }
+    required init(decoder: PostboxDecoder) {
+        self.versionIds = decoder.decodeDataForKey("v").map(MessageId.decodeArrayFromData) ?? []
+    }
+    func encode(_ encoder: PostboxEncoder) {
+        encoder.encodeData(MessageId.encodeArrayToData(self.versionIds), forKey: "v")
+    }
+}
+
 final class CodeGramArchiveCatchupTests: XCTestCase {
     private var postbox: Postbox!
     private var path: String!
@@ -27,6 +44,7 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
         try super.setUpWithError()
         initializeAccountManagement()
         let _ = UnrelatedArchiveProbeAttribute.register
+        let _ = EagerArchiveRevisionLinksAttribute.register
         self.path = NSTemporaryDirectory() + "CodeGramArchiveCatchup-" + UUID().uuidString
         let encryption = ValueBoxEncryptionParameters(forceEncryptionIfNoSet: false,
             key: ValueBoxEncryptionParameters.Key(data: Data(repeating: 0, count: 32))!,
@@ -93,6 +111,63 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
         return StoreMessage(id: id, customStableId: nil, globallyUniqueId: nil, groupingKey: nil,
             threadId: nil, timestamp: 100, flags: [.Incoming], tags: [], globalTags: [], localTags: [],
             forwardInfo: nil, authorId: nil, text: text, attributes: attributes, media: [])
+    }
+
+    func testHistoryAndSearchDoNotEagerlyDecodeArchivedRevisions() {
+        let liveId = self.id(42)
+        let revisionCount = 1_000
+        let versionIds = (1 ... revisionCount).map { self.id(Int32($0), namespace: Namespaces.Message.ArchivedVersion) }
+        XCTAssertEqual(self.wait(self.postbox.transaction { transaction -> Bool in
+            let versions = versionIds.enumerated().map { offset, id in
+                self.message(id, text: "previous revision \(offset)", attributes: [
+                    UnrelatedArchiveProbeAttribute(), ArchivedMessageVersionAttribute(capturedAt: Int32(offset))])
+            }
+            let _ = transaction.addMessages(versions + [self.message(liveId, text: "archivehotpathneedle", attributes: [
+                EagerArchiveRevisionLinksAttribute(versionIds: versionIds)])], location: .Random)
+            return true
+        }), true)
+
+        let result = self.wait(self.postbox.transaction { transaction -> ([Int], [Int], Int, Bool) in
+            func measure(_ label: String, _ body: () -> Int) -> (Int, Int) {
+                let _ = UnrelatedArchiveProbeAttribute.reads.swap(0)
+                let started = CFAbsoluteTimeGetCurrent()
+                let rows = body()
+                let reads = UnrelatedArchiveProbeAttribute.reads.with { $0 }
+                print("CodeGram archive render benchmark \(label): rows=\(rows), revision_decodes=\(reads), milliseconds=\((CFAbsoluteTimeGetCurrent() - started) * 1_000)")
+                return (rows, reads)
+            }
+            func workload(_ label: String) -> [Int] {
+                let direct = measure(label + "/getMessage") { transaction.getMessage(liveId) == nil ? 0 : 1 }
+                let history = measure(label + "/history") {
+                    transaction.getMessages(peerId: self.peer, namespace: Namespaces.Message.Cloud,
+                        from: MessageIndex.absoluteUpperBound(), includeFrom: false,
+                        to: MessageIndex.absoluteLowerBound(), limit: 50).count
+                }
+                let search = measure(label + "/search") {
+                    transaction.searchMessages(peerId: self.peer, query: "archivehotpathneedle", tags: nil).count
+                }
+                XCTAssertEqual(direct.0, 1)
+                XCTAssertEqual(history.0, 1)
+                XCTAssertEqual(search.0, 1)
+                return [direct.1, history.1, search.1]
+            }
+            let eagerReads = workload("legacy-eager")
+            transaction.updateMessage(liveId, update: { _ in
+                .update(self.message(liveId, text: "archivehotpathneedle", attributes: [
+                    ArchivedMessageAttribute(originalMessageId: liveId, versionIds: versionIds, deletedAt: nil, sessionId: 1)]))
+            })
+            let lazyReads = workload("production-lazy")
+            let storedIdsPreserved = transaction.getMessage(liveId)?.archivedMessageAttribute?.versionIds == versionIds
+            let menu = measure("production-lazy/explicit-version-menu") {
+                _internal_archivedMessageVersions(transaction: transaction, id: liveId).count
+            }
+            return (eagerReads, lazyReads, menu.1, storedIdsPreserved && menu.0 == revisionCount + 1)
+        })
+        XCTAssertEqual(result?.0, [revisionCount, revisionCount, revisionCount],
+            "Legacy association must reproduce the actual renderer's revision amplification")
+        XCTAssertEqual(result?.1, [0, 0, 0], "Opening a chat, search or message must not render its entire edit history")
+        XCTAssertEqual(result?.2, revisionCount, "Opening the versions menu still loads every stored revision")
+        XCTAssertEqual(result?.3, true, "Stored version IDs and the complete revision history must survive")
     }
 
     func testMixedEditAndDeletesShareOneSnapshotAndRetentionPass() {

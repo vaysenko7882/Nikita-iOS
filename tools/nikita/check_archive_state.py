@@ -31,27 +31,35 @@ def main():
             "struct NikitaRemoteArchiveState:", "\nstruct NikitaRemoteArchiveEvent:")
         index = declaration("submodules/TelegramCore/Sources/Settings/DeletedMessageArchiveSettings.swift",
             "public struct DeletedMessageArchiveSettings:", "\nfunc deletedMessageArchiveSettings(")
+        message_id = declaration("submodules/Postbox/Sources/Message.swift",
+            "public struct MessageId:", "\npublic struct MessageIndex:")
+        attribute_protocol = declaration("submodules/Postbox/Sources/Message.swift",
+            "public protocol MessageAttribute:", "\npublic struct MessageGroupInfo:")
+        archive_attributes = declaration("submodules/TelegramCore/Sources/SyncCore/SyncCore_ArchivedMessageAttribute.swift",
+            "// Consumed by the seed merge", "\npublic extension Message {")
         declarations = temporary / "ProductionArchiveState.swift"
         resource = (ROOT / "submodules/TelegramCore/Sources/Nikita/NikitaArchiveMediaResource.swift").read_text().replace("import Postbox\n", "")
         resource_protocol = (ROOT / "submodules/TelegramCore/Sources/SyncCore/SyncCore_TelegramMediaResource.swift").read_text().replace("import Postbox\n", "")
-        declarations.write_text("import Foundation\n" + state + "\n" + index + "\n" + resource_protocol + "\n" + resource)
+        declarations.write_text("import Foundation\n" + state + "\n" + index + "\n" +
+            resource_protocol + "\n" + resource + "\n" + message_id + "\n" +
+            attribute_protocol + "\n" + archive_attributes)
 
         # These unrelated Postbox dependency types are not exercised by this
         # persistence test. The encoder, decoder, buffers, PreferencesEntry,
-        # state declaration and index-entry declaration are production sources.
+        # state/index, MessageId, MessageAttribute and archive attributes are
+        # production sources. Only unrelated dependency types are stubbed.
         support = temporary / "CodecSupport.swift"
         support.write_text('''import Foundation
 public enum CachedMediaRepresentationKeepDuration {}
-public struct PeerId {
+public struct PeerId: Hashable, Comparable, Codable, CustomStringConvertible {
     let rawValue: Int64
     init(_ value: Int64) { self.rawValue = value }
     func toInt64() -> Int64 { return self.rawValue }
+    public var description: String { return String(self.rawValue) }
+    public static func <(lhs: PeerId, rhs: PeerId) -> Bool { return lhs.rawValue < rhs.rawValue }
 }
-public struct MessageId {
-    let peerId: PeerId
-    let namespace: Int32
-    let id: Int32
-}
+public struct MediaId {}
+public struct StoryId {}
 func postboxLog(_ message: String) {}
 func mdb_cmp_memn(_ left: UnsafeRawPointer, _ leftCount: Int,
     _ right: UnsafeRawPointer, _ rightCount: Int) -> Int32 {
@@ -66,7 +74,7 @@ func mdb_cmp_memn(_ left: UnsafeRawPointer, _ leftCount: Int,
         for part in ("Encoder", "Decoder"):
             sources.extend(sorted((ROOT / "submodules/Postbox/Sources/Utils" / part).glob("*.swift")))
         executable = temporary / "archive-state-check"
-        subprocess.run(["xcrun", "--sdk", "macosx", "swiftc", "-O", "-g", "-parse-as-library",
+        subprocess.run(["xcrun", "--sdk", "macosx", "swiftc", "-Osize", "-whole-module-optimization", "-g", "-warnings-as-errors", "-parse-as-library",
             "-I", str(module), *map(str, sources), str(support), str(declarations),
             str(ROOT / "submodules/TelegramCore/Sources/Nikita/DeletedMessageArchiveBatch.swift"),
             str(ROOT / "tools/nikita/tests/ArchiveStateCheck.swift"), str(objective_c),

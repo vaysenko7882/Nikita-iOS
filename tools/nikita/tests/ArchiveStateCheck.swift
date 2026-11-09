@@ -32,6 +32,7 @@ enum ArchiveStateCheck {
         }
 
         verifyCatchupBatch()
+        verifyLazyArchiveAttribute()
         let empty = roundTrip(NikitaRemoteArchiveState())
         require(empty.pendingVersions.isEmpty && empty.cursor == 0, "Empty state changed")
 
@@ -87,6 +88,28 @@ enum ArchiveStateCheck {
         print("Archive state: empty/populated/repeated-startup round-trips and legacy migration passed.")
         print("VPS media resource: actual Postbox round-trip, large size, account isolation and invalid identity checks passed.")
     }
+}
+
+private func verifyLazyArchiveAttribute() {
+    let original = MessageId(peerId: PeerId(123), namespace: 0, id: 42)
+    let versions = (1 ... 10_000).map {
+        MessageId(peerId: original.peerId, namespace: 10, id: Int32($0))
+    }
+    let attribute = ArchivedMessageAttribute(originalMessageId: original, versionIds: versions,
+        deletedAt: 77, sessionId: 999)
+    declareEncodable(ArchivedMessageAttribute.self, f: { ArchivedMessageAttribute(decoder: $0) })
+    let encoder = PostboxEncoder()
+    encoder.encodeRootObject(attribute)
+    let decoder = PostboxDecoder(buffer: MemoryBuffer(data: encoder.makeData()))
+    guard let restored = decoder.decodeRootObject() as? ArchivedMessageAttribute else {
+        fatalError("Archived message attribute failed actual Postbox round-trip")
+    }
+    require(restored.originalMessageId == original && restored.versionIds == versions &&
+        restored.deletedAt == 77 && restored.sessionId == 999,
+        "Lazy archive rendering must preserve all stored revision metadata")
+    require(restored.associatedMessageIds.isEmpty,
+        "Stored revisions must not become eager associations during normal message rendering")
+    print("Archive attribute: revision_ids=10000, implicit_revision_links=0; metadata preserved by the actual Postbox codec. Database-render timings run in TelegramCoreTests.")
 }
 
 

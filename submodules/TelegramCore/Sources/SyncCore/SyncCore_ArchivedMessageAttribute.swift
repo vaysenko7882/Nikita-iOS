@@ -27,7 +27,10 @@ public final class ArchivedMessageAttribute: MessageAttribute {
     public let sessionId: Int64
 
     public var associatedMessageIds: [MessageId] {
-        return self.versionIds
+        // Associated messages are eagerly rendered for every history row, search
+        // result and getMessage. A revision list can contain thousands of rows;
+        // load it only through archivedMessageVersions when the user opens it.
+        return []
     }
 
     public init(

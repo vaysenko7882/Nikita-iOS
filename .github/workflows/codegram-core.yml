@@ -9,7 +9,11 @@ concurrency:
   group: codegram-core-${{ ((github.ref != 'refs/heads/codex/codegram-14.4-links-profile-icons' && github.ref != 'refs/heads/codex/codegram-14.6-performance-save') || contains(github.event.head_commit.message, '[core]') || github.event_name == 'workflow_dispatch') && github.ref || github.sha }}
   cancel-in-progress: true
 jobs:
+  host-performance:
+    if: (github.ref != 'refs/heads/codex/codegram-14.4-links-profile-icons' && github.ref != 'refs/heads/codex/codegram-14.6-performance-save') || contains(github.event.head_commit.message, '[core]') || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/codegram-performance.yml
   core-tests:
+    needs: host-performance
     if: (github.ref != 'refs/heads/codex/codegram-14.4-links-profile-icons' && github.ref != 'refs/heads/codex/codegram-14.6-performance-save') || contains(github.event.head_commit.message, '[core]') || github.event_name == 'workflow_dispatch'
     runs-on: xcode-27
     timeout-minutes: 90

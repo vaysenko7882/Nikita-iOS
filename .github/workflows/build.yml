@@ -9,7 +9,11 @@ concurrency:
   group: ${{ (github.ref == 'refs/heads/nikita/v2' || contains(github.event.head_commit.message, '[build ipa]') || github.event_name == 'workflow_dispatch') && 'nikita-device-build' || format('nikita-device-skipped-{0}', github.sha) }}
   cancel-in-progress: false
 jobs:
+  host-performance:
+    if: github.ref == 'refs/heads/nikita/v2' || contains(github.event.head_commit.message, '[build ipa]') || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/codegram-performance.yml
   build:
+    needs: host-performance
     if: github.ref == 'refs/heads/nikita/v2' || contains(github.event.head_commit.message, '[build ipa]') || github.event_name == 'workflow_dispatch'
     runs-on: xcode-27
     timeout-minutes: 360
@@ -138,7 +142,7 @@ jobs:
         run: |
           python3 tools/nikita/verify_release_bundle.py "$RUNNER_TEMP/codegram-release" \
             --expected-sha "$EXPECTED_SOURCE_SHA" --expected-build "$EXPECTED_BUILD_NUMBER" \
-            --expected-version 14.6.0 --report "$RUNNER_TEMP/codegram-release-verification.json"
+            --expected-version 14.7.0 --report "$RUNNER_TEMP/codegram-release-verification.json"
       - name: Retain release integrity report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

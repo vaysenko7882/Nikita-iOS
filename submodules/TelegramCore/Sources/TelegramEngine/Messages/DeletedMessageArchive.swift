@@ -270,6 +270,9 @@ private func isVolatileEditedMessageAttribute(_ attribute: MessageAttribute) -> 
         || attribute is ChannelMessageStateVersionAttribute
         || attribute is PeerGroupMessageStateVersionAttribute
         || attribute is TranslationMessageAttribute
+        || attribute is ConsumableContentMessageAttribute
+        || attribute is ConsumablePersonalMentionMessageAttribute
+        || attribute is ReplyThreadMessageAttribute
 }
 
 private func encodedContentAttributes(_ attributes: [MessageAttribute]) -> [Data] {
@@ -285,12 +288,145 @@ private func encodedContentAttributes(_ attributes: [MessageAttribute]) -> [Data
     }
 }
 
+private func archiveImageRepresentationsAreEqual(_ lhs: [TelegramMediaImageRepresentation], _ rhs: [TelegramMediaImageRepresentation]) -> Bool {
+    guard lhs.count == rhs.count else {
+        return false
+    }
+    for i in 0 ..< lhs.count {
+        if !lhs[i].isSemanticallyEqual(to: rhs[i]) {
+            return false
+        }
+    }
+    return true
+}
+
+private func archiveOptionalMediaAreEqual(_ lhs: Media?, _ rhs: Media?) -> Bool {
+    switch (lhs, rhs) {
+    case let (.some(lhs), .some(rhs)):
+        return archiveMediaAreEqual(lhs, rhs)
+    case (nil, nil):
+        return true
+    default:
+        return false
+    }
+}
+
+private func archiveExtendedMediaAreEqual(_ lhs: TelegramExtendedMedia, _ rhs: TelegramExtendedMedia) -> Bool {
+    if case let .full(lhsMedia) = lhs, case let .full(rhsMedia) = rhs {
+        return archiveMediaAreEqual(lhsMedia, rhsMedia)
+    }
+    return lhs == rhs
+}
+
+private func archiveLoadedWebpageContentsAreEqual(_ lhs: TelegramMediaWebpageLoadedContent, _ rhs: TelegramMediaWebpageLoadedContent) -> Bool {
+    guard lhs.url == rhs.url,
+        lhs.displayUrl == rhs.displayUrl,
+        lhs.hash == rhs.hash,
+        lhs.type == rhs.type,
+        lhs.websiteName == rhs.websiteName,
+        lhs.title == rhs.title,
+        lhs.text == rhs.text,
+        lhs.embedUrl == rhs.embedUrl,
+        lhs.embedType == rhs.embedType,
+        lhs.embedSize == rhs.embedSize,
+        lhs.duration == rhs.duration,
+        lhs.author == rhs.author,
+        lhs.isMediaLargeByDefault == rhs.isMediaLargeByDefault,
+        lhs.imageIsVideoCover == rhs.imageIsVideoCover else {
+        return false
+    }
+    return archiveOptionalMediaAreEqual(lhs.image, rhs.image)
+        && archiveOptionalMediaAreEqual(lhs.file, rhs.file)
+        && archiveOptionalMediaAreEqual(lhs.story, rhs.story)
+        && lhs.attributes == rhs.attributes
+        && lhs.instantPage == rhs.instantPage
+}
+
+private func archiveMediaAreEqual(_ lhs: Media, _ rhs: Media) -> Bool {
+    // Cloud file references and access hashes are refreshed fetch credentials.
+    // Strict media equality turns a history refresh into an archived edit. Keep
+    // content fields explicit: general semantic equality omits file attributes,
+    // covers, emoji markup and some video representation details.
+    if let lhs = lhs as? TelegramMediaFile {
+        guard let rhs = rhs as? TelegramMediaFile,
+            lhs.fileId == rhs.fileId,
+            lhs.partialReference == rhs.partialReference,
+            lhs.resource.id == rhs.resource.id,
+            archiveImageRepresentationsAreEqual(lhs.previewRepresentations, rhs.previewRepresentations),
+            lhs.videoThumbnails.count == rhs.videoThumbnails.count,
+            lhs.immediateThumbnailData == rhs.immediateThumbnailData,
+            lhs.size == rhs.size,
+            lhs.mimeType == rhs.mimeType,
+            lhs.attributes == rhs.attributes,
+            lhs.alternativeRepresentations.count == rhs.alternativeRepresentations.count else {
+            return false
+        }
+        for i in 0 ..< lhs.videoThumbnails.count {
+            if lhs.videoThumbnails[i].dimensions != rhs.videoThumbnails[i].dimensions
+                || lhs.videoThumbnails[i].resource.id != rhs.videoThumbnails[i].resource.id {
+                return false
+            }
+        }
+        if !archiveOptionalMediaAreEqual(lhs.videoCover, rhs.videoCover) {
+            return false
+        }
+        for i in 0 ..< lhs.alternativeRepresentations.count {
+            if !archiveMediaAreEqual(lhs.alternativeRepresentations[i], rhs.alternativeRepresentations[i]) {
+                return false
+            }
+        }
+        return true
+    } else if let lhs = lhs as? TelegramMediaImage {
+        guard let rhs = rhs as? TelegramMediaImage,
+            lhs.imageId == rhs.imageId,
+            archiveImageRepresentationsAreEqual(lhs.representations, rhs.representations),
+            lhs.videoRepresentations.count == rhs.videoRepresentations.count,
+            lhs.immediateThumbnailData == rhs.immediateThumbnailData,
+            lhs.emojiMarkup == rhs.emojiMarkup,
+            lhs.partialReference == rhs.partialReference,
+            lhs.flags == rhs.flags else {
+            return false
+        }
+        for i in 0 ..< lhs.videoRepresentations.count {
+            if lhs.videoRepresentations[i].dimensions != rhs.videoRepresentations[i].dimensions
+                || lhs.videoRepresentations[i].resource.id != rhs.videoRepresentations[i].resource.id
+                || lhs.videoRepresentations[i].startTimestamp != rhs.videoRepresentations[i].startTimestamp {
+                return false
+            }
+        }
+        return archiveOptionalMediaAreEqual(lhs.video, rhs.video)
+    } else if let lhs = lhs as? TelegramMediaWebpage {
+        guard let rhs = rhs as? TelegramMediaWebpage, lhs.webpageId == rhs.webpageId else {
+            return false
+        }
+        switch (lhs.content, rhs.content) {
+        case let (.Loaded(lhsContent), .Loaded(rhsContent)):
+            return archiveLoadedWebpageContentsAreEqual(lhsContent, rhsContent)
+        default:
+            return lhs.isEqual(to: rhs)
+        }
+    } else if let lhs = lhs as? TelegramMediaPaidContent {
+        guard let rhs = rhs as? TelegramMediaPaidContent,
+            lhs.amount == rhs.amount,
+            lhs.extendedMedia.count == rhs.extendedMedia.count else {
+            return false
+        }
+        for i in 0 ..< lhs.extendedMedia.count {
+            if !archiveExtendedMediaAreEqual(lhs.extendedMedia[i], rhs.extendedMedia[i]) {
+                return false
+            }
+        }
+        return true
+    }
+    return lhs.isEqual(to: rhs)
+}
+
 private func mediaArraysAreEqual(_ lhs: [Media], _ rhs: [Media]) -> Bool {
     if lhs.count != rhs.count {
         return false
     }
     for i in 0 ..< lhs.count {
-        if !lhs[i].isEqual(to: rhs[i]) {
+        if !archiveMediaAreEqual(lhs[i], rhs[i]) {
             return false
         }
     }

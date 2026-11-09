@@ -46,9 +46,7 @@ struct ChatTopVisibleMessageRange: Equatable {
     var isLoading: Bool
 }
 
-private var historyMessageCount: Int {
-    return MessageFilterSettingsStore.shared.current.isActive ? 512 : 44
-}
+private let historyMessageCount = MessageFilterHistoryWindow.initialMessageCount
 
 private func maxTrailingFilteredIncomingMessageIndex(view: MessageHistoryView, accountPeerId: PeerId, settings: MessageFilterSettings) -> MessageIndex? {
     guard settings.isActive, view.laterId == nil, !view.holeLater else {
@@ -103,6 +101,15 @@ private func filteredUnseenPersonalMentionMessageIds(view: MessageHistoryView, a
 }
 
 private extension ChatHistoryLocation {
+    var messageCount: Int? {
+        switch self {
+        case let .Initial(count), let .InitialSearch(_, count, _, _, _), let .Navigation(_, _, count, _):
+            return count
+        case .Scroll:
+            return nil
+        }
+    }
+
     func withMessageCount(_ count: Int) -> ChatHistoryLocation? {
         switch self {
         case let .Initial(currentCount):
@@ -2198,9 +2205,28 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
             let (contentSettings, messageFilterSettings, deletedMessageArchiveSettings) = contentSettingsAndMessageFilter
             let (historyAppearsCleared, pendingUnpinnedAllMessages, pendingRemovedMessages, currentlyPlayingMessageIdAndType, scrollToMessageId, chatHasBots, allAdMessages) = promises
 
-            if messageFilterSettings.isActive, let strongSelf = self, let location = update.2, let expandedLocation = location.content.withMessageCount(historyMessageCount) {
-                strongSelf.chatHistoryLocationValue = ChatHistoryLocationInput(content: expandedLocation, id: strongSelf.takeNextHistoryLocationId())
-                return
+            if messageFilterSettings.isActive,
+               case let .HistoryView(view, _, _, _, _, _, _) = update.0,
+               !view.isLoading,
+               let strongSelf = self,
+               let location = update.2,
+               location == strongSelf.chatHistoryLocationValue,
+               let currentCount = location.content.messageCount {
+                var hiddenMessageCount = 0
+                for entry in view.entries {
+                    if let author = entry.message.author, messageFilterSettings.hidesMessages(fromAuthorId: author.id.toInt64()) {
+                        hiddenMessageCount += 1
+                    }
+                }
+                if let expandedCount = MessageFilterHistoryWindow.expandedMessageCount(
+                    currentCount: currentCount,
+                    loadedMessageCount: view.entries.count,
+                    hiddenMessageCount: hiddenMessageCount,
+                    hasMoreMessages: view.earlierId != nil || view.laterId != nil || view.holeEarlier || view.holeLater
+                ), let expandedLocation = location.content.withMessageCount(expandedCount) {
+                    strongSelf.chatHistoryLocationValue = ChatHistoryLocationInput(content: expandedLocation, id: strongSelf.takeNextHistoryLocationId())
+                    return
+                }
             }
             
             if measure_isFirstTime {
