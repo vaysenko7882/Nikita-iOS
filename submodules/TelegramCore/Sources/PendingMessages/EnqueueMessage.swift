@@ -153,6 +153,15 @@ func resentReplySubject(_ attribute: ReplyMessageAttribute) -> EngineMessageRepl
     return EngineMessageReplySubject(messageId: attribute.messageId, quote: attribute.isQuote ? attribute.quote : nil, innerSubject: attribute.innerSubject)
 }
 
+/// Older pending messages may store the only fetch source in outgoing info,
+/// independently of the medium's own partial reference or any upload policy bit.
+func resentMessageMediaReference(_ media: Media, attributes: [MessageAttribute]) -> AnyMediaReference {
+    if let partialReference = attributes.compactMap({ ($0 as? OutgoingMessageInfoAttribute)?.partialReference }).first {
+        return partialReference.mediaReference(media)
+    }
+    return .standalone(media: media)
+}
+
 public enum EnqueueMessage {
     case message(text: String, attributes: [MessageAttribute], inlineStickers: [MediaId: Media], mediaReference: AnyMediaReference?, threadId: Int64?, replyToMessageId: EngineMessageReplySubject?, replyToStoryId: StoryId?, localGroupingKey: Int64?, correlationId: Int64?, bubbleUpEmojiOrStickersets: [ItemCollectionId])
     case forward(source: MessageId, threadId: Int64?, grouping: EnqueueMessageGrouping, attributes: [MessageAttribute], correlationId: Int64?)
@@ -730,6 +739,10 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
     for message in messages {
         switch message {
             case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets):
+                if codeGramRequiresMediaUpload(attributes) {
+                    signals.append(.single((true, message)))
+                    continue
+                }
                 if let mediaReference = mediaReference {
                     signals.append(opportunisticallyTransformMessageWithMedia(network: network, postbox: postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, mediaReference: mediaReference, userInteractive: userInteractive)
                     |> map { result -> (Bool, EnqueueMessage) in
@@ -747,11 +760,28 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
 
 public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
     account.temporarilyRevealGhostModePresence()
-    let signal: Signal<[(Bool, EnqueueMessage)], NoError>
-    if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {
-        signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)
+    let prepared: Signal<[EnqueueMessage], NoError>
+    if peerId == account.peerId, NikitaSettingsStore.shared.allowsProtectedExport,
+        messages.contains(where: { message in
+            if case let .message(_, _, _, reference?, _, _, _, _, _, _) = message {
+                return codeGramSourceMessageReference(reference)?.id != nil
+            }
+            return false
+        }) {
+        // Mark received media before an optional editor transform can strip its
+        // source reference. Ordinary sends do not need this extra transaction.
+        prepared = account.postbox.transaction { transaction in
+            return messages.map { prepareCodeGramProtectedDirectMediaMessage(transaction: transaction, message: $0,
+                destination: peerId, accountPeerId: account.peerId) }
+        }
     } else {
-        signal = .single(messages.map { (false, $0) })
+        prepared = .single(messages)
+    }
+    let signal = prepared |> mapToSignal { messages -> Signal<[(Bool, EnqueueMessage)], NoError> in
+        if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {
+            return opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)
+        }
+        return .single(messages.map { (false, $0) })
     }
     for storyId in messages.compactMap(\.replyToStoryId) {
         let _ = _internal_commitGhostModeStoryReadState(account: account, storyId: storyId).startStandalone()
@@ -878,7 +908,7 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
                     if let forwardSource = forwardSource {
                         messages.append(.forward(source: forwardSource, threadId: nil, grouping: .auto, attributes: filteredAttributes, correlationId: nil))
                     } else {
-                        messages.append(.message(text: message.text, attributes: filteredAttributes, inlineStickers: [:], mediaReference: message.media.first.flatMap(AnyMediaReference.standalone), threadId: message.threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: message.groupingKey, correlationId: nil, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets))
+                        messages.append(.message(text: message.text, attributes: filteredAttributes, inlineStickers: [:], mediaReference: message.media.first.map { resentMessageMediaReference($0, attributes: message.attributes) }, threadId: message.threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: message.groupingKey, correlationId: nil, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets))
                     }
                 }
             }
@@ -886,6 +916,17 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
         }
         _internal_deleteMessages(transaction: transaction, mediaBox: account.postbox.mediaBox, ids: removeMessageIds, deleteMedia: false)
     }
+}
+
+private func prepareCodeGramProtectedDirectMediaMessage(transaction: Transaction, message: EnqueueMessage,
+    destination: PeerId, accountPeerId: PeerId) -> EnqueueMessage {
+    guard destination == accountPeerId, NikitaSettingsStore.shared.allowsProtectedExport,
+        case let .message(_, _, _, reference?, _, _, _, _, _, _) = message,
+        let sourceId = codeGramSourceMessageReference(reference)?.id,
+        let source = transaction.getMessage(sourceId) else { return message }
+    return codeGramProtectedDirectMediaMessage(message, source: source, destination: destination,
+        accountPeerId: accountPeerId, enabled: true,
+        cachedUserData: transaction.getPeerCachedData(peerId: sourceId.peerId) as? CachedUserData) ?? message
 }
 
 func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)], disableAutoremove: Bool = false, transformGroupingKeysWithPeerId: Bool = false) -> [MessageId?] {
@@ -942,6 +983,8 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
         
         switch message {
             case let .message(_, attributes, _, _, threadId, replyToMessageId, _, _, _, _):
+                updatedMessage = prepareCodeGramProtectedDirectMediaMessage(transaction: transaction, message: updatedMessage,
+                    destination: peerId, accountPeerId: account.peerId)
                 if let replyToMessageId = replyToMessageId, (replyToMessageId.messageId.peerId != peerId && peerId.namespace == Namespaces.Peer.SecretChat), let replyMessage = transaction.getMessage(replyToMessageId.messageId) {
                     var canBeForwarded = true
                     if replyMessage.id.namespace != Namespaces.Message.Cloud {

@@ -5278,7 +5278,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 }
                 var file: TelegramMediaFile?
                 for media in message.media {
-                    if let mediaFile = media as? TelegramMediaFile, mediaFile.isMusic {
+                    if let mediaFile = media as? TelegramMediaFile, !mediaFile.isVideo {
                         file = mediaFile
                     }
                 }

@@ -55,6 +55,7 @@ jobs:
           python3 build-system/Make/PostboxImportCheck.py
           python3 tools/nikita/check_matte_ui.py
           python3 tools/nikita/check_archive_state.py
+          python3 tools/nikita/check_external_share.py
           xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift tools/nikita/tests/VoiceProcessorCheck.swift -o "$RUNNER_TEMP/nikita-voice-check"
           "$RUNNER_TEMP/nikita-voice-check"
           xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/CodeGramEnergyPolicy.swift tools/nikita/tests/EnergyPolicyCheck.swift -o "$RUNNER_TEMP/codegram-energy-check"

@@ -105,6 +105,11 @@ FILES += [
     "submodules/TelegramCore/Sources/TelegramEngine/Privacy/BlockedPeersPagination.swift",
     "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift",
     "submodules/TelegramCore/Tests/CodeGramArchiveCatchupTests.swift",
+    "submodules/TelegramUI/Sources/SaveMediaToFiles.swift",
+    "submodules/TelegramUI/Sources/ChatController.swift",
+    "submodules/TelegramUI/Sources/OpenChatMessage.swift",
+    "submodules/ShareController/Sources/ShareController.swift",
+    "submodules/ShareController/Sources/ShareControllerNode.swift",
 ]
 for relative in FILES:
     subprocess.run(["xcrun", "swiftc", "-frontend", "-parse", str(ROOT / relative)], check=True)

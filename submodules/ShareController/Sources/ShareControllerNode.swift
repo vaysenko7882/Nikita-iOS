@@ -26,6 +26,7 @@ enum ShareState {
 
 enum ShareExternalState {
     case preparing
+    case failed
     case done
 }
 
@@ -1735,6 +1736,24 @@ final class ShareControllerNode: ViewControllerTracingNode, ASScrollViewDelegate
                                     strongSelf.ready.set(.single(true))
                                 }
                             }
+                        case .failed:
+                            if reportReady { strongSelf.ready.set(.single(true)) }
+                            let transition = ContainedViewLayoutTransition.immediate
+                            transition.updateAlpha(node: strongSelf.actionButtonNode, alpha: 1.0)
+                            transition.updateAlpha(node: strongSelf.inputFieldNode, alpha: 1.0)
+                            transition.updateAlpha(node: strongSelf.actionSeparatorNode, alpha: 1.0)
+                            transition.updateAlpha(node: strongSelf.actionsBackgroundNode, alpha: 1.0)
+                            if let node = strongSelf.startAtTimestampNode { transition.updateAlpha(node: node, alpha: 1.0) }
+                            if let peersContentNode = strongSelf.peersContentNode {
+                                strongSelf.transitionToContentNode(peersContentNode, fastOut: true)
+                            }
+                            let needsDismissal = strongSelf.peersContentNode == nil
+                            strongSelf.present?(standardTextAlertController(theme: AlertControllerTheme(presentationData: strongSelf.presentationData), title: nil,
+                                text: strongSelf.presentationData.strings.Login_UnknownError,
+                                actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: { [weak self] in
+                                    guard needsDismissal, let self else { return }
+                                    self.animateOut(shared: false, completion: { [weak self] in self?.dismiss?(false) })
+                                })]))
                         case .done:
                             if let loadingTimestamp = loadingTimestamp {
                                 let minDelay = 0.6

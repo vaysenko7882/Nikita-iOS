@@ -124,4 +124,90 @@ final class CodeGramProtectedMessageCopyTests: XCTestCase {
         let referencedVideo = video.withUpdatedPartialReference(ownReference)
         XCTAssertTrue(codeGramPhotoVideoForUpload(referencedVideo, photo: image) === referencedVideo)
     }
+
+    private func directFile() -> TelegramMediaFile {
+        return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: 8), partialReference: nil,
+            resource: LocalFileMediaResource(fileId: 9), previewRepresentations: [], videoThumbnails: [],
+            immediateThumbnailData: nil, mimeType: "audio/ogg", size: 100,
+            attributes: [.Audio(isVoice: true, duration: 2, title: nil, performer: nil, waveform: nil)], alternativeRepresentations: [])
+    }
+
+    private func directMessage(_ reference: AnyMediaReference) -> EnqueueMessage {
+        return .message(text: "My own caption", attributes: [NotificationInfoMessageAttribute(flags: .muted)],
+            inlineStickers: [MediaId(namespace: Namespaces.Media.CloudFile, id: 8): reference.media],
+            mediaReference: reference, threadId: 7,
+            replyToMessageId: EngineMessageReplySubject(messageId: self.source().id, quote: nil, innerSubject: nil),
+            replyToStoryId: StoryId(peerId: self.channelId, id: 99), localGroupingKey: 200, correlationId: 300,
+            bubbleUpEmojiOrStickersets: [ItemCollectionId(namespace: 1, id: 5)])
+    }
+
+    func testDirectMediaSendPreservesAuthoredFieldsAndFetchSource() {
+        let file = self.directFile()
+        let source = self.source(media: [file])
+        let requested = self.directMessage(.message(message: MessageReference(source), media: file))
+        guard let prepared = codeGramProtectedDirectMediaMessage(requested, source: source, destination: self.accountId,
+            accountPeerId: self.accountId, enabled: true, cachedUserData: nil),
+            case let .message(text, attributes, stickers, reference, threadId, reply, story, grouping, correlation, bubbleUp) = prepared,
+            case let .message(message, media)? = reference,
+            let copiedFile = media as? TelegramMediaFile else { return XCTFail("Direct media was not prepared") }
+        XCTAssertEqual(text, "My own caption")
+        XCTAssertEqual(stickers.count, 1)
+        XCTAssertEqual(threadId, 7)
+        XCTAssertEqual(reply?.messageId, source.id)
+        XCTAssertEqual(story, StoryId(peerId: self.channelId, id: 99))
+        XCTAssertEqual(grouping, 200)
+        XCTAssertEqual(correlation, 300)
+        XCTAssertEqual(bubbleUp, [ItemCollectionId(namespace: 1, id: 5)])
+        XCTAssertTrue(attributes.contains(where: { ($0 as? NotificationInfoMessageAttribute)?.flags.contains(.muted) == true }))
+        XCTAssertTrue(codeGramRequiresMediaUpload(attributes))
+        XCTAssertEqual(message.id, source.id)
+        XCTAssertEqual(copiedFile.partialReference, .message(message: MessageReference(source)))
+        XCTAssertTrue(copiedFile.isVoice)
+        XCTAssertNil(file.partialReference)
+        let twice = codeGramProtectedDirectMediaMessage(prepared, source: source, destination: self.accountId,
+            accountPeerId: self.accountId, enabled: true, cachedUserData: nil)
+        XCTAssertEqual(twice?.attributes.filter { $0 is OutgoingMessageInfoAttribute }.count, 1,
+            "Preflight and transaction preparation must be idempotent")
+    }
+
+    func testStandaloneDirectMediaFindsItsStoredMessageReference() {
+        let file = self.directFile()
+        let source = self.source(media: [file])
+        let reference = AnyMediaReference.standalone(media: file.withUpdatedPartialReference(.message(message: MessageReference(source))))
+        XCTAssertEqual(codeGramSourceMessageReference(reference)?.id, source.id)
+        let result = codeGramProtectedDirectMediaMessage(self.directMessage(reference), source: source,
+            destination: self.accountId, accountPeerId: self.accountId, enabled: true, cachedUserData: nil)
+        XCTAssertTrue(codeGramRequiresMediaUpload(result?.attributes ?? []))
+    }
+
+    func testDirectMediaScopeDoesNotChangeOtherSends() {
+        let file = self.directFile()
+        let source = self.source(media: [file])
+        let requested = self.directMessage(.message(message: MessageReference(source), media: file))
+        XCTAssertNil(codeGramProtectedDirectMediaMessage(requested, source: source, destination: self.accountId,
+            accountPeerId: self.accountId, enabled: false, cachedUserData: nil))
+        XCTAssertNil(codeGramProtectedDirectMediaMessage(requested, source: source, destination: self.channelId,
+            accountPeerId: self.accountId, enabled: true, cachedUserData: nil))
+        XCTAssertNil(codeGramProtectedDirectMediaMessage(requested, source: self.source(protected: false, media: [file]),
+            destination: self.accountId, accountPeerId: self.accountId, enabled: true, cachedUserData: nil))
+        XCTAssertNil(codeGramProtectedDirectMediaMessage(self.directMessage(.standalone(media: file)), source: source,
+            destination: self.accountId, accountPeerId: self.accountId, enabled: true, cachedUserData: nil))
+    }
+
+    func testLegacyRetryRecoversSourceStoredOnlyInOutgoingInfo() {
+        let file = self.directFile()
+        let source = self.source(media: [file])
+        let legacyInfo = OutgoingMessageInfoAttribute(uniqueId: 42, flags: [], acknowledged: false,
+            correlationId: nil, bubbleUpEmojiOrStickersets: [],
+            partialReference: .message(message: MessageReference(source)))
+        XCTAssertFalse(codeGramRequiresMediaUpload([legacyInfo]))
+        XCTAssertNil(file.partialReference)
+        let recovered = resentMessageMediaReference(file, attributes: [legacyInfo])
+        XCTAssertEqual(codeGramSourceMessageReference(recovered)?.id, source.id)
+        let retry = codeGramProtectedDirectMediaMessage(self.directMessage(recovered), source: source,
+            destination: self.accountId, accountPeerId: self.accountId, enabled: true, cachedUserData: nil)
+        XCTAssertTrue(codeGramRequiresMediaUpload(retry?.attributes ?? []))
+        XCTAssertNil(codeGramSourceMessageReference(resentMessageMediaReference(file, attributes: [])),
+            "Unreferenced local uploads must remain standalone")
+    }
 }

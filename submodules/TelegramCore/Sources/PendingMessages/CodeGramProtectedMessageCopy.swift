@@ -60,6 +60,48 @@ func codeGramRequiresMediaUpload(_ attributes: [MessageAttribute]) -> Bool {
     return attributes.contains(where: { ($0 as? OutgoingMessageInfoAttribute)?.flags.contains(.requiresMediaUpload) == true })
 }
 
+/// Audio-player and share-sheet sends already request a new message, rather than
+/// a forward. Their source may be carried on the wrapper or on the stored medium.
+func codeGramSourceMessageReference(_ reference: AnyMediaReference) -> MessageReference? {
+    if case let .message(message, _) = reference { return message }
+    let partialReference: PartialMediaReference?
+    if let file = reference.media as? TelegramMediaFile {
+        partialReference = file.partialReference
+    } else if let image = reference.media as? TelegramMediaImage {
+        partialReference = image.partialReference
+    } else { partialReference = nil }
+    if case let .message(message)? = partialReference { return message }
+    return nil
+}
+
+func codeGramProtectedDirectMediaMessage(_ message: EnqueueMessage, source: Message, destination: PeerId,
+    accountPeerId: PeerId, enabled: Bool, cachedUserData: CachedUserData?) -> EnqueueMessage? {
+    guard enabled, destination == accountPeerId, source.id.namespace == Namespaces.Message.Cloud,
+        codeGramHasServerCopyProtection(source, cachedUserData: cachedUserData),
+        case let .message(text, attributes, inlineStickers, mediaReference, threadId, reply, story, groupingKey, correlationId, bubbleUp) = message,
+        let mediaReference, mediaReference.media is TelegramMediaImage || mediaReference.media is TelegramMediaFile,
+        codeGramSourceMessageReference(mediaReference)?.id == source.id else { return nil }
+    var attributes = attributes
+    if !codeGramRequiresMediaUpload(attributes) {
+        attributes.append(OutgoingMessageInfoAttribute(uniqueId: 0, flags: [.requiresMediaUpload], acknowledged: false,
+            correlationId: nil, bubbleUpEmojiOrStickersets: [], partialReference: nil))
+    }
+    let sourceReference = MessageReference(source)
+    let partialReference = PartialMediaReference.message(message: sourceReference)
+    let media: Media
+    if let file = mediaReference.media as? TelegramMediaFile {
+        media = file.withUpdatedPartialReference(partialReference)
+    } else if let image = mediaReference.media as? TelegramMediaImage {
+        media = TelegramMediaImage(imageId: image.imageId, representations: image.representations,
+            videoRepresentations: image.videoRepresentations, immediateThumbnailData: image.immediateThumbnailData,
+            emojiMarkup: image.emojiMarkup, reference: image.reference, partialReference: partialReference, flags: image.flags, video: image.video)
+    } else { return nil }
+    return .message(text: text, attributes: attributes, inlineStickers: inlineStickers,
+        mediaReference: .message(message: sourceReference, media: media), threadId: threadId,
+        replyToMessageId: reply, replyToStoryId: story, localGroupingKey: groupingKey,
+        correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUp)
+}
+
 /// The paired document is part of its photo's message, although API photo parsing
 /// does not attach that message reference to the nested file itself.
 func codeGramPhotoVideoForUpload(_ video: TelegramMediaFile, photo: TelegramMediaImage) -> TelegramMediaFile {
