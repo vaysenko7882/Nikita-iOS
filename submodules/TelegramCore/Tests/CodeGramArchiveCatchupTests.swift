@@ -60,6 +60,17 @@ private let archiveBenchmarkSeedConfiguration: SeedConfiguration = {
 }()
 
 final class CodeGramArchiveCatchupTests: XCTestCase {
+    // Other suites replace Logger.shared. Keep this owner alive for the process
+    // so its queue-owned short-log file is not deinitialized on a test thread.
+    private static let logger: Logger = {
+        let path = NSTemporaryDirectory() + "codegram-archive-catchup-tests-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        let logger = Logger(rootPath: path, basePath: path)
+        logger.logToFile = false
+        logger.logToConsole = false
+        return logger
+    }()
+
     private var postbox: Postbox!
     private var path: String!
     private let peer = PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(700))
@@ -309,10 +320,7 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
     }
 
     func testAutomaticPeerEvictionWaitsForColdArchivePins() throws {
-        let logger = Logger(rootPath: self.path, basePath: self.path + "/cold-logs")
-        logger.logToFile = false
-        logger.logToConsole = false
-        Logger.setSharedLogger(logger)
+        Logger.setSharedLogger(Self.logger)
         let mediaBox = self.postbox.mediaBox
         let resource = CloudDocumentMediaResource(datacenterId: 1, fileId: 8_000, accessHash: 1, size: 3,
             fileReference: Data([1]), fileName: "archive.dat")
