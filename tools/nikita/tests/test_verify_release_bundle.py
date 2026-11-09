@@ -69,7 +69,7 @@ class ReleaseBundleCheck(unittest.TestCase):
         (self.output / "Build.json.sha256").write_text(hashlib.sha256(metadata.read_bytes()).hexdigest() + "  Build.json\n")
 
     def verify(self):
-        return release.verify(self.output, expected_sha=self.sha, expected_build=self.build, root=self.root)
+        return release.verify(self.output, expected_sha=self.sha, expected_build=self.build, expected_version="14.5.0", root=self.root)
 
     def test_accepts_six_device_binaries_and_twenty_four_icons(self):
         self.write_bundle()

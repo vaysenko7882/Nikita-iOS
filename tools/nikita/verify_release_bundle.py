@@ -121,7 +121,7 @@ def verify_png(data, size, filename):
     return dict(path=filename, size=[width, height], sha256=hashlib.sha256(data).hexdigest())
 
 
-def verify(directory, *, expected_sha, expected_build, expected_version="14.5.0", root=ROOT):
+def verify(directory, *, expected_sha, expected_build, expected_version="14.7.0", root=ROOT):
     directory, root = Path(directory), Path(root)
     require(re.fullmatch(r"[0-9a-f]{40}", expected_sha) is not None, "Expected a full source commit SHA")
     require(str(expected_build).isdigit() and int(expected_build) > 0, "Expected a positive workflow build number")
@@ -185,7 +185,7 @@ def main():
     parser.add_argument("directory", type=Path)
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--expected-build", required=True)
-    parser.add_argument("--expected-version", default="14.5.0")
+    parser.add_argument("--expected-version", default="14.7.0")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     try:

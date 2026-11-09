@@ -1665,7 +1665,8 @@ public class Account {
         }
         self.restartConfigurationUpdates()
         
-        self.automaticCacheEvictionContext = AutomaticCacheEvictionContext(postbox: postbox, accountManager: accountManager)
+        self.automaticCacheEvictionContext = AutomaticCacheEvictionContext(postbox: postbox, accountManager: accountManager,
+            initialMediaRetentionReady: deletedMessageArchiveInitialMediaPinsRestored(postbox: postbox))
         
         /*#if DEBUG
         self.managedOperationsDisposable.add(debugFetchAllStickers(account: self).start(completed: {

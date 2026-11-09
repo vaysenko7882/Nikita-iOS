@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UniformTypeIdentifiers
 import Display
 import SwiftSignalKit
 import TelegramCore
@@ -11,7 +12,7 @@ import PresentationDataUtils
 
 private func sanitizedFileNameComponent(_ value: String) -> String? {
     let result = (value as NSString).lastPathComponent.replacingOccurrences(of: "/", with: "_")
-    if result.isEmpty || result == "." || result == ".." {
+    if result.isEmpty || result == "." || result == ".." || result.contains("\0") || result.utf8.count > 200 {
         return nil
     }
     return result
@@ -31,7 +32,42 @@ func saveMediaToFiles(context: AccountContext, fileReference: FileMediaReference
         }
     }
     
-    var signal = fetchMediaData(context: context, userLocation: .other, mediaReference: fileReference.abstract)
+    let signal = fetchMediaData(context: context, userLocation: .other, mediaReference: fileReference.abstract)
+    |> filter { state, _ in
+        if case let .data(data) = state { return data.isComplete }
+        return false
+    }
+    |> take(1)
+    |> deliverOn(Queue.concurrentDefaultQueue())
+    |> map { state, _ -> CodeGramExportFile? in
+        guard case let .data(data) = state else { return nil }
+        let file = fileReference.media
+        let originalName = file.fileName.flatMap(sanitizedFileNameComponent)
+        let fileExtension = originalName.flatMap { sanitizedFileNameComponent(($0 as NSString).pathExtension) }
+            ?? UTType(mimeType: file.mimeType)?.preferredFilenameExtension ?? (file.isMusic ? "mp3" : "bin")
+        var fileName = originalName ?? "media.\(fileExtension)"
+        if file.isMusic {
+            // Preserve the audio player's artist/title naming, but keep metadata
+            // reads and the final export copy off the UI thread.
+            var nameComponents: [String] = []
+            if let title {
+                if let performer, let value = sanitizedFileNameComponent(performer) { nameComponents.append(value) }
+                if let value = sanitizedFileNameComponent(title) { nameComponents.append(value) }
+            } else {
+                let audioAsset = AVURLAsset(url: URL(fileURLWithPath: data.path))
+                let metadata = audioAsset.commonMetadata
+                if let artist = metadata.first(where: { $0.commonKey == .commonKeyArtist })?.stringValue,
+                    let value = sanitizedFileNameComponent(artist) { nameComponents.append(value) }
+                if let title = metadata.first(where: { $0.commonKey == .commonKeyTitle })?.stringValue,
+                    let value = sanitizedFileNameComponent(title) { nameComponents.append(value) }
+            }
+            if !nameComponents.isEmpty,
+                let named = sanitizedFileNameComponent(nameComponents.joined(separator: " – ") + "." + fileExtension) {
+                fileName = named
+            }
+        }
+        return CodeGramExportFile(sourcePath: data.path, fileName: fileName)
+    }
     
     var cancelImpl: (() -> Void)?
     let presentationData = context.sharedContext.currentPresentationData.with { $0 }
@@ -52,8 +88,7 @@ func saveMediaToFiles(context: AccountContext, fileReference: FileMediaReference
     let progressDisposable = progressSignal.startStrict()
     
     let disposable = MetaDisposable()
-    signal = signal
-    |> afterDisposed {
+    let exportSignal = signal |> afterDisposed {
         Queue.mainQueue().async {
             progressDisposable.dispose()
         }
@@ -61,78 +96,14 @@ func saveMediaToFiles(context: AccountContext, fileReference: FileMediaReference
     cancelImpl = { [weak disposable] in
         disposable?.set(nil)
     }
-    disposable.set((signal
-    |> deliverOnMainQueue).startStrict(next: { state, _ in
-        switch state {
-        case .progress:
-            break
-        case let .data(data):
-            if data.isComplete {
-                var symlinkPath = data.path + ".mp3"
-                try? FileManager.default.removeItem(atPath: symlinkPath)
-                let _ = try? FileManager.default.linkItem(atPath: data.path, toPath: symlinkPath)
-                
-                let audioUrl = URL(fileURLWithPath: symlinkPath)
-                let audioAsset = AVURLAsset(url: audioUrl)
-                
-                var fileExtension = "mp3"
-                if let filename = fileReference.media.fileName {
-                    if let value = sanitizedFileNameComponent((filename as NSString).pathExtension) {
-                        fileExtension = value
-                    }
-                }
-                
-                var nameComponents: [String] = []
-                if let title {
-                    if let performer, let value = sanitizedFileNameComponent(performer) {
-                        nameComponents.append(value)
-                    }
-                    if let value = sanitizedFileNameComponent(title) {
-                        nameComponents.append(value)
-                    }
-                } else {
-                    var artist: String?
-                    var title: String?
-                    for data in audioAsset.commonMetadata {
-                        if data.commonKey == .commonKeyArtist {
-                            artist = data.stringValue
-                        }
-                        if data.commonKey == .commonKeyTitle {
-                            title = data.stringValue
-                        }
-                    }
-                    if let artist, !artist.isEmpty, let value = sanitizedFileNameComponent(artist) {
-                        nameComponents.append(value)
-                    }
-                    if let title, !title.isEmpty, let value = sanitizedFileNameComponent(title) {
-                        nameComponents.append(value)
-                    }
-                    if nameComponents.isEmpty, let filename = fileReference.media.fileName, let value = sanitizedFileNameComponent((filename as NSString).deletingPathExtension) {
-                        nameComponents.append(value)
-                    }
-                }
-                if !nameComponents.isEmpty {
-                    let fileName = "\(nameComponents.joined(separator: " – ")).\(fileExtension)"
-                    let directoryUrl = audioUrl.deletingLastPathComponent().standardizedFileURL
-                    let targetUrl = directoryUrl.appendingPathComponent(fileName, isDirectory: false).standardizedFileURL
-                    let directoryPath = directoryUrl.path.hasSuffix("/") ? directoryUrl.path : directoryUrl.path + "/"
-                    if targetUrl.path.hasPrefix(directoryPath) {
-                        do {
-                            try FileManager.default.linkItem(atPath: data.path, toPath: targetUrl.path)
-                            try? FileManager.default.removeItem(atPath: symlinkPath)
-                            symlinkPath = targetUrl.path
-                        } catch {
-                        }
-                    }
-                }
-                
-                let url = URL(fileURLWithPath: symlinkPath)
-                let controller = legacyICloudFilePicker(theme: presentationData.theme, mode: .export, url: url, documentTypes: [], forceDarkTheme: false, dismissed: {}, completion: { _ in
-                    
-                })
-                present(controller, nil)
-            }
-        }
+    disposable.set((exportSignal
+    |> deliverOnMainQueue).startStrict(next: { file in
+        guard let file else { return }
+        // The picker owns the copy until its file provider has finished reading
+        // it. Both completion and cancellation can call dispose safely.
+        let controller = legacyICloudFilePicker(theme: presentationData.theme, mode: .export, url: file.url,
+            documentTypes: [], forceDarkTheme: false, dismissed: { file.dispose() }, completion: { _ in file.dispose() })
+        present(controller, nil)
     }))
     
     return disposable

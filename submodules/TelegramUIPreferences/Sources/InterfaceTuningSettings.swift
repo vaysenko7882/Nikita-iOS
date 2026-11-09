@@ -153,23 +153,17 @@ public final class InterfaceTuningSettingsStore {
     private let defaults: UserDefaults
     private let key = "interfaceTuningSettings.v1"
     private let lock = NSLock()
-    private var cachedValue: InterfaceTuningSettings
+    private var cache: CodeGramSettingsCache<InterfaceTuningSettings>
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(InterfaceTuningSettings.self, from: data) {
-            self.cachedValue = value
-        } else {
-            self.cachedValue = .defaultSettings
-        }
+        self.cache = CodeGramSettingsCache(defaultValue: .defaultSettings, data: defaults.data(forKey: self.key))
     }
 
     public var current: InterfaceTuningSettings {
         self.lock.lock()
-        if let data = self.defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(InterfaceTuningSettings.self, from: data) {
-            self.cachedValue = value
-        }
-        let value = self.cachedValue
+        self.cache.reload(data: self.defaults.data(forKey: self.key))
+        let value = self.cache.value
         self.lock.unlock()
         return value
     }
@@ -177,16 +171,11 @@ public final class InterfaceTuningSettingsStore {
     @discardableResult
     public func update(_ f: (InterfaceTuningSettings) -> InterfaceTuningSettings) -> InterfaceTuningSettings {
         self.lock.lock()
-        let currentValue: InterfaceTuningSettings
-        if let data = self.defaults.data(forKey: self.key), let value = try? JSONDecoder().decode(InterfaceTuningSettings.self, from: data) {
-            currentValue = value
-        } else {
-            currentValue = self.cachedValue
-        }
+        self.cache.reload(data: self.defaults.data(forKey: self.key))
+        let currentValue = self.cache.value
         var updatedValue = f(currentValue)
         updatedValue.classicDesign = false
-        self.cachedValue = updatedValue
-        if let data = try? JSONEncoder().encode(updatedValue) {
+        if let data = self.cache.store(updatedValue) {
             self.defaults.set(data, forKey: self.key)
         }
         self.lock.unlock()

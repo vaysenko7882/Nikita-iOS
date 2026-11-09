@@ -2,14 +2,18 @@ name: Build CodeGram IPA
 on:
   workflow_dispatch:
   push:
-    branches: [nikita/v2, codex/codegram-14.4-links-profile-icons]
+    branches: [nikita/v2, codex/codegram-14.4-links-profile-icons, codex/codegram-14.6-performance-save]
 permissions:
   contents: read
 concurrency:
   group: ${{ (github.ref == 'refs/heads/nikita/v2' || contains(github.event.head_commit.message, '[build ipa]') || github.event_name == 'workflow_dispatch') && 'nikita-device-build' || format('nikita-device-skipped-{0}', github.sha) }}
   cancel-in-progress: false
 jobs:
+  host-performance:
+    if: github.ref == 'refs/heads/nikita/v2' || contains(github.event.head_commit.message, '[build ipa]') || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/codegram-performance.yml
   build:
+    needs: host-performance
     if: github.ref == 'refs/heads/nikita/v2' || contains(github.event.head_commit.message, '[build ipa]') || github.event_name == 'workflow_dispatch'
     runs-on: xcode-27
     timeout-minutes: 360
@@ -55,6 +59,7 @@ jobs:
           python3 build-system/Make/PostboxImportCheck.py
           python3 tools/nikita/check_matte_ui.py
           python3 tools/nikita/check_archive_state.py
+          python3 tools/nikita/check_external_share.py
           xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/NikitaVoiceProcessor.swift tools/nikita/tests/VoiceProcessorCheck.swift -o "$RUNNER_TEMP/nikita-voice-check"
           "$RUNNER_TEMP/nikita-voice-check"
           xcrun swiftc -O submodules/TelegramCore/Sources/Nikita/CodeGramEnergyPolicy.swift tools/nikita/tests/EnergyPolicyCheck.swift -o "$RUNNER_TEMP/codegram-energy-check"
@@ -63,6 +68,10 @@ jobs:
           "$RUNNER_TEMP/codegram-catchup-check"
           xcrun swiftc -O -warnings-as-errors submodules/SaveToCameraRoll/Sources/CodeGramExportFile.swift tools/nikita/tests/MediaExportFileCheck.swift -o "$RUNNER_TEMP/codegram-export-check"
           "$RUNNER_TEMP/codegram-export-check"
+          xcrun swiftc -O -warnings-as-errors submodules/TelegramUIPreferences/Sources/CodeGramSettingsCache.swift tools/nikita/tests/SettingsCacheCheck.swift -o "$RUNNER_TEMP/codegram-settings-cache-check"
+          "$RUNNER_TEMP/codegram-settings-cache-check"
+          xcrun swiftc -O -warnings-as-errors submodules/TelegramCore/Sources/TelegramEngine/Privacy/BlockedPeersPagination.swift tools/nikita/tests/BlockedPeersPaginationCheck.swift -o "$RUNNER_TEMP/codegram-blocked-pagination-check"
+          "$RUNNER_TEMP/codegram-blocked-pagination-check"
       - name: Fetch pinned dependencies
         run: python3 tools/nikita/configure.py --submodules
       - name: Compile CodeGram for iPhone
@@ -133,7 +142,7 @@ jobs:
         run: |
           python3 tools/nikita/verify_release_bundle.py "$RUNNER_TEMP/codegram-release" \
             --expected-sha "$EXPECTED_SOURCE_SHA" --expected-build "$EXPECTED_BUILD_NUMBER" \
-            --expected-version 14.5.0 --report "$RUNNER_TEMP/codegram-release-verification.json"
+            --expected-version 14.7.0 --report "$RUNNER_TEMP/codegram-release-verification.json"
       - name: Retain release integrity report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

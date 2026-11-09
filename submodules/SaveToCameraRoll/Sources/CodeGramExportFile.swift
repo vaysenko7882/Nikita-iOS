@@ -2,12 +2,12 @@ import Foundation
 
 /// Owns only an export copy, never the MediaBox resource. Copying runs on the
 /// caller's worker queue; unlinking always runs on a utility queue.
-final class CodeGramExportFile {
-    let url: URL
+public final class CodeGramExportFile {
+    public let url: URL
     private let lock = NSLock()
     private var directory: URL?
 
-    init?(sourcePath: String, fileName: String) {
+    public init?(sourcePath: String, fileName: String) {
         guard !fileName.isEmpty, fileName != ".", fileName != "..",
             (fileName as NSString).lastPathComponent == fileName,
             !fileName.contains("\0"), fileName.utf8.count <= 200 else { return nil }
@@ -24,7 +24,7 @@ final class CodeGramExportFile {
         self.url = url
     }
 
-    func dispose() {
+    public func dispose() {
         self.lock.lock()
         let directory = self.directory
         self.directory = nil

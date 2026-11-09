@@ -703,10 +703,10 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             var savableMedia: (AnyMediaReference, Bool)?
             for media in message.effectiveMedia {
                 if let image = media as? TelegramMediaImage {
-                    savableMedia = (ImageMediaReference.standalone(media: image).abstract, false)
+                    savableMedia = (.message(message: MessageReference(message), media: image), false)
                     break
                 } else if let file = media as? TelegramMediaFile, file.isVideo {
-                    savableMedia = (FileMediaReference.standalone(media: file).abstract, true)
+                    savableMedia = (.message(message: MessageReference(message), media: file), true)
                     break
                 }
             }
@@ -715,7 +715,8 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Save"), color: theme.actionSheet.primaryTextColor)
                 }, action: { _, completion in
                     let _ = (saveToCameraRoll(context: context, userLocation: .peer(message.id.peerId), mediaReference: mediaReference)
-                    |> deliverOnMainQueue).startStandalone(completed: {
+                    |> filter { $0 >= 1.0 } |> take(1)
+                    |> deliverOnMainQueue).startStandalone(next: { _ in
                         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                         controllerInteraction.presentControllerInCurrent(UndoOverlayController(
                             presentationData: presentationData,
@@ -1813,10 +1814,10 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             var isVideo = false
             for media in message.effectiveMedia {
                 if let image = media as? TelegramMediaImage, let _ = largestImageRepresentation(image.representations) {
-                    mediaReference = ImageMediaReference.standalone(media: image).abstract
+                    mediaReference = .message(message: MessageReference(message), media: image)
                     break
                 } else if let file = media as? TelegramMediaFile, file.isVideo {
-                    mediaReference = FileMediaReference.standalone(media: file).abstract
+                    mediaReference = .message(message: MessageReference(message), media: file)
                     isVideo = true
                     break
                 }
@@ -1826,7 +1827,8 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Save"), color: theme.actionSheet.primaryTextColor)
                 }, action: { _, f in
                     let _ = (saveToCameraRoll(context: context, userLocation: .peer(message.id.peerId), mediaReference: mediaReference)
-                             |> deliverOnMainQueue).startStandalone(completed: {
+                             |> filter { $0 >= 1.0 } |> take(1)
+                             |> deliverOnMainQueue).startStandalone(next: { _ in
                         Queue.mainQueue().after(0.2) {
                             let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                             controllerInteraction.presentControllerInCurrent(UndoOverlayController(presentationData: presentationData, content: .mediaSaved(text: isVideo ? presentationData.strings.Gallery_VideoSaved : presentationData.strings.Gallery_ImageSaved), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return true }), nil)
@@ -1855,7 +1857,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
         if !isCopyProtected {
             for media in message.effectiveMedia {
                 if let file = media as? TelegramMediaFile {
-                    if file.isMusic {
+                    if !file.isVideo {
                         actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_SaveToFiles, icon: { theme in
                             return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Save"), color: theme.actionSheet.primaryTextColor)
                         }, action: { _, f in

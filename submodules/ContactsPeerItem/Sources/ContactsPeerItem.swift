@@ -877,7 +877,7 @@ public class ContactsPeerItemNode: ItemListRevealOptionsItemNode {
             case let .peer(peer, _):
                 if let peer = peer, (peer.id != item.context.account.peerId || item.peerMode == .memberList || item.aliasHandling == .standard) {
                     peerBadge = PeerBadgeRegistryStore.shared.badge(peerId: peer.id)
-                    if MessageFilterSettingsStore.shared.current.isShadowBanned(peer.id.toInt64()) {
+                    if MessageFilterSettingsStore.shared.cachedCurrent.isShadowBanned(peer.id.toInt64()) {
                         shadowBanIconImage = PresentationResourcesChatList.shadowBanIcon(item.presentationData.theme)
                     }
                     if peer.isScam {

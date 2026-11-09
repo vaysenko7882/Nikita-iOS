@@ -1,7 +1,7 @@
 name: CodeGram server and link regressions
 on:
   push:
-    branches: [codex/codegram-14.4-links-profile-icons, nikita/v2]
+    branches: [codex/codegram-14.4-links-profile-icons, codex/codegram-14.6-performance-save, nikita/v2]
 permissions:
   contents: read
 jobs:

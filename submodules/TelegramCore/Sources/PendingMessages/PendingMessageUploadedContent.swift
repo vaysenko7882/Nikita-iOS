@@ -193,7 +193,7 @@ func messageContentToUpload(accountPeerId: PeerId, network: Network, postbox: Po
     } else if peerId.namespace != Namespaces.Peer.SecretChat,
               let richAttribute = attributes.first(where: { $0 is RichTextMessageAttribute }) as? RichTextMessageAttribute,
               !richAttribute.instantPage.rawMedia.isEmpty {
-        return .signal(richMessageContentToUpload(network: network, postbox: postbox, auxiliaryMethods: auxiliaryMethods, messageMediaPreuploadManager: messageMediaPreuploadManager, forceReupload: forceReupload, peerId: peerId, instantPage: richAttribute.instantPage), .media)
+        return .signal(richMessageContentToUpload(network: network, postbox: postbox, auxiliaryMethods: auxiliaryMethods, messageMediaPreuploadManager: messageMediaPreuploadManager, forceReupload: forceReupload || codeGramRequiresMediaUpload(attributes), peerId: peerId, instantPage: richAttribute.instantPage), .media)
     } else {
         return .signal(.single(.content(PendingMessageUploadedContentAndReuploadInfo(content: .text(text), reuploadInfo: nil, cacheReferenceKey: nil))), .text)
     }
@@ -253,12 +253,17 @@ func mediaContentToUpload(accountPeerId: PeerId, network: Network, postbox: Post
         if peerId.namespace == Namespaces.Peer.SecretChat, let resource = largest.resource as? SecretFileMediaResource {
             return .single(.content(PendingMessageUploadedContentAndReuploadInfo(content: .secretMedia(.inputEncryptedFile(.init(id: resource.fileId, accessHash: resource.accessHash)), resource.decryptedSize, resource.key), reuploadInfo: nil, cacheReferenceKey: nil)))
         }
-        if peerId.namespace != Namespaces.Peer.SecretChat, let reference = image.reference, case let .cloud(id, accessHash, maybeFileReference) = reference, let fileReference = maybeFileReference {
+        if !codeGramRequiresMediaUpload(attributes), peerId.namespace != Namespaces.Peer.SecretChat, let reference = image.reference, case let .cloud(id, accessHash, maybeFileReference) = reference, let fileReference = maybeFileReference {
             return .single(.content(PendingMessageUploadedContentAndReuploadInfo(content: .media(Api.InputMedia.inputMediaPhoto(.init(flags: 0, id: Api.InputPhoto.inputPhoto(.init(id: id, accessHash: accessHash, fileReference: Buffer(data: fileReference))), ttlSeconds: nil, video: nil)), text), reuploadInfo: nil, cacheReferenceKey: nil)))
         } else {
-            return uploadedMediaImageContent(network: network, postbox: postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messageMediaPreuploadManager: messageMediaPreuploadManager, forceReupload: forceReupload, isGrouped: isGrouped, peerId: peerId, image: image, messageId: messageId, text: text, attributes: attributes, autoremoveMessageAttribute: autoremoveMessageAttribute, autoclearMessageAttribute: autoclearMessageAttribute, auxiliaryMethods: auxiliaryMethods)
+            return uploadedMediaImageContent(network: network, postbox: postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messageMediaPreuploadManager: messageMediaPreuploadManager, forceReupload: forceReupload || codeGramRequiresMediaUpload(attributes), isGrouped: isGrouped, peerId: peerId, image: image, messageId: messageId, text: text, attributes: attributes, autoremoveMessageAttribute: autoremoveMessageAttribute, autoclearMessageAttribute: autoclearMessageAttribute, auxiliaryMethods: auxiliaryMethods)
         }
     } else if let file = media as? TelegramMediaFile {
+        if codeGramRequiresMediaUpload(attributes) {
+            // FILEREF refresh still returns the protected document. Upload the
+            // bytes with the source message reference retained for fetching.
+            return uploadedMediaFileContent(network: network, postbox: postbox, auxiliaryMethods: auxiliaryMethods, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messageMediaPreuploadManager: messageMediaPreuploadManager, forceReupload: true, isGrouped: isGrouped, isPaid: false, passFetchProgress: passFetchProgress, forceNoBigParts: forceNoBigParts, peerId: peerId, messageId: messageId, text: text, attributes: attributes, autoremoveMessageAttribute: autoremoveMessageAttribute, autoclearMessageAttribute: autoclearMessageAttribute, file: file)
+        }
         if let resource = file.resource as? CloudDocumentMediaResource {
             if peerId.namespace == Namespaces.Peer.SecretChat {
                 for attribute in file.attributes {
@@ -690,7 +695,7 @@ enum PredownloadedResource {
     case none
 }
 
-func maybePredownloadedImageResource(postbox: Postbox, peerId: PeerId, resource: MediaResource, forceRefresh: Bool) -> Signal<PredownloadedResource, PendingMessageUploadError> {
+func maybePredownloadedImageResource(postbox: Postbox, peerId: PeerId, resource: MediaResource, forceRefresh: Bool, resourceReference: MediaResourceReference? = nil) -> Signal<PredownloadedResource, PendingMessageUploadError> {
     if peerId.namespace == Namespaces.Peer.SecretChat {
         return .single(.none)
     }
@@ -735,7 +740,14 @@ func maybePredownloadedImageResource(postbox: Postbox, peerId: PeerId, resource:
                 }
             }
         })
-        let fetched = postbox.mediaBox.fetchedResource(resource, parameters: nil).start(error: { _ in
+        let fetch: Signal<FetchResourceSourceType, FetchResourceError>
+        if let resourceReference {
+            fetch = fetchedMediaResource(mediaBox: postbox.mediaBox, userLocation: .peer(peerId), userContentType: .image,
+                reference: resourceReference, ranges: nil, statsCategory: .image)
+        } else {
+            fetch = postbox.mediaBox.fetchedResource(resource, parameters: nil)
+        }
+        let fetched = fetch.start(error: { _ in
             subscriber.putError(.generic)
         })
         
@@ -803,7 +815,8 @@ private func uploadedMediaImageContent(network: Network, postbox: Postbox, trans
     if image.video != nil {
         predownloadedResource = .single(.none)
     } else {
-        predownloadedResource = maybePredownloadedImageResource(postbox: postbox, peerId: peerId, resource: largestRepresentation.resource, forceRefresh: forceReupload)
+        let reference = image.partialReference?.mediaReference(image) ?? .standalone(media: image)
+        predownloadedResource = maybePredownloadedImageResource(postbox: postbox, peerId: peerId, resource: largestRepresentation.resource, forceRefresh: forceReupload, resourceReference: reference.resourceReference(largestRepresentation.resource))
     }
     return predownloadedResource
     |> mapToSignal { result -> Signal<PendingMessageUploadedContentResult, PendingMessageUploadError> in
@@ -931,7 +944,7 @@ private func uploadedMediaImageContent(network: Network, postbox: Postbox, trans
                 |> mapError { _ -> PendingMessageUploadError in return .generic }
                 let photoVideoUpload: Signal<UploadedMediaPhotoVideoResult?, PendingMessageUploadError>
                 if peerId.namespace != Namespaces.Peer.SecretChat, let video = transformedImage.video ?? image.video {
-                    photoVideoUpload = uploadedMediaPhotoVideoContent(network: network, postbox: postbox, messageMediaPreuploadManager: messageMediaPreuploadManager, peerId: peerId, file: video)
+                    photoVideoUpload = uploadedMediaPhotoVideoContent(network: network, postbox: postbox, messageMediaPreuploadManager: messageMediaPreuploadManager, peerId: peerId, file: codeGramPhotoVideoForUpload(video, photo: transformedImage))
                     |> map(Optional.init)
                 } else {
                     photoVideoUpload = .single(nil)

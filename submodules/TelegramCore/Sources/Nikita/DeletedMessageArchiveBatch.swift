@@ -15,6 +15,8 @@ final class DeletedMessageArchiveBatch {
     private var indexLoaded = false
     private var indexValue = DeletedMessageArchiveIndex.empty
     private var indexChanged = false
+    private var liveMessageIndex: Set<DeletedMessageArchiveIndexEntry>?
+    private(set) var liveMessageIndexBuildCount = 0
     private var remoteStateLoaded = false
     private var remoteState: NikitaRemoteArchiveState?
     private var remoteStateChanged = false
@@ -52,6 +54,30 @@ final class DeletedMessageArchiveBatch {
         precondition(!self.finished)
         self.ensureIndexLoaded()
         update(&self.indexValue); self.indexChanged = true
+        // Generic mutations can remove or replace live entries. Dedicated append
+        // operations below keep this lookup current without rebuilding it.
+        self.liveMessageIndex = nil
+    }
+    private func insertLiveMessage(_ entry: DeletedMessageArchiveIndexEntry) -> Bool {
+        if self.liveMessageIndex == nil {
+            self.liveMessageIndex = Set(self.indexValue.liveMessageIds)
+            self.liveMessageIndexBuildCount += 1
+        }
+        guard self.liveMessageIndex!.insert(entry).inserted else { return false }
+        self.indexValue.liveMessageIds.append(entry)
+        return true
+    }
+    func appendSnapshot(_ snapshot: DeletedMessageArchiveIndexEntry, live: DeletedMessageArchiveIndexEntry) {
+        precondition(!self.finished)
+        self.ensureIndexLoaded()
+        self.indexValue.messageIds.append(snapshot)
+        let _ = self.insertLiveMessage(live)
+        self.indexChanged = true
+    }
+    func appendLiveMessage(_ entry: DeletedMessageArchiveIndexEntry) {
+        precondition(!self.finished)
+        self.ensureIndexLoaded()
+        if self.insertLiveMessage(entry) { self.indexChanged = true }
     }
     func takePendingVersions(for key: String) -> [DeletedMessageArchiveIndexEntry]? {
         precondition(!self.finished)

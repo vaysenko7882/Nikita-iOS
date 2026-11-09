@@ -66,7 +66,9 @@ private func uploadImageToCloud(
         return .fail(.generic)
     }
 
-    return maybePredownloadedImageResource(postbox: postbox, peerId: peerId, resource: largestRepresentation.resource, forceRefresh: false)
+    let imageReference = image.partialReference?.mediaReference(image) ?? .standalone(media: image)
+    return maybePredownloadedImageResource(postbox: postbox, peerId: peerId, resource: largestRepresentation.resource, forceRefresh: false,
+        resourceReference: imageReference.resourceReference(largestRepresentation.resource))
     |> mapToSignal { predownloaded -> Signal<CloudUploadEvent, PendingMessageUploadError> in
         var referenceKey: CachedSentMediaReferenceKey?
         switch predownloaded {
@@ -82,7 +84,6 @@ private func uploadImageToCloud(
             referenceKey = nil
         }
 
-        let imageReference: AnyMediaReference = .standalone(media: image)
         let upload = messageMediaPreuploadManager.upload(
             network: network,
             postbox: postbox,

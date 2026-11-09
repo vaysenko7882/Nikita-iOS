@@ -1,3 +1,4 @@
+import Foundation
 import Postbox
 import TelegramCore
 import XCTest
@@ -22,7 +23,8 @@ final class DeletedMessageArchiveTests: XCTestCase {
         )
 
         XCTAssertEqual(attribute.originalMessageId, originalId)
-        XCTAssertEqual(attribute.associatedMessageIds, [versionId])
+        XCTAssertEqual(attribute.versionIds, [versionId])
+        XCTAssertTrue(attribute.associatedMessageIds.isEmpty)
         XCTAssertEqual(attribute.deletedAt, 100)
         XCTAssertEqual(attribute.sessionId, 200)
     }

@@ -13,6 +13,8 @@ public struct OutgoingMessageInfoFlags: OptionSet {
     }
     
     public static var transformedMedia = OutgoingMessageInfoFlags(rawValue: 1 << 0)
+    /// Send received bytes as new media instead of reusing a protected cloud reference.
+    public static var requiresMediaUpload = OutgoingMessageInfoFlags(rawValue: 1 << 1)
 }
 
 public class OutgoingMessageInfoAttribute: MessageAttribute {

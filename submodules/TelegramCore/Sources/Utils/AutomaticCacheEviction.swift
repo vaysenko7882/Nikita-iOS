@@ -13,15 +13,17 @@ final class AutomaticCacheEvictionContext {
         let processingQueue: Queue
         let accountManager: AccountManager<TelegramAccountManagerTypes>
         let postbox: Postbox
+        let initialMediaRetentionReady: Signal<Bool, NoError>
         
         var settingsDisposable: Disposable?
         var processDisposable: Disposable?
         
-        init(queue: Queue, accountManager: AccountManager<TelegramAccountManagerTypes>, postbox: Postbox) {
+        init(queue: Queue, accountManager: AccountManager<TelegramAccountManagerTypes>, postbox: Postbox, initialMediaRetentionReady: Signal<Bool, NoError>) {
             self.queue = queue
             self.processingQueue = Queue(name: "AutomaticCacheEviction-Processing", qos: .background)
             self.accountManager = accountManager
             self.postbox = postbox
+            self.initialMediaRetentionReady = initialMediaRetentionReady
             
             self.start()
         }
@@ -62,9 +64,10 @@ final class AutomaticCacheEvictionContext {
             
             self.settingsDisposable = (combineLatest(queue: self.queue,
                 cacheSettings,
-                accountSpecificSettings
+                accountSpecificSettings,
+                self.initialMediaRetentionReady |> filter { $0 } |> take(1)
             )
-            |> map { cacheSettings, accountSpecificSettings -> CombinedSettings in
+            |> map { cacheSettings, accountSpecificSettings, _ -> CombinedSettings in
                 return CombinedSettings(
                     categoryStorageTimeout: cacheSettings.categoryStorageTimeout,
                     exceptions: accountSpecificSettings.peerStorageTimeoutExceptions
@@ -261,11 +264,11 @@ final class AutomaticCacheEvictionContext {
     private let queue: Queue
     private let impl: QueueLocalObject<Impl>
     
-    init(postbox: Postbox, accountManager: AccountManager<TelegramAccountManagerTypes>) {
+    init(postbox: Postbox, accountManager: AccountManager<TelegramAccountManagerTypes>, initialMediaRetentionReady: Signal<Bool, NoError> = .single(true)) {
         let queue = Queue(name: "AutomaticCacheEviction")
         self.queue = queue
         self.impl = QueueLocalObject(queue: queue, generate: {
-            return Impl(queue: queue, accountManager: accountManager, postbox: postbox)
+            return Impl(queue: queue, accountManager: accountManager, postbox: postbox, initialMediaRetentionReady: initialMediaRetentionReady)
         })
     }
 }

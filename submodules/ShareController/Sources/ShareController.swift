@@ -34,24 +34,41 @@ private enum ExternalShareItem {
 
 private enum ExternalShareItemStatus {
     case progress
+    case failed
     case done(ExternalShareItem)
 }
 
 private enum ExternalShareResourceStatus {
     case progress
+    case failed
     case done(MediaResourceData)
 }
 
 private func collectExternalShareResource(postbox: Postbox, resourceReference: MediaResourceReference, statsCategory: MediaResourceStatsCategory) -> Signal<ExternalShareResourceStatus, NoError> {
     return Signal { subscriber in
-        let fetched = fetchedMediaResource(mediaBox: postbox.mediaBox, userLocation: .other, userContentType: .other, reference: resourceReference, statsCategory: statsCategory).start()
+        let finished = Atomic(value: false)
         let data = postbox.mediaBox.resourceData(resourceReference.resource, option: .complete(waitUntilFetchStatus: false)).start(next: { value in
             if value.complete {
-                subscriber.putNext(.done(value))
-            } else {
+                if !finished.swap(true) {
+                    subscriber.putNext(.done(value))
+                    subscriber.putCompletion()
+                }
+            } else if !finished.with({ $0 }) {
                 subscriber.putNext(.progress)
             }
         })
+        let fetched: Disposable
+        if finished.with({ $0 }) {
+            fetched = EmptyDisposable
+        } else {
+            fetched = fetchedMediaResource(mediaBox: postbox.mediaBox, userLocation: .other, userContentType: .other,
+                reference: resourceReference, statsCategory: statsCategory, reportResultStatus: true).start(error: { _ in
+                if !finished.swap(true) {
+                    subscriber.putNext(.failed)
+                    subscriber.putCompletion()
+                }
+            })
+        }
         
         return ActionDisposable {
             fetched.dispose()
@@ -62,7 +79,12 @@ private func collectExternalShareResource(postbox: Postbox, resourceReference: M
 
 private enum ExternalShareItemsState {
     case progress
+    case failed
     case done([ExternalShareItem])
+}
+
+private enum ExternalSharePreparationError {
+    case failed
 }
 
 private struct CollectableExternalShareItem {
@@ -95,17 +117,21 @@ private func collectExternalShareItems(strings: PresentationStrings, dateTimeFor
                     switch next {
                         case .progress:
                             return .single(.progress)
+                        case .failed:
+                            return .single(.failed)
                         case let .done(data):
                             if file.isSticker, !file.isAnimatedSticker, let dimensions = file.dimensions {
                                 return chatMessageSticker(postbox: postbox, userLocation: .other, file: file, small: false, fetched: true, onlyFullSize: true)
+                                |> take(1)
                                 |> map { f -> ExternalShareItemStatus in
                                     let context = f(TransformImageArguments(corners: ImageCorners(), imageSize: dimensions.cgSize, boundingSize: dimensions.cgSize, intrinsicInsets: UIEdgeInsets(), emptyColor: nil, scale: 1.0))
                                     if let image = context?.generateImage() {
                                         return .done(.image(image))
                                     } else {
-                                        return .progress
+                                        return .failed
                                     }
                                 }
+                                |> timeout(30.0, queue: Queue.concurrentDefaultQueue(), alternate: .single(.failed))
                             } else {
                                 let fileName: String
                                 if let value = file.fileName {
@@ -125,7 +151,8 @@ private func collectExternalShareItems(strings: PresentationStrings, dateTimeFor
                                 if let _ = try? FileManager.default.copyItem(at: URL(fileURLWithPath: data.path), to: URL(fileURLWithPath: filePath)) {
                                     return .single(.done(.file(URL(fileURLWithPath: filePath), fileName, file.mimeType)))
                                 } else {
-                                    return .single(.progress)
+                                    try? FileManager.default.removeItem(atPath: fileDirectory)
+                                    return .single(.failed)
                                 }
                             }
                     }
@@ -136,9 +163,11 @@ private func collectExternalShareItems(strings: PresentationStrings, dateTimeFor
                 switch next {
                     case .progress:
                         return .progress
+                    case .failed:
+                        return .failed
                     case let .done(data):
                         guard let fileData = try? Data(contentsOf: URL(fileURLWithPath: data.path)) else {
-                            return .progress
+                            return .failed
                         }
                         if let image = UIImage(data: fileData) {
                             return .done(.image(image))
@@ -148,7 +177,7 @@ private func collectExternalShareItems(strings: PresentationStrings, dateTimeFor
                                 return .done(.file(URL(fileURLWithPath: data.path), "image.bin", "application/octet-stream"))
                             }
                             #endif
-                            return .progress
+                            return .failed
                         }
                 }
             })
@@ -200,7 +229,12 @@ private func collectExternalShareItems(strings: PresentationStrings, dateTimeFor
                 let vCardData = vCard.data(using: .utf8)
                 if let _ = try? vCardData?.write(to: URL(fileURLWithPath: filePath)) {
                     signals.append(.single(.done(.file(URL(fileURLWithPath: filePath), fileName, "text/x-vcard"))))
+                } else {
+                    try? FileManager.default.removeItem(atPath: fileDirectory)
+                    signals.append(.single(.failed))
                 }
+            } else {
+                signals.append(.single(.failed))
             }
         }
         if let url = item.url, let parsedUrl = URL(string: url) {
@@ -238,25 +272,42 @@ private func collectExternalShareItems(strings: PresentationStrings, dateTimeFor
             }
         }
     }
-    return combineLatest(signals)
+    guard !signals.isEmpty else { return .single(.failed) }
+    // An error cancels the batch immediately, even if another item has not
+    // produced its first value. Local successful shares need no loading phase.
+    let preparedSignals = signals.map { signal -> Signal<ExternalShareItemStatus, ExternalSharePreparationError> in
+        return signal |> castError(ExternalSharePreparationError.self)
+        |> mapToSignal { status -> Signal<ExternalShareItemStatus, ExternalSharePreparationError> in
+            if case .failed = status { return .fail(.failed) }
+            return .single(status)
+        }
+    }
+    return combineLatest(preparedSignals)
     |> map { statuses -> ExternalShareItemsState in
         var items: [ExternalShareItem] = []
         for status in statuses {
             switch status {
                 case .progress:
                     return .progress
+                case .failed:
+                    return .failed
                 case let .done(item):
                     items.append(item)
             }
         }
         return .done(items)
     }
+    |> `catch` { _ -> Signal<ExternalShareItemsState, NoError> in .single(.failed) }
     |> distinctUntilChanged(isEqual: { lhs, rhs in
         if case .progress = lhs, case .progress = rhs {
             return true
         } else {
             return false
         }
+    })
+    |> take(until: { state in
+        if case .progress = state { return SignalTakeAction(passthrough: true, complete: false) }
+        return SignalTakeAction(passthrough: true, complete: true)
     })
 }
 
@@ -1044,6 +1095,9 @@ public final class ShareController: ViewController {
                     switch state {
                         case .progress:
                             return .preparing
+                        case .failed:
+                            self?._ready.set(.single(true))
+                            return .failed
                         case let .done(items):
                             if let strongSelf = self, !items.isEmpty {
                                 strongSelf._ready.set(.single(true))
