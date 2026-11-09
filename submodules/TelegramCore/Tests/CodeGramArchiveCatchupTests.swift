@@ -7,12 +7,14 @@ import XCTest
 /// Counts actual stored-message decoding, rather than timing a policy helper.
 private final class UnrelatedArchiveProbeAttribute: MessageAttribute {
     static let reads = Atomic<Int>(value: 0)
+    static let onNextDecode = Atomic<(() -> Void)?>(value: nil)
     static let register: Void = {
         declareEncodable(UnrelatedArchiveProbeAttribute.self, f: { UnrelatedArchiveProbeAttribute(decoder: $0) })
     }()
     init() {}
     required init(decoder: PostboxDecoder) {
         let _ = Self.reads.modify { $0 + 1 }
+        Self.onNextDecode.swap(nil)?()
     }
     func encode(_ encoder: PostboxEncoder) {}
 }
@@ -107,10 +109,174 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
         return MessageId(peerId: peer ?? self.peer, namespace: namespace, id: id)
     }
 
-    private func message(_ id: MessageId, text: String, attributes: [MessageAttribute] = []) -> StoreMessage {
+    private func message(_ id: MessageId, text: String, attributes: [MessageAttribute] = [], media: [Media] = []) -> StoreMessage {
         return StoreMessage(id: id, customStableId: nil, globallyUniqueId: nil, groupingKey: nil,
             threadId: nil, timestamp: 100, flags: [.Incoming], tags: [], globalTags: [], localTags: [],
-            forwardInfo: nil, authorId: nil, text: text, attributes: attributes, media: [])
+            forwardInfo: nil, authorId: nil, text: text, attributes: attributes, media: media)
+    }
+
+    func testMediaRetentionSlicesStartupAndOnlyReadsChangedArchiveEntries() {
+        func file(_ id: Int64) -> TelegramMediaFile {
+            return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: id), partialReference: nil,
+                resource: CloudDocumentMediaResource(datacenterId: 1, fileId: id, accessHash: 1, size: 3,
+                    fileReference: Data([1]), fileName: "fixture.dat"), previewRepresentations: [], videoThumbnails: [],
+                immediateThumbnailData: nil, mimeType: "application/octet-stream", size: 3,
+                attributes: [.FileName(fileName: "fixture.dat")], alternativeRepresentations: [])
+        }
+        let count = 2_000
+        let ids = (1 ... count).map { self.id(Int32($0), namespace: Namespaces.Message.ArchivedVersion) }
+        var index = DeletedMessageArchiveIndex(messageIds: ids.map(DeletedMessageArchiveIndexEntry.init), liveMessageIds: [])
+        let firstFile = file(1)
+        self.postbox.mediaBox.storeResourceData(firstFile.resource.id, data: Data([1, 2, 3]), synchronous: true)
+        XCTAssertEqual(self.wait(self.postbox.transaction { transaction -> Bool in
+            let _ = transaction.addMessages(ids.enumerated().map { offset, id in
+                self.message(id, text: "stored \(offset)", attributes: [UnrelatedArchiveProbeAttribute()], media: [file(Int64(offset + 1))])
+            }, location: .Random)
+            transaction.updatePreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex, { _ in PreferencesEntry(index) })
+            return true
+        }), true)
+        let retention = DeletedMessageArchiveMediaRetention(postbox: self.postbox, delay: 0.02, batchDelay: 0.001)
+        defer { retention.releasePins() }
+        func pass(_ index: DeletedMessageArchiveIndex, invalidated: Set<MessageId> = [], repetitions: Int = 1) -> DeletedMessageArchiveMediaRetentionWork? {
+            return self.wait(Signal { subscriber in
+                for number in 0 ..< repetitions {
+                    retention.request(settings: .defaultSettings, index: index, invalidatedIds: invalidated,
+                        completed: number == repetitions - 1 ? { work in
+                            subscriber.putNext(work)
+                            subscriber.putCompletion()
+                        } : nil)
+                }
+                return EmptyDisposable
+            })
+        }
+        let started = CFAbsoluteTimeGetCurrent()
+        let _ = UnrelatedArchiveProbeAttribute.reads.swap(0)
+        let initial = pass(index)
+        XCTAssertEqual(initial?.messageReads, count)
+        XCTAssertEqual(initial?.resourceStats, count)
+        XCTAssertLessThanOrEqual(initial?.largestReadBatch ?? Int.max, 64)
+        XCTAssertEqual(UnrelatedArchiveProbeAttribute.reads.with { $0 }, count,
+            "Startup accounting must measure actual stored-message decodes")
+
+        let idle = pass(index, repetitions: 100)
+        XCTAssertEqual(idle?.messageReads, 0, "100 replay packets must reuse the catalogue")
+        XCTAssertEqual(idle?.resourceStats, 0, "100 replay packets must reuse known resource sizes")
+        let completedLater = file(2)
+        self.postbox.mediaBox.storeResourceData(completedLater.resource.id, data: Data([1, 2, 3]), synchronous: true)
+        retention.protect(resourceIds: [completedLater.resource.id])
+        let downloaded = pass(index)
+        XCTAssertEqual(downloaded?.messageReads, 0)
+        XCTAssertEqual(downloaded?.resourceStats, 1, "Reusing a now-complete resource must invalidate its cached incomplete size")
+        self.waitForCompletion(self.postbox.mediaBox.removeCachedResources([completedLater.resource.id], force: false) |> ignoreValues)
+        XCTAssertNotNil(self.postbox.mediaBox.completedResourcePath(id: completedLater.resource.id), "A newly completed reused resource must keep its fresh pin")
+        let added = self.id(3_000, namespace: Namespaces.Message.ArchivedVersion)
+        XCTAssertEqual(self.wait(self.postbox.transaction { transaction -> Bool in
+            let _ = transaction.addMessages([self.message(added, text: "new", attributes: [UnrelatedArchiveProbeAttribute()], media: [file(3_000)])], location: .Random)
+            return true
+        }), true)
+        index.messageIds.append(DeletedMessageArchiveIndexEntry(added))
+        let delta = pass(index)
+        XCTAssertEqual(delta?.messageReads, 1)
+        XCTAssertEqual(delta?.resourceStats, 1)
+
+        XCTAssertEqual(self.wait(self.postbox.transaction { transaction -> Bool in
+            transaction.updateMessage(added, update: { _ in
+                .update(self.message(added, text: "import replaced media", attributes: [UnrelatedArchiveProbeAttribute()], media: [file(4_000)]))
+            })
+            return true
+        }), true)
+        let replaced = pass(index, invalidated: [added])
+        XCTAssertEqual(replaced?.messageReads, 1, "A remote import can change media while keeping the same message ID")
+        XCTAssertEqual(replaced?.resourceStats, 1)
+        XCTAssertEqual(self.wait(self.postbox.transaction { transaction in
+            ids.filter { transaction.getMessage($0) != nil }.count
+        }), count, "Quota maintenance must preserve every archived message")
+        XCTAssertEqual(try? Data(contentsOf: URL(fileURLWithPath: self.postbox.mediaBox.resourcePath(firstFile.resource))), Data([1, 2, 3]))
+        print("CodeGram archive retention benchmark: requests=104, stored_rows=2000, startup_reads=\(initial?.messageReads ?? -1), max_read_batch=\(initial?.largestReadBatch ?? -1), idle_reads=\(idle?.messageReads ?? -1), idle_stats=\(idle?.resourceStats ?? -1), completed_resource_stats=\(downloaded?.resourceStats ?? -1), added_reads=\(delta?.messageReads ?? -1), same_id_update_reads=\(replaced?.messageReads ?? -1), milliseconds=\((CFAbsoluteTimeGetCurrent() - started) * 1_000)")
+    }
+
+    func testSupersededEvictionDoesNotDeleteQueuedMedia() throws {
+        let mediaBox = self.postbox.mediaBox
+        let id = MediaResourceId("codegram-retention-stale-eviction")
+        let paths = mediaBox.storePathsForId(id)
+        let files = [paths.complete, paths.partial, paths.partial + ".meta"]
+        for path in files { try Data([1, 2, 3]).write(to: URL(fileURLWithPath: path)) }
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let blocked = mediaBox.removeCachedResources([MediaResourceId("codegram-retention-blocker")], force: true,
+            shouldRemove: {
+                entered.signal()
+                let _ = release.wait(timeout: .now() + 10)
+                return false
+            }).start()
+        defer { release.signal(); blocked.dispose() }
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        let generation = Atomic<Int>(value: 1)
+        let finished = DispatchSemaphore(value: 0)
+        let queued = mediaBox.removeCachedResources([id], force: true,
+            shouldRemove: { generation.with { $0 == 1 } }).start(completed: { finished.signal() })
+        let _ = generation.swap(2)
+        release.signal()
+        XCTAssertEqual(finished.wait(timeout: .now() + 10), .success)
+        queued.dispose()
+        for path in files {
+            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), Data([1, 2, 3]),
+                "A newer archive snapshot must cancel eviction at the actual MediaBox I/O queue")
+        }
+    }
+
+    func testInvalidationDuringAnInFlightReadCannotRestoreStaleMedia() {
+        func file(_ id: Int64) -> TelegramMediaFile {
+            return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: id), partialReference: nil,
+                resource: CloudDocumentMediaResource(datacenterId: 1, fileId: id, accessHash: 1, size: 3,
+                    fileReference: Data([1]), fileName: "fixture.dat"), previewRepresentations: [], videoThumbnails: [],
+                immediateThumbnailData: nil, mimeType: "application/octet-stream", size: 3,
+                attributes: [.FileName(fileName: "fixture.dat")], alternativeRepresentations: [])
+        }
+        let id = self.id(7_000, namespace: Namespaces.Message.Archived)
+        let oldFile = file(7_000), newFile = file(7_001)
+        let mediaBox = self.postbox.mediaBox
+        for file in [oldFile, newFile] { mediaBox.storeResourceData(file.resource.id, data: Data([1, 2, 3]), synchronous: true) }
+        XCTAssertEqual(self.wait(self.postbox.transaction { transaction -> Bool in
+            let _ = transaction.addMessages([self.message(id, text: "old", attributes: [UnrelatedArchiveProbeAttribute()], media: [oldFile])], location: .Random)
+            return true
+        }), true)
+        let retention = DeletedMessageArchiveMediaRetention(postbox: self.postbox, delay: 0.02, batchDelay: 0.001)
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), completed = DispatchSemaphore(value: 0)
+        let result = Atomic<DeletedMessageArchiveMediaRetentionWork?>(value: nil)
+        let index = DeletedMessageArchiveIndex(messageIds: [DeletedMessageArchiveIndexEntry(id)], liveMessageIds: [])
+        let _ = UnrelatedArchiveProbeAttribute.onNextDecode.swap({
+            entered.signal()
+            let _ = release.wait(timeout: .now() + 10)
+        })
+        defer {
+            let _ = UnrelatedArchiveProbeAttribute.onNextDecode.swap(nil)
+            release.signal()
+            retention.releasePins()
+        }
+        retention.request(settings: .defaultSettings, index: index)
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        // The old row has been read and is still decoding. Queue its replacement
+        // before releasing that read, then invalidate its catalogue descriptor.
+        let rewrite = self.postbox.transaction { transaction -> Void in
+            transaction.updateMessage(id, update: { _ in
+                .update(self.message(id, text: "new", attributes: [UnrelatedArchiveProbeAttribute()], media: [newFile]))
+            })
+        }.start()
+        defer { rewrite.dispose() }
+        retention.request(settings: .defaultSettings, index: index, invalidatedIds: [id], completed: { work in
+            let _ = result.swap(work)
+            completed.signal()
+        })
+        release.signal()
+        XCTAssertEqual(completed.wait(timeout: .now() + 10), .success)
+        XCTAssertEqual(result.with { $0?.messageReads }, 1, "The invalidated row must be fetched again after the stale callback")
+        XCTAssertEqual(result.with { $0?.resourceStats }, 1)
+        // A stale descriptor would pin oldFile, allowing ordinary cache cleanup
+        // to delete newFile. Check the actual MediaBox keepResource behaviour.
+        self.waitForCompletion(mediaBox.removeCachedResources([newFile.resource.id], force: false) |> ignoreValues)
+        XCTAssertNotNil(mediaBox.completedResourcePath(id: newFile.resource.id), "The replacement resource must retain its pin")
+        XCTAssertEqual(self.wait(self.postbox.transaction { transaction in transaction.getMessage(id)?.text }), "new")
     }
 
     func testHistoryAndSearchDoNotEagerlyDecodeArchivedRevisions() {
@@ -140,8 +306,8 @@ final class CodeGramArchiveCatchupTests: XCTestCase {
                 let direct = measure(label + "/getMessage") { transaction.getMessage(liveId) == nil ? 0 : 1 }
                 let history = measure(label + "/history") {
                     transaction.getMessages(peerId: self.peer, namespace: Namespaces.Message.Cloud,
-                        from: MessageIndex.absoluteUpperBound(), includeFrom: false,
-                        to: MessageIndex.absoluteLowerBound(), limit: 50).count
+                        from: MessageIndex.upperBound(peerId: self.peer, namespace: Namespaces.Message.Cloud), includeFrom: false,
+                        to: MessageIndex.lowerBound(peerId: self.peer, namespace: Namespaces.Message.Cloud), limit: 50).count
                 }
                 let search = measure(label + "/search") {
                     transaction.searchMessages(peerId: self.peer, query: "archivehotpathneedle", tags: nil).count

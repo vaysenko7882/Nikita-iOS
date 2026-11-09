@@ -2610,7 +2610,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             
             let contentData: ContentData
 
-            let messageFilterSettings = item.presentationData.messageFilterSettings
+            let messageFilterSettings = MessageFilterSettingsStore.shared.cachedCurrent
             if case let .chat(itemPeer) = contentPeer, let peer = itemPeer.chatOrMonoforumMainPeer, messageFilterSettings.isShadowBanned(peer.id.toInt64()) {
                 currentShadowBanIconImage = PresentationResourcesChatList.shadowBanIcon(item.presentationData.theme)
             }

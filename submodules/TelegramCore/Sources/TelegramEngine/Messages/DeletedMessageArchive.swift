@@ -4,12 +4,7 @@ import SwiftSignalKit
 
 private let deletedMessageArchiveSessionId = Int64.random(in: Int64.min ... Int64.max)
 
-private struct DeletedMessageArchiveKeptResourceKey: Hashable {
-    let mediaBoxPath: String
-    let resourceId: MediaResourceId
-}
-
-private let deletedMessageArchiveMediaKeepDisposables = Atomic<[DeletedMessageArchiveKeptResourceKey: Disposable]>(value: [:])
+private let deletedMessageArchiveMediaRetentions = Atomic<[String: DeletedMessageArchiveMediaRetention]>(value: [:])
 private let deletedMessageArchiveSessionInitialized = Atomic<Bool>(value: false)
 
 private func archiveTimestamp() -> Int32 {
@@ -75,6 +70,10 @@ private func prepareDeletedMessageArchive(transaction: Transaction, mediaBox: Me
 }
 
 private func archivedResourceIds(_ message: Message) -> [MediaResourceId] {
+    return archivedResourceIds(media: message.effectiveMedia)
+}
+
+private func archivedResourceIds(media: [Media]) -> [MediaResourceId] {
     var result: [MediaResourceId] = []
 
     func append(_ media: Media) {
@@ -100,7 +99,7 @@ private func archivedResourceIds(_ message: Message) -> [MediaResourceId] {
         }
     }
 
-    for media in message.effectiveMedia {
+    for media in media {
         append(media)
     }
     return result
@@ -162,62 +161,279 @@ public func deletedMessageArchiveRetentionPlan<ID: Hashable>(
     return (retained: retained, removed: removedIds)
 }
 
-private func updateDeletedMessageArchiveMediaRetention(transaction: Transaction, mediaBox: MediaBox, settings suppliedSettings: DeletedMessageArchiveSettings? = nil, index suppliedIndex: DeletedMessageArchiveIndex? = nil) {
-    let settings = suppliedSettings ?? deletedMessageArchiveSettings(transaction: transaction)
-    let index = suppliedIndex ?? (transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty)
+struct DeletedMessageArchiveMediaRetentionWork {
+    var messageReads = 0
+    var largestReadBatch = 0
+    var resourceStats = 0
+}
 
-    var orderedResourceIds: [MediaResourceId] = []
-    var disappearingResourceIds = Set<MediaResourceId>()
-    var seenResourceIds = Set<MediaResourceId>()
-    for entry in index.messageIds.reversed() {
-        guard let message = transaction.getMessage(entry.messageId) else {
-            continue
-        }
-        let isDisappearing = messageIsDisappearing(message)
-        for id in archivedResourceIds(message).reversed() {
-            if seenResourceIds.insert(id).inserted {
-                orderedResourceIds.append(id)
-                if isDisappearing {
-                    disappearingResourceIds.insert(id)
+private struct DeletedMessageArchiveMediaRecord {
+    let resourceIds: [MediaResourceId]
+    let isDisappearing: Bool
+}
+
+/// The archive index is durable; this disposable catalogue is rebuilt once per
+/// launch. Replay only submits a snapshot, never scans old messages or stats files
+/// on Postbox's shared queue. Existing pins survive an interrupted maintenance pass.
+final class DeletedMessageArchiveMediaRetention {
+    private weak var postbox: Postbox?
+    private let queue = Queue(name: "CodeGram.ArchiveMediaRetention", qos: .utility)
+    private let generation = Atomic<Int>(value: 0)
+    private let transactionDisposable = MetaDisposable()
+    private let delay: Double
+    private let batchDelay: Double
+    private var index = DeletedMessageArchiveIndex.empty
+    private var settings = DeletedMessageArchiveSettings.defaultSettings
+    private var records: [DeletedMessageArchiveIndexEntry: DeletedMessageArchiveMediaRecord] = [:]
+    private var invalidatedGenerations: [DeletedMessageArchiveIndexEntry: Int] = [:]
+    private var resourceSizes: [MediaResourceId: Int64] = [:]
+    private var pins: [MediaResourceId: Disposable] = [:]
+    private var running = false
+    private var scheduled = false
+    private var suspended = false
+    private var runId = 0
+    private var requestedGeneration = 0
+    private var refreshSizes = false
+    private var lastSizeRefresh: Double = 0
+    private var work = DeletedMessageArchiveMediaRetentionWork()
+    private var completions: [(DeletedMessageArchiveMediaRetentionWork) -> Void] = []
+
+    init(postbox: Postbox, delay: Double = 1.0, batchDelay: Double = 0.02) {
+        self.postbox = postbox
+        self.delay = delay
+        self.batchDelay = batchDelay
+    }
+
+    deinit {
+        self.transactionDisposable.dispose()
+        for pin in self.pins.values { pin.dispose() }
+    }
+
+    var isAlive: Bool { self.postbox != nil }
+
+    func request(settings: DeletedMessageArchiveSettings, index: DeletedMessageArchiveIndex,
+        invalidatedIds: Set<MessageId> = [], refreshSizes: Bool = false,
+        completed: ((DeletedMessageArchiveMediaRetentionWork) -> Void)? = nil) {
+        // Increment before enqueuing: a finishing old pass must not evict using a
+        // stale snapshot while a newer replay transaction has already changed it.
+        let generation = self.generation.modify { $0 + 1 }
+        self.queue.async {
+            self.index = index
+            self.settings = settings
+            self.requestedGeneration = generation
+            self.suspended = false
+            self.refreshSizes = self.refreshSizes || refreshSizes
+            for id in invalidatedIds {
+                let entry = DeletedMessageArchiveIndexEntry(id)
+                for resourceId in self.records[entry]?.resourceIds ?? [] where self.resourceSizes[resourceId] == 0 {
+                    self.resourceSizes.removeValue(forKey: resourceId)
                 }
+                self.records.removeValue(forKey: entry)
+                self.invalidatedGenerations[entry] = generation
+            }
+            if let completed { self.completions.append(completed) }
+            self.schedule()
+        }
+    }
+
+    /// Install a pin before the capture transaction returns. The maintenance
+    /// queue takes ownership later; the MediaBox operation is enqueued now.
+    func protect(resourceIds: [MediaResourceId]) {
+        guard let mediaBox = self.postbox?.mediaBox else { return }
+        // Capture can precede batch.finish by thousands of replay operations.
+        // Invalidate pending eviction/pruning before installing these fresh pins.
+        let _ = self.generation.modify { $0 + 1 }
+        let pins = Set(resourceIds).map { ($0, mediaBox.keepResource(id: $0).start()) }
+        self.queue.async {
+            for (id, pin) in pins {
+                // A resource can finish downloading between two captures using
+                // the same ID. Its previous "incomplete" size is no longer valid.
+                if self.resourceSizes[id] == 0 { self.resourceSizes.removeValue(forKey: id) }
+                if self.pins[id] == nil { self.pins[id] = pin }
+                else { pin.dispose() }
             }
         }
     }
-    orderedResourceIds.reverse()
 
-    var completedResources: [(id: MediaResourceId, size: Int64, isDisappearing: Bool)] = []
-    for id in orderedResourceIds {
-        if let path = mediaBox.completedResourcePath(id: id), let size = fileSize(path) {
-            completedResources.append((id: id, size: size, isDisappearing: disappearingResourceIds.contains(id)))
+    func releasePins() {
+        let _ = self.generation.modify { $0 + 1 }
+        self.queue.async {
+            self.suspended = true
+            self.runId += 1
+            self.running = false
+            self.transactionDisposable.set(nil)
+            for pin in self.pins.values { pin.dispose() }
+            self.pins.removeAll()
+            self.resourceSizes.removeAll()
+            self.completions.removeAll()
         }
     }
 
-    let gigabyte: Int64 = 1024 * 1024 * 1024
-    let plan = deletedMessageArchiveRetentionPlan(
-        items: completedResources,
-        limitBytes: Int64(settings.mediaLimitGigabytes) * gigabyte,
-        disappearingLimitBytes: Int64(settings.disappearingMediaLimitGigabytes) * gigabyte
-    )
-    let idsToRemove = plan.removed
-    let retainedIds = plan.retained
+    private func schedule() {
+        guard !self.running, !self.scheduled, !self.suspended else { return }
+        self.scheduled = true
+        self.queue.after(self.delay) {
+            self.scheduled = false
+            guard !self.running, !self.suspended else { return }
+            self.work = DeletedMessageArchiveMediaRetentionWork()
+            self.begin()
+        }
+    }
 
-    if !idsToRemove.isEmpty {
-        let _ = mediaBox.removeCachedResources(idsToRemove, force: true).start()
+    private func begin() {
+        guard self.postbox != nil, !self.suspended else { return }
+        self.running = true
+        self.runId += 1
+        let runId = self.runId
+        let generation = self.requestedGeneration
+        let entries = Set(self.index.messageIds)
+        self.records = self.records.filter { entries.contains($0.key) }
+        self.invalidatedGenerations = self.invalidatedGenerations.filter { entries.contains($0.key) }
+        let missing = self.index.messageIds.filter { self.records[$0] == nil }
+        self.read(missing, offset: 0, runId: runId, generation: generation)
     }
-    let desiredKeys = Set(retainedIds.map { DeletedMessageArchiveKeptResourceKey(mediaBoxPath: mediaBox.basePath, resourceId: $0) })
-    var removedKeepDisposables: [Disposable] = []
-    let _ = deletedMessageArchiveMediaKeepDisposables.modify { current in
-        var current = current
-        let removedKeys = current.keys.filter { $0.mediaBoxPath == mediaBox.basePath && !desiredKeys.contains($0) }
-        for key in removedKeys {
-            if let disposable = current.removeValue(forKey: key) { removedKeepDisposables.append(disposable) }
+
+    private func read(_ entries: [DeletedMessageArchiveIndexEntry], offset: Int, runId: Int, generation: Int) {
+        guard self.runId == runId, !self.suspended, let postbox = self.postbox else { return }
+        guard self.generation.with({ $0 }) == generation else {
+            self.running = false
+            self.schedule()
+            return
         }
-        for key in desiredKeys where current[key] == nil {
-            current[key] = mediaBox.keepResource(id: key.resourceId).start()
+        guard offset < entries.count else {
+            self.finish(runId: runId, generation: generation)
+            return
         }
-        return current
+        let batch = Array(entries[offset ..< min(offset + 64, entries.count)])
+        self.transactionDisposable.set(postbox.transaction { transaction -> (Int, [DeletedMessageArchiveIndexEntry: DeletedMessageArchiveMediaRecord]) in
+            let started = CFAbsoluteTimeGetCurrent()
+            var records: [DeletedMessageArchiveIndexEntry: DeletedMessageArchiveMediaRecord] = [:]
+            var reads = 0
+            for entry in batch {
+                let message = transaction.getMessage(entry.messageId)
+                records[entry] = DeletedMessageArchiveMediaRecord(resourceIds: message.map(archivedResourceIds) ?? [],
+                    isDisappearing: message.map(messageIsDisappearing) ?? false)
+                reads += 1
+                // A large message can exceed the time budget by itself; do not
+                // compound it with another 63 decodes before chat/search can run.
+                if CFAbsoluteTimeGetCurrent() - started >= 0.004 { break }
+            }
+            return (reads, records)
+        }.start(next: { [weak self] result in
+            guard let self else { return }
+            self.queue.async {
+                guard self.runId == runId, !self.suspended else { return }
+                let (reads, records) = result
+                self.work.messageReads += reads
+                self.work.largestReadBatch = max(self.work.largestReadBatch, reads)
+                let validRecords = records.filter { (self.invalidatedGenerations[$0.key] ?? 0) <= generation }
+                self.records.merge(validRecords, uniquingKeysWith: { _, updated in updated })
+                if let mediaBox = self.postbox?.mediaBox {
+                    for record in validRecords.values {
+                        for id in record.resourceIds where self.pins[id] == nil {
+                            self.pins[id] = mediaBox.keepResource(id: id).start()
+                        }
+                    }
+                }
+                self.queue.after(self.batchDelay) { self.read(entries, offset: offset + reads, runId: runId, generation: generation) }
+            }
+        }))
     }
-    for disposable in removedKeepDisposables { disposable.dispose() }
+
+    private func finish(runId: Int, generation: Int) {
+        guard self.runId == runId, !self.suspended, let postbox = self.postbox else { return }
+        guard self.generation.with({ $0 }) == generation else {
+            // Requests submitted during a pass reuse all decoded rows and only
+            // add the newly captured messages. No full scan starts over.
+            self.running = false
+            self.schedule()
+            return
+        }
+        var resources: [MediaResourceId] = []
+        var disappearing = Set<MediaResourceId>()
+        var seen = Set<MediaResourceId>()
+        for entry in self.index.messageIds.reversed() {
+            guard self.generation.with({ $0 }) == generation else {
+                self.running = false
+                self.schedule()
+                return
+            }
+            guard let record = self.records[entry] else { continue }
+            for id in record.resourceIds.reversed() where seen.insert(id).inserted {
+                resources.append(id)
+                if record.isDisappearing { disappearing.insert(id) }
+            }
+        }
+        resources.reverse()
+        let mediaBox = postbox.mediaBox
+        // File I/O and quota planning run on the utility queue. Unchanged replay
+        // packets reuse sizes; an occasional refresh accounts for later downloads.
+        let now = CFAbsoluteTimeGetCurrent()
+        let refreshAll = self.refreshSizes || now - self.lastSizeRefresh >= 30.0
+        if refreshAll { self.lastSizeRefresh = now }
+        self.refreshSizes = false
+        self.resourceSizes = self.resourceSizes.filter { seen.contains($0.key) }
+        var completed: [(id: MediaResourceId, size: Int64, isDisappearing: Bool)] = []
+        for id in resources {
+            guard self.generation.with({ $0 }) == generation else {
+                self.running = false
+                self.schedule()
+                return
+            }
+            if refreshAll || self.resourceSizes[id] == nil {
+                self.work.resourceStats += 1
+                self.resourceSizes[id] = mediaBox.completedResourcePath(id: id).flatMap { fileSize($0) } ?? 0
+            }
+            if let size = self.resourceSizes[id], size > 0 {
+                if self.pins[id] == nil { self.pins[id] = mediaBox.keepResource(id: id).start() }
+                completed.append((id: id, size: size, isDisappearing: disappearing.contains(id)))
+            }
+        }
+        let gigabyte: Int64 = 1024 * 1024 * 1024
+        let plan = deletedMessageArchiveRetentionPlan(items: completed,
+            limitBytes: Int64(self.settings.mediaLimitGigabytes) * gigabyte,
+            disappearingLimitBytes: Int64(self.settings.disappearingMediaLimitGigabytes) * gigabyte)
+        let removed = Set(plan.removed)
+        // Match the archive's existing policy: only completed files consume the
+        // quota and keep persistent pins. Capture/in-progress pins are temporary.
+        let desiredPins = Set(plan.retained)
+        // Authorize eviction in a tiny serialized transaction, after all replay
+        // mutations before it have submitted their new generation. No old plan
+        // can delete resources after a newer index/settings snapshot arrived.
+        self.transactionDisposable.set(postbox.transaction { _ -> Bool in
+            guard self.generation.with({ $0 }) == generation else { return false }
+            if !plan.removed.isEmpty {
+                let _ = mediaBox.removeCachedResources(plan.removed, force: true,
+                    shouldRemove: { self.generation.with({ $0 }) == generation }).start()
+            }
+            return true
+        }.start(next: { [weak self] accepted in
+            guard let self else { return }
+            self.queue.async {
+                guard self.runId == runId, !self.suspended else { return }
+                self.running = false
+                guard accepted, self.generation.with({ $0 }) == generation else { self.schedule(); return }
+                for id in Array(self.pins.keys) where !desiredPins.contains(id) {
+                    self.pins.removeValue(forKey: id)?.dispose()
+                }
+                // The I/O queue may still cancel removal after a new request.
+                // Re-stat next time instead of caching an unconfirmed deletion.
+                for id in removed { self.resourceSizes.removeValue(forKey: id) }
+                let callbacks = self.completions
+                self.completions.removeAll()
+                for callback in callbacks { callback(self.work) }
+            }
+        }))
+    }
+}
+
+func updateDeletedMessageArchiveMediaRetention(transaction: Transaction, mediaBox: MediaBox,
+    settings suppliedSettings: DeletedMessageArchiveSettings? = nil, index suppliedIndex: DeletedMessageArchiveIndex? = nil,
+    invalidatedIds: Set<MessageId> = [], refreshSizes: Bool = false) {
+    guard let retention = deletedMessageArchiveMediaRetentions.with({ $0[mediaBox.basePath] }) else { return }
+    let settings = suppliedSettings ?? deletedMessageArchiveSettings(transaction: transaction)
+    let index = suppliedIndex ?? (transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty)
+    retention.request(settings: settings, index: index, invalidatedIds: invalidatedIds, refreshSizes: refreshSizes)
 }
 
 func makeDeletedMessageArchiveBatch(transaction: Transaction, mediaBox: MediaBox) -> DeletedMessageArchiveBatch {
@@ -238,6 +454,30 @@ private func mutateDeletedMessageArchiveIndex(transaction: Transaction, batch: D
             var index = entry?.get(DeletedMessageArchiveIndex.self) ?? .empty
             update(&index)
             return PreferencesEntry(index)
+        })
+    }
+}
+
+private func appendDeletedMessageArchiveSnapshot(transaction: Transaction, batch: DeletedMessageArchiveBatch?, snapshot: MessageId, live: MessageId) {
+    let snapshotEntry = DeletedMessageArchiveIndexEntry(snapshot)
+    let liveEntry = DeletedMessageArchiveIndexEntry(live)
+    if let batch {
+        batch.appendSnapshot(snapshotEntry, live: liveEntry)
+    } else {
+        mutateDeletedMessageArchiveIndex(transaction: transaction, batch: nil, { index in
+            index.messageIds.append(snapshotEntry)
+            if !index.liveMessageIds.contains(liveEntry) { index.liveMessageIds.append(liveEntry) }
+        })
+    }
+}
+
+private func appendDeletedMessageArchiveLiveMessage(transaction: Transaction, batch: DeletedMessageArchiveBatch?, id: MessageId) {
+    let entry = DeletedMessageArchiveIndexEntry(id)
+    if let batch {
+        batch.appendLiveMessage(entry)
+    } else {
+        mutateDeletedMessageArchiveIndex(transaction: transaction, batch: nil, { index in
+            if !index.liveMessageIds.contains(entry) { index.liveMessageIds.append(entry) }
         })
     }
 }
@@ -318,6 +558,55 @@ private func archiveExtendedMediaAreEqual(_ lhs: TelegramExtendedMedia, _ rhs: T
     return lhs == rhs
 }
 
+private func archiveFileArraysAreEqual(_ lhs: [TelegramMediaFile], _ rhs: [TelegramMediaFile]) -> Bool {
+    guard lhs.count == rhs.count else { return false }
+    for i in 0 ..< lhs.count {
+        if !archiveMediaAreEqual(lhs[i], rhs[i]) { return false }
+    }
+    return true
+}
+
+private func archiveWebpageAttributesAreEqual(_ lhs: [TelegramMediaWebpageAttribute], _ rhs: [TelegramMediaWebpageAttribute]) -> Bool {
+    guard lhs.count == rhs.count else { return false }
+    for i in 0 ..< lhs.count {
+        switch (lhs[i], rhs[i]) {
+        case let (.theme(lhsAttribute), .theme(rhsAttribute)):
+            if lhsAttribute.settings != rhsAttribute.settings
+                || !archiveFileArraysAreEqual(lhsAttribute.files, rhsAttribute.files) { return false }
+        case let (.stickerPack(lhsAttribute), .stickerPack(rhsAttribute)):
+            if lhsAttribute.flags != rhsAttribute.flags
+                || !archiveFileArraysAreEqual(lhsAttribute.files, rhsAttribute.files) { return false }
+        case let (.giftCollection(lhsAttribute), .giftCollection(rhsAttribute)):
+            if !archiveFileArraysAreEqual(lhsAttribute.files, rhsAttribute.files) { return false }
+        default:
+            if lhs[i] != rhs[i] { return false }
+        }
+    }
+    return true
+}
+
+private func archiveInstantPagesAreEqual(_ lhs: InstantPage.Accessor?, _ rhs: InstantPage.Accessor?) -> Bool {
+    switch (lhs, rhs) {
+    case let (.some(lhs), .some(rhs)):
+        if lhs == rhs { return true }
+        let lhsPage = lhs._parse(), rhsPage = rhs._parse()
+        guard lhsPage.blocks == rhsPage.blocks,
+            lhsPage.isComplete == rhsPage.isComplete,
+            lhsPage.rtl == rhsPage.rtl,
+            lhsPage.url == rhsPage.url,
+            lhsPage.rawMedia.count == rhsPage.rawMedia.count else { return false }
+        for (id, lhsMedia) in lhsPage.rawMedia {
+            guard let rhsMedia = rhsPage.rawMedia[id], archiveMediaAreEqual(lhsMedia, rhsMedia) else { return false }
+        }
+        // Page views, like message view counts, change without an authored edit.
+        return true
+    case (nil, nil):
+        return true
+    default:
+        return false
+    }
+}
+
 private func archiveLoadedWebpageContentsAreEqual(_ lhs: TelegramMediaWebpageLoadedContent, _ rhs: TelegramMediaWebpageLoadedContent) -> Bool {
     guard lhs.url == rhs.url,
         lhs.displayUrl == rhs.displayUrl,
@@ -338,8 +627,8 @@ private func archiveLoadedWebpageContentsAreEqual(_ lhs: TelegramMediaWebpageLoa
     return archiveOptionalMediaAreEqual(lhs.image, rhs.image)
         && archiveOptionalMediaAreEqual(lhs.file, rhs.file)
         && archiveOptionalMediaAreEqual(lhs.story, rhs.story)
-        && lhs.attributes == rhs.attributes
-        && lhs.instantPage == rhs.instantPage
+        && archiveWebpageAttributesAreEqual(lhs.attributes, rhs.attributes)
+        && archiveInstantPagesAreEqual(lhs.instantPage, rhs.instantPage)
 }
 
 private func archiveMediaAreEqual(_ lhs: Media, _ rhs: Media) -> Bool {
@@ -528,7 +817,8 @@ private func addStoredCopy(
     message: Message,
     namespace: MessageId.Namespace,
     attributes: [MessageAttribute],
-    keepGlobalTags: Bool = false
+    keepGlobalTags: Bool = false,
+    mediaBox: MediaBox? = nil
 ) -> MessageId? {
     let globallyUniqueId = Int64.random(in: Int64.min ... Int64.max)
     let copy = makeStoredCopy(
@@ -538,7 +828,11 @@ private func addStoredCopy(
         globallyUniqueId: globallyUniqueId,
         keepGlobalTags: keepGlobalTags
     )
-    return transaction.addMessages([copy], location: .Random)[globallyUniqueId]
+    let id = transaction.addMessages([copy], location: .Random)[globallyUniqueId]
+    if id != nil, let mediaBox {
+        deletedMessageArchiveMediaRetentions.with({ $0[mediaBox.basePath] })?.protect(resourceIds: archivedResourceIds(message))
+    }
+    return id
 }
 
 private func canArchiveMessageFromChat(transaction: Transaction, peerId: PeerId, settings: DeletedMessageArchiveSettings) -> Bool {
@@ -588,17 +882,12 @@ func archivePreviousMessageVersionIfNeeded(
         transaction: transaction,
         message: previous,
         namespace: Namespaces.Message.ArchivedVersion,
-        attributes: snapshotAttributes
+        attributes: snapshotAttributes,
+        mediaBox: mediaBox
     ) else {
         return updatedMessage
     }
-    mutateDeletedMessageArchiveIndex(transaction: transaction, batch: batch, { current in
-        current.messageIds.append(DeletedMessageArchiveIndexEntry(snapshotId))
-        let liveEntry = DeletedMessageArchiveIndexEntry(id)
-        if !current.liveMessageIds.contains(liveEntry) {
-            current.liveMessageIds.append(liveEntry)
-        }
-    })
+    appendDeletedMessageArchiveSnapshot(transaction: transaction, batch: batch, snapshot: snapshotId, live: id)
     if let mediaBox {
         requestDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox, batch: batch)
     }
@@ -662,7 +951,8 @@ func archiveMessagesBeforeCloudDeletion(
             transaction: transaction,
             message: message,
             namespace: Namespaces.Message.Archived,
-            attributes: attributes
+            attributes: attributes,
+            mediaBox: mediaBox
         ) {
             result.append(archivedId)
         }
@@ -775,10 +1065,7 @@ private func attachNikitaPendingVersions(transaction: Transaction, id: MessageId
         ids.append(entry.messageId)
     }
     guard !ids.isEmpty else { return updated }
-    mutateDeletedMessageArchiveIndex(transaction: transaction, batch: batch, { index in
-        let entry = DeletedMessageArchiveIndexEntry(id)
-        if !index.liveMessageIds.contains(entry) { index.liveMessageIds.append(entry) }
-    })
+    appendDeletedMessageArchiveLiveMessage(transaction: transaction, batch: batch, id: id)
     var attributes = attributesWithoutArchiveMetadata(updated.attributes)
     attributes.append(ArchivedMessageAttribute(originalMessageId: id, versionIds: ids, deletedAt: nil, sessionId: deletedMessageArchiveSessionId))
     return updated.withUpdatedAttributes(attributes)
@@ -874,6 +1161,7 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
     }
     var count = 0
     var failed = false
+    var invalidatedMediaIds = Set<MessageId>()
     for event in events {
         guard let originalId = event.originalId else { continue }
         let key = nikitaArchiveMessageKey(originalId)
@@ -891,7 +1179,7 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
         func makeCopy(namespace: Int32, attributes: [MessageAttribute]) -> MessageId? {
             if remoteMedia.isEmpty, let current, nikitaArchiveContentMatches(current, event: event) {
                 return addStoredCopy(transaction: transaction, message: current, namespace: namespace,
-                    attributes: attributesWithoutArchiveMetadata(current.attributes) + attributes)
+                    attributes: attributesWithoutArchiveMetadata(current.attributes) + attributes, mediaBox: mediaBox)
             }
             let uniqueId = Int64.random(in: Int64.min ... Int64.max)
             let source = current.flatMap { nikitaArchiveContentMatches($0, event: event) ? $0 : nil }
@@ -908,7 +1196,11 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                 globallyUniqueId: uniqueId, groupingKey: event.groupedId, threadId: event.threadId, timestamp: event.date,
                 flags: event.outgoing ? [] : [.Incoming], tags: tags, globalTags: [], localTags: [], forwardInfo: nil,
                 authorId: event.resolvedAuthorId, text: event.displayText, attributes: attributes, media: remoteMedia)
-            return transaction.addMessages([copy], location: .Random)[uniqueId]
+            let id = transaction.addMessages([copy], location: .Random)[uniqueId]
+            if id != nil {
+                deletedMessageArchiveMediaRetentions.with({ $0[mediaBox.basePath] })?.protect(resourceIds: archivedResourceIds(media: copy.media))
+            }
+            return id
         }
 
         if event.kind == "edit" {
@@ -916,6 +1208,8 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                 guard let version = transaction.getMessage(id) else { return false }
                 let matches = version.archivedVersionCapturedAt == event.capturedAt && nikitaArchiveContentMatches(version, event: event)
                 if matches && !remoteMedia.isEmpty {
+                    invalidatedMediaIds.insert(id)
+                    deletedMessageArchiveMediaRetentions.with({ $0[mediaBox.basePath] })?.protect(resourceIds: archivedResourceIds(media: remoteMedia))
                     reuseNikitaArchiveCachedMedia(version.media, remote: remoteMedia, mediaBox: mediaBox)
                     transaction.updateMessage(id, update: { message in
                         let attributes = attributesWithoutExpiry(message.attributes)
@@ -969,7 +1263,7 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                         let snapshotId: MessageId?
                         if useRemote {
                             snapshotId = addStoredCopy(transaction: transaction, message: archived, namespace: Namespaces.Message.ArchivedVersion,
-                                attributes: attributesWithoutArchiveMetadata(archived.attributes) + [ArchivedMessageVersionAttribute(capturedAt: event.capturedAt)])
+                                attributes: attributesWithoutArchiveMetadata(archived.attributes) + [ArchivedMessageVersionAttribute(capturedAt: event.capturedAt)], mediaBox: mediaBox)
                         } else {
                             snapshotId = makeCopy(namespace: Namespaces.Message.ArchivedVersion,
                                 attributes: [ArchivedMessageVersionAttribute(capturedAt: event.capturedAt)])
@@ -982,6 +1276,8 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
                 }
                 let attribute = ArchivedMessageAttribute(originalMessageId: originalId, versionIds: versionIds,
                     deletedAt: event.capturedAt, sessionId: deletedMessageArchiveSessionId)
+                invalidatedMediaIds.insert(archived.id)
+                deletedMessageArchiveMediaRetentions.with({ $0[mediaBox.basePath] })?.protect(resourceIds: archivedResourceIds(media: remoteMedia))
                 transaction.updateMessage(archived.id, update: { message in
                     if !useRemote { return .update(nikitaArchiveStoredUpdate(message, attribute: attribute)) }
                     let source = current.flatMap { nikitaArchiveContentMatches($0, event: event) ? $0 : nil }
@@ -1023,31 +1319,20 @@ func importNikitaArchiveEvents(transaction: Transaction, mediaBox: MediaBox,
     if index != initialIndex {
         updateDeletedMessageArchiveIndex(transaction: transaction, { _ in index })
     }
-    if count != 0 { updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox) }
+    if count != 0 || !invalidatedMediaIds.isEmpty {
+        updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox, index: index, invalidatedIds: invalidatedMediaIds)
+    }
     return failed ? nil : count
 }
 
 func _internal_clearDeletedMessageArchiveMedia(transaction: Transaction, mediaBox: MediaBox) {
+    deletedMessageArchiveMediaRetentions.with({ $0[mediaBox.basePath] })?.releasePins()
     let index = transaction.getPreferencesEntry(key: PreferencesKeys.deletedMessageArchiveIndex)?.get(DeletedMessageArchiveIndex.self) ?? .empty
     var resourceIds = Set<MediaResourceId>()
     for entry in index.messageIds {
         if let message = transaction.getMessage(entry.messageId) {
             resourceIds.formUnion(archivedResourceIds(message))
         }
-    }
-    var removedKeepDisposables: [Disposable] = []
-    let _ = deletedMessageArchiveMediaKeepDisposables.modify { current in
-        var current = current
-        let removedKeys = current.keys.filter { $0.mediaBoxPath == mediaBox.basePath }
-        for key in removedKeys {
-            if let disposable = current.removeValue(forKey: key) {
-                removedKeepDisposables.append(disposable)
-            }
-        }
-        return current
-    }
-    for disposable in removedKeepDisposables {
-        disposable.dispose()
     }
     if !resourceIds.isEmpty {
         let _ = mediaBox.removeCachedResources(Array(resourceIds), force: true).start()
@@ -1086,10 +1371,16 @@ func _internal_deletedMessageArchiveStats(transaction: Transaction, mediaBox: Me
 }
 
 func _internal_refreshDeletedMessageArchiveMediaLimit(transaction: Transaction, mediaBox: MediaBox) {
-    updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox)
+    updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: mediaBox, refreshSizes: true)
 }
 
 func initializeDeletedMessageArchiveSession(postbox: Postbox) -> Signal<Never, NoError> {
+    let _ = deletedMessageArchiveMediaRetentions.modify { current in
+        var current = current.filter { $0.value.isAlive }
+        current[postbox.mediaBox.basePath]?.releasePins()
+        current[postbox.mediaBox.basePath] = DeletedMessageArchiveMediaRetention(postbox: postbox)
+        return current
+    }
     let _ = deletedMessageArchiveSessionInitialized.swap(true)
     return postbox.transaction { transaction -> Void in
         _ = prepareDeletedMessageArchive(transaction: transaction, mediaBox: postbox.mediaBox)

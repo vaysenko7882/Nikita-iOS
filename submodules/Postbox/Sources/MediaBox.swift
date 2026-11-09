@@ -1779,7 +1779,7 @@ public final class MediaBox {
         }
     }
     
-    public func removeCachedResources(_ ids: [MediaResourceId], force: Bool = false, notify: Bool = false) -> Signal<Float, NoError> {
+    public func removeCachedResources(_ ids: [MediaResourceId], force: Bool = false, notify: Bool = false, shouldRemove: (() -> Bool)? = nil) -> Signal<Float, NoError> {
         return Signal { subscriber in
             self.dataQueue.async {
                 //let uniqueIds = Set(ids.map { $0.stringRepresentation })
@@ -1822,6 +1822,11 @@ public final class MediaBox {
                 }
                 
                 for id in ids {
+                    // Deferred quota maintenance may have been superseded after
+                    // it entered this queue. Check at the actual eviction point.
+                    guard shouldRemove?() ?? true else {
+                        break
+                    }
                     if !force {
                         if self.fileContexts[id] != nil {
                             count += 3
@@ -1844,6 +1849,7 @@ public final class MediaBox {
                 }
                 
                 for path in pathsToDelete {
+                    guard shouldRemove?() ?? true else { break }
                     unlink(path)
                     count += 1
                     reportProgress(count)

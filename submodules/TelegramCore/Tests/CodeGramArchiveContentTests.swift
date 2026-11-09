@@ -41,12 +41,13 @@ final class CodeGramArchiveContentTests: XCTestCase {
             rhsText: "same", rhsAttributes: [], rhsMedia: [rhs])
     }
 
-    private func webpage(reference: UInt8 = 1, title: String = "Preview", imageId: Int64 = 20) -> TelegramMediaWebpage {
+    private func webpage(reference: UInt8 = 1, title: String = "Preview", imageId: Int64 = 20,
+        attributes: [TelegramMediaWebpageAttribute] = [], instantPage: InstantPage? = nil) -> TelegramMediaWebpage {
         let content = TelegramMediaWebpageLoadedContent(url: "https://example.com", displayUrl: "example.com",
             hash: 1, type: "article", websiteName: "Example", title: title, text: "Description",
             embedUrl: nil, embedType: nil, embedSize: nil, duration: nil, author: nil,
             isMediaLargeByDefault: false, imageIsVideoCover: false, image: self.image(imageId, reference: reference),
-            file: self.document(reference: reference), story: nil, attributes: [], instantPage: nil)
+            file: self.document(reference: reference), story: nil, attributes: attributes, instantPage: instantPage)
         return TelegramMediaWebpage(webpageId: MediaId(namespace: Namespaces.Media.CloudWebpage, id: 60), content: .Loaded(content))
     }
 
@@ -90,6 +91,73 @@ final class CodeGramArchiveContentTests: XCTestCase {
     func testLinkPreviewContentChangeCreatesRevision() {
         XCTAssertFalse(self.contentsAreEqual(self.webpage(), self.webpage(title: "Changed")))
         XCTAssertFalse(self.contentsAreEqual(self.webpage(), self.webpage(imageId: 21)))
+    }
+
+    private func instantPage(reference: UInt8 = 1, text: String = "Article", imageId: Int64 = 20, views: Int32 = 1) -> InstantPage {
+        let image = self.image(imageId, reference: reference)
+        let file = self.document(reference: reference)
+        return InstantPage(blocks: [.paragraph(.plain(text))], rawMedia: [image.imageId: image, file.fileId: file],
+            isComplete: true, rtl: false, url: "https://example.com", views: views)
+    }
+
+    func testInstantPageReferenceAndViewRefreshDoNotCreateRevision() {
+        let previous = self.webpage(instantPage: self.instantPage())
+        let refreshed = self.webpage(instantPage: self.instantPage(reference: 2, views: 2))
+        XCTAssertFalse(previous.isEqual(to: refreshed))
+        XCTAssertTrue(self.contentsAreEqual(previous, refreshed))
+        XCTAssertTrue(self.contentsAreEqual(previous, self.webpage(instantPage: self.instantPage(views: 3))))
+    }
+
+    func testPersistedInstantPageReferenceRefreshDoesNotCreateRevision() throws {
+        initializeAccountManagement()
+        func persisted(_ media: TelegramMediaWebpage) throws -> TelegramMediaWebpage {
+            let encoder = PostboxEncoder()
+            encoder.encodeRootObject(media)
+            let decoder = PostboxDecoder(buffer: MemoryBuffer(data: encoder.makeData()))
+            return try XCTUnwrap(decoder.decodeRootObject() as? TelegramMediaWebpage)
+        }
+        let previous = try persisted(self.webpage(instantPage: self.instantPage()))
+        let refreshed = try persisted(self.webpage(instantPage: self.instantPage(reference: 2, views: 2)))
+        XCTAssertFalse(previous.isEqual(to: refreshed), "Actual persisted InstantPage bytes must differ")
+        XCTAssertTrue(self.contentsAreEqual(previous, refreshed))
+    }
+
+    func testInstantPageContentChangesCreateRevisions() {
+        let previous = self.webpage(instantPage: self.instantPage())
+        XCTAssertFalse(self.contentsAreEqual(previous, self.webpage(instantPage: self.instantPage(text: "Changed"))))
+        XCTAssertFalse(self.contentsAreEqual(previous, self.webpage(instantPage: self.instantPage(imageId: 21))))
+        XCTAssertFalse(self.contentsAreEqual(previous, self.webpage()))
+    }
+
+    private func webpageAttributes(reference: UInt8 = 1, fileId: Int64 = 10,
+        settings: TelegramThemeSettings? = nil,
+        flags: TelegramMediaWebpageStickerPackAttribute.Flags = []) -> [TelegramMediaWebpageAttribute] {
+        let file = self.document(fileId, reference: reference)
+        return [.theme(TelegraMediaWebpageThemeAttribute(files: [file], settings: settings)),
+            .stickerPack(TelegramMediaWebpageStickerPackAttribute(flags: flags, files: [file])),
+            .giftCollection(TelegramMediaWebpageGiftCollectionAttribute(files: [file]))]
+    }
+
+    func testWebpageAttributeReferenceRefreshDoesNotCreateRevision() {
+        let previous = self.webpage(attributes: self.webpageAttributes())
+        let refreshed = self.webpage(attributes: self.webpageAttributes(reference: 2))
+        XCTAssertFalse(previous.isEqual(to: refreshed))
+        XCTAssertTrue(self.contentsAreEqual(previous, refreshed))
+    }
+
+    func testWebpageAttributeContentChangesCreateRevisions() {
+        let attributes = self.webpageAttributes()
+        let previous = self.webpage(attributes: attributes)
+        let replacements = self.webpageAttributes(fileId: 11)
+        for i in attributes.indices {
+            var changed = attributes
+            changed[i] = replacements[i]
+            XCTAssertFalse(self.contentsAreEqual(previous, self.webpage(attributes: changed)))
+        }
+        XCTAssertFalse(self.contentsAreEqual(previous, self.webpage(attributes: self.webpageAttributes(flags: .isEmoji))))
+        let settings = TelegramThemeSettings(baseTheme: .night, accentColor: 100, outgoingAccentColor: nil,
+            messageColors: [], animateMessageColors: false, wallpaper: nil)
+        XCTAssertFalse(self.contentsAreEqual(previous, self.webpage(attributes: self.webpageAttributes(settings: settings))))
     }
 
     func testPaidMediaRefreshPreservesActualContentChanges() {

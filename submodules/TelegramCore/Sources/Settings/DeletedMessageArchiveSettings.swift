@@ -167,6 +167,9 @@ public func updateDeletedMessageArchiveSettingsInteractively(
         transaction.updatePreferencesEntry(key: PreferencesKeys.deletedMessageArchiveSettings, { current in
             return PreferencesEntry(f(current?.get(DeletedMessageArchiveSettings.self) ?? .defaultSettings))
         })
+        // Invalidate queued quota work in the same transaction as the new
+        // settings, before a plan based on the old limits can evict any media.
+        updateDeletedMessageArchiveMediaRetention(transaction: transaction, mediaBox: postbox.mediaBox, refreshSizes: true)
     }
     |> ignoreValues
 }

@@ -146,6 +146,13 @@ enum ChatHistoryViewScrollPosition {
 enum ChatHistoryViewUpdateType {
     case Initial(fadeIn: Bool)
     case Generic(type: ViewUpdateType)
+
+    fileprivate var isFillHole: Bool {
+        if case .Generic(.FillHole) = self {
+            return true
+        }
+        return false
+    }
 }
 
 public struct ChatHistoryCombinedInitialReadStateData {
@@ -2206,7 +2213,8 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
             let (historyAppearsCleared, pendingUnpinnedAllMessages, pendingRemovedMessages, currentlyPlayingMessageIdAndType, scrollToMessageId, chatHasBots, allAdMessages) = promises
 
             if messageFilterSettings.isActive,
-               case let .HistoryView(view, _, _, _, _, _, _) = update.0,
+               case let .HistoryView(view, type, _, _, _, _, _) = update.0,
+               !type.isFillHole,
                !view.isLoading,
                let strongSelf = self,
                let location = update.2,

@@ -68,6 +68,16 @@ public final class MessageFilterSettingsStore {
         return value
     }
 
+    /// Row layouts use the latest in-process value without copying/comparing the
+    /// complete preferences blob. `current`, writes and settings signals keep
+    /// this snapshot refreshed, including externally observed preferences.
+    public var cachedCurrent: MessageFilterSettings {
+        self.lock.lock()
+        let value = self.cache.value
+        self.lock.unlock()
+        return value
+    }
+
     @discardableResult
     public func update(_ f: (MessageFilterSettings) -> MessageFilterSettings) -> MessageFilterSettings {
         self.lock.lock()
