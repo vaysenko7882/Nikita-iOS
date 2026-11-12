@@ -10,15 +10,18 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
         run: |
-          if [ -d /Applications/Xcode_26.6.app ]; then
-            sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
-          fi
+          for candidate in /Applications/Xcode_27*.app /Applications/Xcode_26*.app /Applications/Xcode.app; do
+            if [ -d "$candidate/Contents/Developer" ]; then
+              sudo xcode-select -s "$candidate/Contents/Developer"
+              break
+            fi
+          done
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
       - name: Build physical-device ARM64 IPA without signing
