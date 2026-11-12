@@ -1,0 +1,35 @@
+name: Build Autismex unsigned IPA
+on:
+  push:
+    branches: [codex/autismex-ipa-20261112]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: autismex-ipa-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          if [ -d /Applications/Xcode_26.6.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+      - name: Build physical-device ARM64 IPA without signing
+        run: bash scripts/build-ipa.sh
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Autismex-unsigned-IPA
+          path: |
+            build/Autismex-unsigned.ipa
+            build/Autismex-unsigned.sha256
+            build/build-info.txt
+          if-no-files-found: error
+          retention-days: 14
