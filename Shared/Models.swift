@@ -94,10 +94,6 @@ struct Metrics: Decodable, Sendable {
     var maxPauseSource: String?
 }
 
-extension Metrics {
-    init() {}
-}
-
 struct Interval: Decodable, Identifiable, Equatable, Sendable {
     var state: String
     var start: Double
