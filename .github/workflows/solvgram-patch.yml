@@ -1,0 +1,36 @@
+name: Build Solvgram gift controls
+on:
+  push:
+    branches: [codex/solvgram-gift-controls-20261113]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: solvgram-patch
+          persist-credentials: false
+      - name: Select Xcode
+        run: |
+          for candidate in /Applications/Xcode_27*.app /Applications/Xcode.app; do
+            if [ -d "$candidate/Contents/Developer" ]; then
+              sudo xcode-select -s "$candidate/Contents/Developer"
+              break
+            fi
+          done
+          xcodebuild -version
+      - name: Test and compile ARM64 gift controls
+        run: bash solvgram-patch/build.sh
+      - name: Retain compiled library
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvgram-gift-controls-arm64
+          path: |
+            solvgram-patch/build/SolvgramGiftControls.dylib
+            solvgram-patch/build/SolvgramGiftControls.sha256
+          if-no-files-found: error
+          retention-days: 14
