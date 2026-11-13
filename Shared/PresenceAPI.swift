@@ -53,11 +53,16 @@ struct PresenceAPI {
     }
 
     func state(date: String?) async throws -> PresenceState {
+        try await stateWithData(date: date).0
+    }
+
+    /// Состояние вместе с исходным JSON — приложение кладёт его в кэш для мгновенного запуска.
+    func stateWithData(date: String?) async throws -> (PresenceState, Data) {
         var query: [URLQueryItem] = []
         if let date { query.append(URLQueryItem(name: "date", value: date)) }
         let data = try await load(request("api/state", query: query))
         do {
-            return try PresenceAPI.decoder.decode(PresenceState.self, from: data)
+            return (try PresenceAPI.decoder.decode(PresenceState.self, from: data), data)
         } catch {
             throw PresenceError.decoding
         }

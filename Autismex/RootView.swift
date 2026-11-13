@@ -16,7 +16,7 @@ enum ActiveSheet: Identifiable {
 }
 
 struct RootView: View {
-    @EnvironmentObject private var store: PresenceStore
+    @Environment(PresenceStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var scrubbing = false
     @State private var diagnosticsOpen = false
@@ -27,13 +27,15 @@ struct RootView: View {
         ZStack(alignment: .bottom) {
             Palette.page.ignoresSafeArea()
             if let state = store.state {
-                content(state)
+                GeometryReader { geometry in
+                    content(state, width: max(1, geometry.size.width))
+                }
                 DateBar(state: state, onPickDate: { sheet = .datePicker })
                     .padding(.horizontal, 14)
                     .padding(.bottom, 6)
             } else {
                 LaunchView(message: store.errorMessage) {
-                    Task { await store.refresh() }
+                    Task { await store.refresh(force: true) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -57,49 +59,52 @@ struct RootView: View {
         }
     }
 
-    private func content(_ state: PresenceState) -> some View {
+    /// Единственная прокрутка — вертикальная. Ширина содержимого жёстко равна ширине
+    /// экрана, поэтому сдвинуть или «растянуть» экран вбок нельзя.
+    private func content(_ state: PresenceState, width: CGFloat) -> some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
-                    TopBar(
-                        onConnection: {
-                            diagnosticsOpen = true
-                            withAnimation(.snappy) { proxy.scrollTo("diagnostics", anchor: .center) }
-                        },
-                        onExport: export,
-                        onSite: { sheet = .site }
-                    )
                     ForEach(store.notices, id: \.self) { text in
                         NoticeView(text: text).padding(.bottom, 10)
                     }
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        StatusCard(state: state, date: context.date)
-                    }
+                    StatusCard(
+                        state: state,
+                        onExport: export,
+                        onSite: { sheet = .site },
+                        onDiagnostics: {
+                            diagnosticsOpen = true
+                            withAnimation(.snappy) { proxy.scrollTo("diagnostics", anchor: .center) }
+                        }
+                    )
                     DaySection(state: state, scrubbing: $scrubbing)
                         .id("day")
-                        .padding(.top, 52)
+                        .padding(.top, 44)
                     WeekSection(state: state)
-                        .padding(.top, 60)
-                    ChronicleSection(state: state)
-                        .padding(.top, 60)
+                        .padding(.top, 56)
+                    ChronicleSection(state: state, width: width - 40)
+                        .padding(.top, 56)
                     HistorySection(state: state) {
                         withAnimation(.snappy) { proxy.scrollTo("day", anchor: .top) }
                     }
-                    .padding(.top, 60)
+                    .padding(.top, 56)
                     TotalsCard(state: state)
-                        .padding(.top, 60)
+                        .padding(.top, 56)
                     DiagnosticsCard(state: state, isOpen: $diagnosticsOpen, onCopy: copyDiagnostics)
                         .id("diagnostics")
                         .padding(.top, 12)
                     FooterView(state: state)
-                        .padding(.top, 36)
+                        .padding(.top, 24)
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 120)
+                .padding(.top, 8)
+                .padding(.bottom, 110)
+                .frame(width: width)
             }
             .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .scrollDisabled(scrubbing)
-            .refreshable { await store.refresh() }
+            .refreshable { await store.refresh(force: true) }
         }
     }
 
@@ -137,7 +142,7 @@ struct RootView: View {
         Task {
             do {
                 UIPasteboard.general.string = try await store.api.diagnostics()
-                show("Диагностика скопирована. Ключей и сессии в ней нет.")
+                show("Диагностика скопирована")
             } catch {
                 show("Не удалось скопировать диагностику")
             }
@@ -147,60 +152,11 @@ struct RootView: View {
     private func show(_ text: String) {
         withAnimation(.snappy) { toast = text }
         Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
             withAnimation(.snappy) {
                 if toast == text { toast = nil }
             }
         }
-    }
-}
-
-// MARK: Верхняя строка
-
-struct TopBar: View {
-    @EnvironmentObject private var store: PresenceStore
-    let onConnection: () -> Void
-    let onExport: () -> Void
-    let onSite: () -> Void
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let connected = store.isConnected(at: context.date)
-            let good = connected && (store.state?.health?.connected ?? true) && store.liveState(at: context.date) != "unknown"
-            let label = !connected ? "Связь потеряна" : (good ? "Наблюдение идёт" : "Нет точных данных")
-            HStack {
-                Button(action: onConnection) {
-                    HStack(spacing: 7) {
-                        Circle()
-                            .fill(good ? Palette.on : Palette.warn)
-                            .frame(width: 7, height: 7)
-                        Text(label)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Palette.ink2)
-                    }
-                    .padding(.horizontal, 13)
-                    .frame(height: 34)
-                    .background(Palette.panel, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                Spacer()
-                Menu {
-                    Button("Экспорт CSV", systemImage: "square.and.arrow.down", action: onExport)
-                    Button("Открыть сайт", systemImage: "safari", action: onSite)
-                    Button("Обновить", systemImage: "arrow.clockwise") {
-                        Task { await store.refresh() }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Palette.ink)
-                        .frame(width: 34, height: 34)
-                        .background(Palette.panel, in: Circle())
-                }
-            }
-        }
-        .padding(.top, 6)
-        .padding(.bottom, 14)
     }
 }
 
@@ -252,10 +208,21 @@ struct FooterView: View {
     let state: PresenceState
 
     var body: some View {
-        let poll = Int(state.health?.pollSeconds ?? 1)
-        Text("Presence 2.0. События Telegram и сверка каждые \(poll) с, пока API доступен. Telegram может задержать или скрыть статус. Паузы по Last Seen помечены отдельно.")
+        Text("Presence 2.1. Время: " + zoneText)
             .font(.system(size: 12))
-            .foregroundStyle(Palette.ink2)
-            .fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(Palette.ink3)
+            .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var zoneText: String {
+        let tz = state.tz
+        let hours = tz.secondsFromGMT() / 3600
+        let city: String
+        if tz.identifier == "Europe/Moscow" {
+            city = "Москва"
+        } else {
+            city = tz.identifier.split(separator: "/").last.map { String($0).replacingOccurrences(of: "_", with: " ") } ?? tz.identifier
+        }
+        return city + ", UTC" + (hours >= 0 ? "+" : "−") + String(abs(hours))
     }
 }

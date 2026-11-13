@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Плавающая панель дня у большого пальца. Смахивание вбок листает дни.
+/// Плавающая панель дня у большого пальца. Смахивание по ней вбок листает дни.
 struct DateBar: View {
-    @EnvironmentObject private var store: PresenceStore
+    @Environment(PresenceStore.self) private var store
     let state: PresenceState
     var onPickDate: () -> Void
 
@@ -43,15 +43,19 @@ struct DateBar: View {
             }
         }
         .padding(7)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background {
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.12), radius: 14, x: 0, y: 6)
+        }
         .overlay(Capsule().strokeBorder(Palette.hair, lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.14), radius: 20, x: 0, y: 10)
         .frame(maxWidth: 440)
         .animation(.snappy, value: state.isToday)
         .sensoryFeedback(.selection, trigger: state.date)
         .gesture(
             DragGesture(minimumDistance: 24)
                 .onEnded { value in
+                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
                     if value.translation.width > 60 {
                         store.move(by: -1)
                     } else if value.translation.width < -60 && !state.isToday {

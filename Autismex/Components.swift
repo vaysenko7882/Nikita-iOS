@@ -46,8 +46,6 @@ struct StatusDot: View {
 /// Кольцо вокруг аватара: зелёное в сети, пунктир — статус неизвестен.
 struct AvatarRing: View {
     let state: String
-    @State private var spin = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         switch state {
@@ -56,13 +54,7 @@ struct AvatarRing: View {
         case "offline":
             Circle().stroke(Palette.offDot.opacity(0.45), lineWidth: 2.5)
         default:
-            Circle()
-                .stroke(Palette.ink3, style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
-                .rotationEffect(.degrees(spin ? 360 : 0))
-                .onAppear {
-                    guard !reduceMotion else { return }
-                    withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) { spin = true }
-                }
+            Circle().stroke(Palette.ink3, style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
         }
     }
 }
@@ -85,7 +77,7 @@ struct InitialsAvatar: View {
             LinearGradient(colors: [Color(light: 0xFFB56E, dark: 0xFFB56E), Color(light: 0xFF7A55, dark: 0xFF7A55)],
                            startPoint: .top, endPoint: .bottom)
             Text(initials)
-                .font(.rounded(22, .semibold))
+                .font(.rounded(20, .semibold))
                 .foregroundStyle(.white)
         }
     }
@@ -116,23 +108,23 @@ struct AvatarView: View {
 
 struct SectionHeader: View {
     let title: String
-    var subtitle: String? = nil
+    var note: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.rounded(26))
                 .tracking(-0.5)
                 .foregroundStyle(Palette.ink)
-            if let subtitle {
-                Text(subtitle)
+            if let note {
+                Text(note)
                     .font(.system(size: 14))
+                    .monospacedDigit()
                     .foregroundStyle(Palette.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 20)
+        .padding(.bottom, 18)
     }
 }
 
@@ -183,7 +175,6 @@ struct ToastView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
             .background(Palette.ink, in: Capsule())
-            .shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
             .padding(.horizontal, 24)
     }
 }
@@ -230,41 +221,45 @@ struct BubbleShape: Shape {
     }
 }
 
-/// «Печатает…» — три подпрыгивающие точки.
+/// «Печатает…» — три точки. Анимацию ведёт система, без пересчёта экрана на каждый кадр.
 struct TypingDots: View {
+    @State private var animate = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { index in
-                    let phase = t / 1.2 - Double(index) * 0.125
-                    let fraction = phase - floor(phase)
-                    let bump = max(0, 1 - abs(fraction - 0.3) / 0.3)
-                    Circle()
-                        .frame(width: 4.5, height: 4.5)
-                        .opacity(0.3 + 0.7 * bump)
-                        .offset(y: -2 * bump)
-                }
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .frame(width: 4.5, height: 4.5)
+                    .opacity(animate ? 1 : 0.3)
+                    .offset(y: animate ? -2 : 0)
+                    .animation(
+                        reduceMotion ? nil : .easeInOut(duration: 0.45).repeatForever(autoreverses: true).delay(Double(index) * 0.15),
+                        value: animate
+                    )
             }
         }
+        .onAppear { animate = true }
     }
 }
 
-/// Обои чата: мягкий цвет и редкая точечная сетка.
+/// Обои чата: мягкий цвет и редкая точечная сетка. Рисуются один раз.
 struct ChatWallpaper: View {
     var body: some View {
         Canvas { context, size in
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Palette.chatBG))
+            var dots = Path()
             let step: CGFloat = 18
             var y: CGFloat = 9
             while y < size.height {
                 var x: CGFloat = 9
                 while x < size.width {
-                    context.fill(Path(ellipseIn: CGRect(x: x - 1.1, y: y - 1.1, width: 2.2, height: 2.2)), with: .color(Palette.chatDot))
+                    dots.addEllipse(in: CGRect(x: x - 1.1, y: y - 1.1, width: 2.2, height: 2.2))
                     x += step
                 }
                 y += step
             }
+            context.fill(dots, with: .color(Palette.chatDot))
         }
     }
 }

@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Ритм недели: точка в каждом часе, площадь точки — минуты онлайн.
+/// Вся сетка — один Canvas и один жест касания: это 1 вью вместо 168.
 struct WeekSection: View {
-    @EnvironmentObject private var store: PresenceStore
+    @Environment(PresenceStore.self) private var store
     let state: PresenceState
     @State private var picked: PickedCell?
 
@@ -11,137 +12,174 @@ struct WeekSection: View {
         var hour: Int
     }
 
+    private let headerHeight: CGFloat = 18
+    private let rowHeight: CGFloat = 28
+
     var body: some View {
+        let days = state.heatmap ?? []
         let facts = Insights.week(state: state)
-        let hourNow = state.isToday ? Fmt.hourMinute(store.serverNow(), tz: state.tz).hour : 24
+        let hourNow = Fmt.hourMinute(store.serverNow(), tz: state.tz).hour
 
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(
-                title: "Ритм недели",
-                subtitle: "Чем крупнее точка, тем больше минут онлайн было в этот час. Нажми на день слева, чтобы открыть его."
-            )
+            SectionHeader(title: "Ритм недели")
+
             if facts.peak != nil || facts.average != nil {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 8) { chips(peak: facts.peak, average: facts.average) }
                     VStack(alignment: .leading, spacing: 8) { chips(peak: facts.peak, average: facts.average) }
                 }
-                .padding(.bottom, 22)
+                .padding(.bottom, 20)
             }
 
-            VStack(spacing: 2) {
-                HStack(spacing: 0) {
-                    Color.clear.frame(width: 40, height: 1)
-                    ForEach([0, 6, 12, 18], id: \.self) { hour in
-                        Text(Fmt.two(hour))
-                            .font(.system(size: 11, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(Palette.ink3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: headerHeight)
+                    ForEach(days, id: \.date) { day in
+                        dayButton(day)
                     }
-                    Color.clear.frame(width: 46, height: 1)
                 }
-                .padding(.bottom, 6)
-                ForEach(state.heatmap ?? [], id: \.date) { day in
-                    row(day, hourNow: hourNow)
+                .frame(width: 42)
+
+                GeometryReader { geometry in
+                    Canvas { context, size in
+                        draw(&context, size: size, days: days, hourNow: hourNow)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        SpatialTapGesture().onEnded { value in
+                            pick(at: value.location, width: geometry.size.width, days: days)
+                        }
+                    )
                 }
+                .frame(height: headerHeight + rowHeight * CGFloat(days.count))
+
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: headerHeight)
+                    ForEach(days, id: \.date) { day in
+                        total(day)
+                    }
+                }
+                .frame(width: 48)
             }
 
-            HStack(alignment: .center, spacing: 12) {
-                readout(hourNow: hourNow)
-                Spacer(minLength: 0)
-                scale
-            }
-            .padding(.top, 16)
+            footer(days: days, hourNow: hourNow)
+                .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+                .padding(.top, 14)
         }
+        .sensoryFeedback(.selection, trigger: picked)
         .onChange(of: state.date) { _, _ in picked = nil }
     }
 
     @ViewBuilder
     private func chips(peak: String?, average: String?) -> some View {
-        if let peak { FactChip(value: peak, label: "чаще всего в сети") }
+        if let peak { FactChip(value: peak, label: "пик") }
         if let average { FactChip(value: average, label: "в среднем за день") }
     }
 
-    private func row(_ day: HeatmapDay, hourNow: Int) -> some View {
+    private func dayButton(_ day: HeatmapDay) -> some View {
         let current = day.date == state.date
-        let total = day.cells.reduce(0) { $0 + $1.online }
-        let known = day.cells.contains { $0.known > 0 }
         let dayNumber = Int(day.date.suffix(2)) ?? 0
-        return HStack(spacing: 0) {
-            Button {
-                store.pick(day.date)
-            } label: {
-                Text(Fmt.cap(Fmt.dayText(day.date, "EE")) + " " + String(dayNumber))
-                    .font(.system(size: 13, weight: current ? .bold : .regular))
-                    .foregroundStyle(current ? Palette.ink : Palette.ink2)
-                    .frame(width: 40, height: 28, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            ForEach(day.cells, id: \.hour) { cell in
-                dot(day: day, cell: cell, future: day.date == state.today && cell.hour > hourNow)
-            }
-            Text(known ? Fmt.compactMinutes(total) : "—")
-                .font(.system(size: 11, weight: current ? .semibold : .regular))
-                .monospacedDigit()
+        return Button {
+            store.pick(day.date)
+        } label: {
+            Text(Fmt.cap(Fmt.dayText(day.date, "EE")) + " " + String(dayNumber))
+                .font(.system(size: 13, weight: current ? .bold : .regular))
                 .foregroundStyle(current ? Palette.ink : Palette.ink2)
                 .lineLimit(1)
-                .frame(width: 46, alignment: .trailing)
+                .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
+                .contentShape(Rectangle())
         }
-        .frame(height: 28)
+        .buttonStyle(.plain)
+        .frame(height: rowHeight)
     }
 
-    private func dot(day: HeatmapDay, cell: HeatCell, future: Bool) -> some View {
-        let minutes = max(0, min(60, cell.online))
-        let share = (minutes / 60).squareRoot()
-        let isPicked = picked == PickedCell(date: day.date, hour: cell.hour)
-        let size = CGFloat(3 + share * 8)
-        return ZStack {
-            if isPicked {
-                Circle().fill(Palette.panel2).frame(width: 24, height: 24)
-            }
-            if future {
-                Circle().fill(Palette.ink3.opacity(0.3)).frame(width: 2, height: 2)
-            } else if cell.known <= 0 {
-                Circle().strokeBorder(Palette.ink3.opacity(0.8), lineWidth: 1.2).frame(width: 6, height: 6)
-            } else if minutes <= 0 {
-                Circle().fill(Palette.ink3.opacity(0.7)).frame(width: 3, height: 3)
-            } else {
-                Circle().fill(Palette.on.opacity(0.4 + share * 0.6)).frame(width: size, height: size)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 28)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            picked = PickedCell(date: day.date, hour: cell.hour)
-        }
-        .sensoryFeedback(.selection, trigger: isPicked) { _, nowPicked in nowPicked }
+    private func total(_ day: HeatmapDay) -> some View {
+        let current = day.date == state.date
+        let known = day.cells.contains { $0.known > 0 }
+        let minutes = day.cells.reduce(0) { $0 + $1.online }
+        return Text(known ? Fmt.compactMinutes(minutes) : "—")
+            .font(.system(size: 11, weight: current ? .semibold : .regular))
+            .monospacedDigit()
+            .foregroundStyle(current ? Palette.ink : Palette.ink2)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .trailing)
+            .frame(height: rowHeight)
     }
+
+    // MARK: Сетка
+
+    private func draw(_ context: inout GraphicsContext, size: CGSize, days: [HeatmapDay], hourNow: Int) {
+        let cellWidth = size.width / 24
+        let maxDot = max(4, min(11, cellWidth - 1.5))
+
+        for hour in [0, 6, 12, 18] {
+            let label = Text(verbatim: Fmt.two(hour))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Palette.ink3)
+            context.draw(label, at: CGPoint(x: CGFloat(hour) * cellWidth + 1, y: 6), anchor: .leading)
+        }
+
+        for (rowIndex, day) in days.enumerated() {
+            let y = headerHeight + CGFloat(rowIndex) * rowHeight + rowHeight / 2
+            for cell in day.cells where cell.hour >= 0 && cell.hour < 24 {
+                let x = (CGFloat(cell.hour) + 0.5) * cellWidth
+                let isPicked = picked == PickedCell(date: day.date, hour: cell.hour)
+                if isPicked {
+                    let box = CGRect(x: x - cellWidth / 2 - 2, y: y - 11, width: cellWidth + 4, height: 22)
+                    context.fill(Path(roundedRect: box, cornerRadius: 7), with: .color(Palette.panel2))
+                }
+                let future = day.date == state.today && cell.hour > hourNow
+                if future {
+                    context.fill(circle(x, y, 2), with: .color(Palette.ink3.opacity(0.3)))
+                } else if cell.known <= 0 {
+                    context.stroke(circle(x, y, 5.5), with: .color(Palette.ink3.opacity(0.8)), lineWidth: 1.2)
+                } else if cell.online <= 0 {
+                    context.fill(circle(x, y, 3), with: .color(Palette.ink3.opacity(0.7)))
+                } else {
+                    let share = (max(0, min(60, cell.online)) / 60).squareRoot()
+                    let diameter = 3 + CGFloat(share) * (maxDot - 3)
+                    context.fill(circle(x, y, diameter), with: .color(Palette.on.opacity(0.4 + share * 0.6)))
+                }
+            }
+        }
+    }
+
+    private func circle(_ x: CGFloat, _ y: CGFloat, _ diameter: CGFloat) -> Path {
+        Path(ellipseIn: CGRect(x: x - diameter / 2, y: y - diameter / 2, width: diameter, height: diameter))
+    }
+
+    private func pick(at location: CGPoint, width: CGFloat, days: [HeatmapDay]) {
+        guard width > 0, location.y >= headerHeight else { return }
+        let row = Int((location.y - headerHeight) / rowHeight)
+        let hour = Int(location.x / (width / 24))
+        guard row >= 0, row < days.count, hour >= 0, hour < 24 else { return }
+        let cell = PickedCell(date: days[row].date, hour: hour)
+        picked = picked == cell ? nil : cell
+    }
+
+    // MARK: Подпись под сеткой
 
     @ViewBuilder
-    private func readout(hourNow: Int) -> some View {
+    private func footer(days: [HeatmapDay], hourNow: Int) -> some View {
         if let picked,
-           let day = state.heatmap?.first(where: { $0.date == picked.date }),
+           let day = days.first(where: { $0.date == picked.date }),
            let cell = day.cells.first(where: { $0.hour == picked.hour }) {
-            let when = Fmt.dayText(day.date, "d MMM") + ", " + Fmt.two(cell.hour) + ":00"
+            let when = Fmt.cap(Fmt.dayText(day.date, "EE, d MMM")) + ", " + Fmt.two(cell.hour) + ":00"
             let detail = cellDetail(cell, future: day.date == state.today && cell.hour > hourNow)
-            (Text(when).fontWeight(.semibold).foregroundColor(Palette.ink) + Text(", " + detail))
+            (Text(when).fontWeight(.semibold).foregroundColor(Palette.ink) + Text(" — " + detail))
                 .font(.system(size: 13))
                 .monospacedDigit()
                 .foregroundStyle(Palette.ink2)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
-            Text("Нажми на точку, чтобы увидеть минуты")
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.ink2)
-                .fixedSize(horizontal: false, vertical: true)
+            scale
         }
     }
 
     private func cellDetail(_ cell: HeatCell, future: Bool) -> String {
         if future { return "ещё не наступило" }
         if cell.known <= 0 { return "нет данных" }
-        return "\(Int(cell.online.rounded())) мин онлайн из \(Int(cell.known.rounded()))"
+        return String(Int(cell.online.rounded())) + " мин в сети"
     }
 
     private var scale: some View {
@@ -153,7 +191,7 @@ struct WeekSection: View {
                     .fill(Palette.on.opacity(0.4 + share * 0.6))
                     .frame(width: CGFloat(3 + share * 8), height: CGFloat(3 + share * 8))
             }
-            Text("60 мин")
+            Text("60 мин в час")
         }
         .font(.system(size: 11))
         .foregroundStyle(Palette.ink2)

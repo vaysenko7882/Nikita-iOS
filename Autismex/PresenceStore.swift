@@ -1,20 +1,9 @@
 import Foundation
+import Observation
 import SwiftUI
 import WidgetKit
 
-enum ChronicleFilter: String, CaseIterable, Identifiable {
-    case all, online, offline
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .all: return "Все"
-        case .online: return "В сети"
-        case .offline: return "Паузы"
-        }
-    }
-}
-
-/// Показатели дня, которые растут каждую секунду между ответами сервера.
+/// Показатели дня, которые растут между ответами сервера.
 struct LiveMetrics {
     var online = 0.0
     var offline = 0.0
@@ -46,24 +35,59 @@ struct LiveMetrics {
     }
 }
 
+/// Источник данных приложения.
+///
+/// Ради плавной прокрутки данные разделены на два слоя:
+/// • `state` — снимок для раскладки экрана. Меняется только когда изменилось что-то
+///   существенное (статус, новый отрезок, другой день) или раз в 45 секунд.
+/// • `latest` — самый свежий ответ сервера. Его читают только маленькие «тикающие»
+///   тексты (таймер, цифра в центре циферблата), поэтому весь экран каждую секунду
+///   не перерисовывается.
 @MainActor
-final class PresenceStore: ObservableObject {
-    @Published private(set) var state: PresenceState?
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var isLoading = false
-    @Published private(set) var streamOpen = false
-    @Published private(set) var lastSuccess: Date?
+@Observable
+final class PresenceStore {
+    private(set) var state: PresenceState? = nil
+    private(set) var errorMessage: String? = nil
+    private(set) var streamOpen = false
+    /// Пришёл ли хотя бы один свежий ответ после запуска.
+    private(set) var bootstrapped = false
 
     let api = PresenceAPI()
 
-    private(set) var fetchedAt = Date.distantPast
-    private var followToday = true
-    private var requestedDate: String?
-    private var requestNumber = 0
-    private var streamTask: Task<Void, Never>?
-    private var pollTask: Task<Void, Never>?
-    private var debounceTask: Task<Void, Never>?
-    private var widgetKey: String?
+    @ObservationIgnored private var latest: PresenceState?
+    @ObservationIgnored private var fetchedAt = Date.distantPast
+    @ObservationIgnored private var lastSuccess: Date?
+    @ObservationIgnored private var stateKey = ""
+    @ObservationIgnored private var stateSetAt = Date.distantPast
+    @ObservationIgnored private var lastRefreshStart = Date.distantPast
+    @ObservationIgnored private var lastCacheWrite = Date.distantPast
+    @ObservationIgnored private var followToday = true
+    @ObservationIgnored private var requestedDate: String?
+    @ObservationIgnored private var requestNumber = 0
+    @ObservationIgnored private var streamTask: Task<Void, Never>?
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var debounceTask: Task<Void, Never>?
+    @ObservationIgnored private var widgetKey: String?
+
+    private static var cacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("presence-state.json")
+    }
+
+    /// Мгновенный запуск: показываем последний сохранённый ответ за сегодня, пока идёт запрос.
+    init() {
+        let url = PresenceStore.cacheURL
+        guard let data = try? Data(contentsOf: url),
+              let cached = try? PresenceAPI.decoder.decode(PresenceState.self, from: data),
+              cached.isToday,
+              Fmt.isoDay(Date().timeIntervalSince1970, tz: cached.tz) == cached.today else { return }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let savedAt = (attributes?[.modificationDate] as? Date) ?? Date()
+        latest = cached
+        fetchedAt = savedAt
+        state = cached
+        stateKey = PresenceStore.fingerprint(cached)
+        stateSetAt = savedAt
+    }
 
     // MARK: Жизненный цикл
 
@@ -80,34 +104,78 @@ final class PresenceStore: ObservableObject {
         pollTask = nil
         debounceTask?.cancel()
         debounceTask = nil
-        streamOpen = false
+        if streamOpen { streamOpen = false }
     }
 
-    func refresh() async {
+    func refresh(force: Bool = false) async {
         requestNumber += 1
         let number = requestNumber
-        isLoading = true
+        lastRefreshStart = Date()
         do {
-            let next = try await api.state(date: followToday ? nil : requestedDate)
+            let (next, data) = try await api.stateWithData(date: followToday ? nil : requestedDate)
             guard number == requestNumber else { return }
-            state = next
-            fetchedAt = Date()
-            lastSuccess = fetchedAt
-            errorMessage = nil
-            if next.isToday {
-                followToday = true
-                requestedDate = nil
-            }
-            reloadWidgetsIfNeeded(next)
+            apply(next, force: force)
+            if next.isToday { cache(data) }
         } catch {
             guard number == requestNumber else { return }
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? "Не удалось получить статистику. Проверь соединение с сайтом."
+            let message = (error as? LocalizedError)?.errorDescription ?? "Не удалось получить статистику. Проверь соединение с сайтом."
+            if errorMessage != message { errorMessage = message }
         }
-        if number == requestNumber { isLoading = false }
+    }
+
+    private func apply(_ next: PresenceState, force: Bool) {
+        let now = Date()
+        latest = next
+        fetchedAt = now
+        lastSuccess = now
+        if !bootstrapped { bootstrapped = true }
+        if errorMessage != nil { errorMessage = nil }
+        if next.isToday {
+            followToday = true
+            requestedDate = nil
+        }
+        let key = PresenceStore.fingerprint(next)
+        if force || state == nil || key != stateKey || now.timeIntervalSince(stateSetAt) > 45 {
+            state = next
+            stateKey = key
+            stateSetAt = now
+        }
+        reloadWidgetsIfNeeded(next)
+    }
+
+    /// Что считается существенным изменением экрана.
+    private static func fingerprint(_ state: PresenceState) -> String {
+        let last = state.rows.last
+        let parts: [String] = [
+            state.date,
+            state.today,
+            state.current.state ?? "",
+            String(Int(state.current.since ?? 0)),
+            String(state.rows.count),
+            last?.state ?? "",
+            String(Int(last?.start ?? 0)),
+            String(state.history?.count ?? 0),
+            state.health?.mode ?? "",
+            (state.health?.selfSession ?? false) ? "self" : "",
+            state.health?.message ?? "",
+            state.profile?.name ?? "",
+            state.profile?.avatarVersion ?? ""
+        ]
+        return parts.joined(separator: "|")
+    }
+
+    private func cache(_ data: Data) {
+        let now = Date()
+        guard now.timeIntervalSince(lastCacheWrite) > 30 else { return }
+        lastCacheWrite = now
+        let url = PresenceStore.cacheURL
+        Task.detached(priority: .utility) {
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     func pick(_ day: String) {
-        guard let state, day <= state.today else { return }
+        guard let state, day <= state.today, day != state.date else { return }
         if day == state.today {
             followToday = true
             requestedDate = nil
@@ -115,7 +183,7 @@ final class PresenceStore: ObservableObject {
             followToday = false
             requestedDate = day
         }
-        Task { await refresh() }
+        Task { await refresh(force: true) }
     }
 
     func move(by days: Int) {
@@ -123,16 +191,19 @@ final class PresenceStore: ObservableObject {
         pick(Fmt.shiftDay(state.date, days))
     }
 
+    /// Не чаще одного запроса в 0,8 с, даже если сервер шлёт события подряд.
     private func scheduleRefresh() {
         debounceTask?.cancel()
+        let sinceLast = Date().timeIntervalSince(lastRefreshStart)
+        let delay = max(0.15, 0.8 - sinceLast)
         debounceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
             await self?.refresh()
         }
     }
 
-    /// Поток событий сервера (SSE). Каждое событие — повод перечитать состояние.
+    /// Поток событий сервера (SSE). Как и сайт, реагируем только на событие «update».
     private func startStream() {
         streamTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -140,21 +211,29 @@ final class PresenceStore: ObservableObject {
                 do {
                     let (bytes, response) = try await URLSession.shared.bytes(for: request)
                     if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                        self?.streamOpen = true
+                        self?.setStream(true)
+                        var eventName = "message"
                         for try await line in bytes.lines {
                             if Task.isCancelled { break }
-                            if line.hasPrefix("event:") || line.hasPrefix("data:") {
-                                self?.scheduleRefresh()
+                            if line.hasPrefix("event:") {
+                                eventName = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                            } else if line.hasPrefix("data:") {
+                                if eventName == "update" { self?.scheduleRefresh() }
+                                eventName = "message"
                             }
                         }
                     }
                 } catch {
                     // Переподключимся ниже.
                 }
-                self?.streamOpen = false
+                self?.setStream(false)
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
         }
+    }
+
+    private func setStream(_ open: Bool) {
+        if streamOpen != open { streamOpen = open }
     }
 
     /// Запасной опрос: если поток молчит, данные устарели или наступил новый день.
@@ -165,8 +244,8 @@ final class PresenceStore: ObservableObject {
                 guard let self else { return }
                 let age = Date().timeIntervalSince(self.lastSuccess ?? .distantPast)
                 var rolledOver = false
-                if self.followToday, let state = self.state {
-                    rolledOver = Fmt.isoDay(self.serverNow(), tz: state.tz) != state.today
+                if self.followToday, let latest = self.latest {
+                    rolledOver = Fmt.isoDay(self.serverNow(), tz: latest.tz) != latest.today
                 }
                 if (!self.streamOpen && age > 5) || age > 60 || rolledOver {
                     await self.refresh()
@@ -187,24 +266,24 @@ final class PresenceStore: ObservableObject {
     // MARK: Живые значения (как liveMetrics и currentState на сайте)
 
     func serverNow(at date: Date = Date()) -> Double {
-        guard let state else { return date.timeIntervalSince1970 }
-        return state.now + date.timeIntervalSince(fetchedAt)
+        guard let latest else { return date.timeIntervalSince1970 }
+        return latest.now + date.timeIntervalSince(fetchedAt)
     }
 
     func isConnected(at date: Date) -> Bool {
-        if streamOpen { return true }
+        if streamOpen && bootstrapped { return true }
         guard let lastSuccess else { return false }
         return date.timeIntervalSince(lastSuccess) < 12
     }
 
     func liveState(at date: Date) -> String {
-        guard let state, isConnected(at: date), state.health?.selfSession != true else { return "unknown" }
-        if let validUntil = state.current.validUntil, serverNow(at: date) >= validUntil { return "unknown" }
-        return state.current.state ?? "unknown"
+        guard let latest, isConnected(at: date), latest.health?.selfSession != true else { return "unknown" }
+        if let validUntil = latest.current.validUntil, serverNow(at: date) >= validUntil { return "unknown" }
+        return latest.current.state ?? "unknown"
     }
 
     func liveMetrics(at date: Date) -> (day: LiveMetrics, total: LiveMetrics) {
-        guard let state else { return (LiveMetrics(), LiveMetrics()) }
+        guard let state = latest else { return (LiveMetrics(), LiveMetrics()) }
         var day = LiveMetrics(state.day)
         var total = LiveMetrics(state.total)
         guard isConnected(at: date) else { return (day, total) }
@@ -254,36 +333,46 @@ final class PresenceStore: ObservableObject {
         return (day, total)
     }
 
+    /// Крупная строка статуса.
+    func headline(at date: Date) -> String {
+        if isConnected(at: date) { return Labels.state(liveState(at: date)) }
+        return (bootstrapped || errorMessage != nil) ? "Нет связи" : "Обновляем…"
+    }
+
+    /// Строка под статусом: «3 мин 44 с, с 18:43».
     func statusLine(at date: Date) -> String {
-        guard let state else { return "Ждём данные Telegram" }
+        guard let state = latest else { return "Ждём данные Telegram" }
         let live = liveState(at: date)
         let now = serverNow(at: date)
         let current = state.current
         switch live {
         case "unknown":
-            if !isConnected(at: date) { return "Показаны последние полученные данные" }
-            if state.health?.selfSession == true { return "Подключи другой свой аккаунт в терминале VPS" }
+            if !isConnected(at: date) {
+                return bootstrapped ? "Показаны последние полученные данные" : "Показаны данные с прошлого запуска"
+            }
+            if state.health?.selfSession == true { return "Подключи другой свой аккаунт на VPS" }
             if let raw = current.state, raw != "unknown" { return "Статус устарел, ждём подтверждение" }
             return current.reason ?? "Ждём точный статус"
         case "offline":
             let start = current.pauseSince ?? current.since ?? now
             let startDay = Fmt.isoDay(start, tz: state.tz)
             let prefix = startDay == state.today ? "" : Fmt.dayText(startDay, "d MMM") + " "
-            return "с " + prefix + Fmt.time(start, tz: state.tz) + " · пауза " + Fmt.duration(now - start, detailed: true)
+            return Fmt.duration(now - start, detailed: true) + ", с " + prefix + Fmt.time(start, tz: state.tz)
         default:
-            return "онлайн " + Fmt.duration(now - (current.since ?? now), detailed: true)
+            let start = current.since ?? now
+            return Fmt.duration(now - start, detailed: true) + ", с " + Fmt.time(start, tz: state.tz)
         }
     }
 
     func pauseNote(at date: Date) -> String? {
-        guard let state, liveState(at: date) == "offline", state.current.pauseSource == "telegram_last_seen" else { return nil }
+        guard let state = latest, liveState(at: date) == "offline", state.current.pauseSource == "telegram_last_seen" else { return nil }
         let observed = serverNow(at: date) - (state.current.since ?? state.now)
-        return "Начало — Last Seen Telegram. Непрерывно наблюдаем " + Fmt.duration(observed, detailed: true) + "."
+        return "Начало по Last Seen. Сами наблюдаем " + Fmt.duration(observed, detailed: true) + "."
     }
 
     /// Конец отрезка с учётом того, что текущий растёт прямо сейчас.
     func liveEnd(_ row: Interval, at date: Date = Date()) -> Double {
-        guard let state, row.isOngoing, state.isToday else { return row.end }
+        guard let state = latest, row.isOngoing, state.isToday else { return row.end }
         let cap = min(serverNow(at: date), state.current.validUntil ?? .infinity, state.dayEnd)
         return max(row.end, cap)
     }
@@ -297,7 +386,7 @@ final class PresenceStore: ObservableObject {
         if let mode = state.health?.mode, ["limited", "conflict", "stale", "error", "rate_limit", "reconnecting"].contains(mode) {
             list.append(state.health?.message ?? "Нет подтверждённого статуса.")
         }
-        if let errorMessage { list.append(errorMessage) }
+        if let errorMessage, bootstrapped { list.append(errorMessage) }
         return list
     }
 }

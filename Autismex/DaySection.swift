@@ -1,24 +1,20 @@
 import SwiftUI
 
-/// Выбранный день: заголовок, циферблат, сравнение со вчера, плитки.
+/// Выбранный день: заголовок, циферблат, один вывод и три плитки.
+/// Сама секция не тикает: живые цифры обновляются внутри циферблата.
 struct DaySection: View {
-    @EnvironmentObject private var store: PresenceStore
+    @Environment(PresenceStore.self) private var store
     let state: PresenceState
     @Binding var scrubbing: Bool
     @AppStorage("dialHintSeen") private var hintSeen = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                dayBody(date: context.date)
-            }
-        }
-    }
+        let now = store.serverNow()
+        let metrics = store.liveMetrics(at: Date()).day
+        let delta = Insights.delta(state: state, onlineSeconds: metrics.online, now: now)
 
-    private var header: some View {
-        HStack(alignment: .lastTextBaseline) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.rounded(34))
                     .tracking(-1)
@@ -27,12 +23,36 @@ struct DaySection: View {
                     .font(.system(size: 15))
                     .foregroundStyle(Palette.ink2)
             }
-            Spacer(minLength: 12)
-            Text(zoneText)
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.ink2)
-                .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            DialView(state: state, scrubbing: $scrubbing, onLearned: { hintSeen = true })
+                .padding(.top, 26)
+
+            if let delta {
+                DeltaPill(text: delta.text, direction: delta.direction)
+                    .padding(.top, 20)
+            }
+
+            if !hintSeen {
+                Text("Задержи палец на кольце и веди по нему")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.ink2)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 14)
+            }
+
+            if metrics.unknown > 90 {
+                Text("Без данных " + Fmt.duration(metrics.unknown) + ", паузой не считаем")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.ink2)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 10)
+            }
+
+            TilesView(state: state, metrics: metrics)
+                .padding(.top, 28)
         }
+        .frame(maxWidth: .infinity)
     }
 
     private var title: String {
@@ -46,75 +66,7 @@ struct DaySection: View {
         let year = state.date.prefix(4) != state.today.prefix(4) ? ", " + String(state.date.prefix(4)) : ""
         return Fmt.cap(Fmt.dayText(state.date, "EEEE")) + year
     }
-
-    private var zoneText: String {
-        let tz = state.tz
-        let hours = tz.secondsFromGMT() / 3600
-        let city: String
-        if tz.identifier == "Europe/Moscow" {
-            city = "Москва"
-        } else {
-            city = tz.identifier.split(separator: "/").last.map { String($0).replacingOccurrences(of: "_", with: " ") } ?? tz.identifier
-        }
-        return city + ", UTC" + (hours >= 0 ? "+" : "−") + String(abs(hours))
-    }
-
-    @ViewBuilder
-    private func dayBody(date: Date) -> some View {
-        let now = store.serverNow(at: date)
-        let live = store.liveState(at: date)
-        let metrics = store.liveMetrics(at: date).day
-        let observed = metrics.online + metrics.offline
-        let note = observed > 0 ? Fmt.percent(metrics.online / observed * 100) + " наблюдаемого времени" : "Нет подтверждённого статуса"
-        let delta = Insights.delta(state: state, onlineSeconds: metrics.online, now: now)
-        let coverageNote = metrics.unknown > 1 ? "Без данных " + Fmt.duration(metrics.unknown) + ", не считаем паузой" : "Наблюдаемое время без пропусков"
-
-        VStack(spacing: 0) {
-            DialView(
-                state: state,
-                now: now,
-                liveState: live,
-                onlineSeconds: metrics.online,
-                note: note,
-                scrubbing: $scrubbing,
-                onLearned: { hintSeen = true }
-            )
-            .padding(.top, 30)
-
-            if let delta {
-                DeltaPill(text: delta.text, direction: delta.direction)
-                    .padding(.top, 22)
-            }
-
-            if !hintSeen {
-                Text("Подержи палец на кольце и веди, чтобы увидеть время. Смахни панель внизу, чтобы сменить день.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.ink2)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-                    .padding(.top, 16)
-                    .transition(.opacity)
-            }
-
-            DialLegend()
-                .padding(.top, 16)
-
-            Text("Данные: " + Fmt.percent(metrics.coverage) + ". " + coverageNote)
-                .font(.system(size: 12))
-                .monospacedDigit()
-                .foregroundStyle(Palette.ink2)
-                .multilineTextAlignment(.center)
-                .padding(.top, 8)
-
-            TilesView(state: state, metrics: metrics, now: now)
-                .padding(.top, 32)
-        }
-        .frame(maxWidth: .infinity)
-        .animation(.easeInOut(duration: 0.3), value: hintSeen)
-    }
 }
-
-// MARK: Сравнение и легенда
 
 struct DeltaPill: View {
     let text: String
@@ -122,7 +74,7 @@ struct DeltaPill: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: direction > 0 ? "arrow.up" : (direction < 0 ? "arrow.down" : "arrow.right"))
+            Image(systemName: direction > 0 ? "arrow.up" : (direction < 0 ? "arrow.down" : "equal"))
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(Palette.ink2)
             Text(text)
@@ -136,94 +88,53 @@ struct DeltaPill: View {
     }
 }
 
-struct DialLegend: View {
-    var body: some View {
-        HStack(spacing: 16) {
-            item(color: Palette.on, dashed: false, text: "В сети")
-            item(color: Palette.off, dashed: false, text: "Офлайн")
-            item(color: Palette.ink3, dashed: true, text: "Нет данных")
-        }
-        .font(.system(size: 12))
-        .foregroundStyle(Palette.ink2)
-    }
-
-    private func item(color: Color, dashed: Bool, text: String) -> some View {
-        HStack(spacing: 6) {
-            if dashed {
-                Circle()
-                    .strokeBorder(color, style: StrokeStyle(lineWidth: 1.2, dash: [1.5, 1.5]))
-                    .frame(width: 10, height: 10)
-            } else {
-                Circle()
-                    .fill(color)
-                    .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 1))
-                    .frame(width: 10, height: 10)
-            }
-            Text(text)
-        }
-    }
-}
-
 // MARK: Плитки
 
 struct TilesView: View {
     let state: PresenceState
     let metrics: LiveMetrics
-    let now: Double
 
     var body: some View {
-        let span = Insights.span(state: state)
         let sessions = Int(metrics.sessions)
-        let pauseNote = metrics.maxPauseSource == "telegram_last_seen"
-            ? "По Last Seen · наблюдали " + Fmt.duration(metrics.observedMaxPause)
-            : "Наблюдаемый максимум за день"
+        let pauses = Int(metrics.pauses)
+        let span = Insights.span(state: state)
 
-        VStack(spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                Tile(dot: Palette.on, label: "Сеансы онлайн", value: "\(sessions)",
-                     note: sessions > 0 ? "В среднем " + Fmt.duration(metrics.averageSession, detailed: true) : "Пока без сеансов онлайн")
-                Tile(dot: Palette.offDot, label: "Паузы", value: "\(Int(metrics.pauses))",
-                     note: "Наблюдали офлайн " + Fmt.duration(metrics.offline))
+        VStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Tile(dot: Palette.on, label: "Сеансы", value: String(sessions),
+                     note: sessions > 0 ? "в среднем " + Fmt.duration(metrics.averageSession) : "пока не было")
+                Tile(dot: Palette.offDot, label: "Паузы", value: String(pauses), note: pauseNote)
             }
             .fixedSize(horizontal: false, vertical: true)
 
-            VStack(alignment: .leading, spacing: 0) {
-                TileLabel(dot: Palette.on, text: "Первый и последний раз в сети")
-                Text(span.value)
-                    .font(.rounded(32))
-                    .tracking(-0.6)
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .padding(.top, 12)
-                Text(span.note)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-            }
-            .tileBackground()
-
-            VStack(alignment: .leading, spacing: 0) {
-                TileLabel(dot: Palette.offDot, text: "Самая долгая пауза")
-                HStack(alignment: .bottom, spacing: 16) {
-                    Text(pauseNote)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Palette.ink2)
-                        .fixedSize(horizontal: false, vertical: true)
+            if let span {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        TileLabel(dot: Palette.on, text: "Первый и последний выход")
+                        Text(span.note)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Spacer(minLength: 0)
-                    Text(Fmt.duration(metrics.maxPause))
-                        .font(.rounded(32))
-                        .tracking(-0.6)
+                    Text(span.value)
+                        .font(.rounded(22))
+                        .monospacedDigit()
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                         .fixedSize()
                 }
-                .padding(.top, 10)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.panel, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
-            .tileBackground()
         }
+    }
+
+    private var pauseNote: String {
+        guard metrics.maxPause > 0 else { return "пока не было" }
+        let source = metrics.maxPauseSource == "telegram_last_seen" ? " по Last Seen" : ""
+        return "до " + Fmt.duration(metrics.maxPause) + source
     }
 }
 
@@ -251,29 +162,22 @@ struct Tile: View {
         VStack(alignment: .leading, spacing: 0) {
             TileLabel(dot: dot, text: label)
             Text(value)
-                .font(.rounded(32))
+                .font(.rounded(34))
                 .tracking(-0.8)
                 .foregroundStyle(Palette.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .padding(.top, 12)
+                .padding(.top, 10)
             Text(note)
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.ink2)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
+                .padding(.top, 4)
             Spacer(minLength: 0)
         }
-        .tileBackground()
-        .frame(maxHeight: .infinity)
-    }
-}
-
-extension View {
-    func tileBackground() -> some View {
-        padding(EdgeInsets(top: 18, leading: 18, bottom: 20, trailing: 18))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }
 
@@ -300,7 +204,7 @@ enum Insights {
         }
         let difference = onlineSeconds - minutes * 60
         if abs(difference) < 60 {
-            return (state.isToday ? "Столько же, сколько вчера в это время" : "Столько же, сколько накануне", 0)
+            return (state.isToday ? "Как вчера в это время" : "Как накануне", 0)
         }
         let more = difference > 0
         let when = state.isToday ? "чем вчера в это время" : "чем накануне"
@@ -308,16 +212,13 @@ enum Insights {
     }
 
     /// Первый выход в сеть, последний и самый долгий сеанс.
-    static func span(state: PresenceState) -> (value: String, note: String) {
+    static func span(state: PresenceState) -> (value: String, note: String)? {
         let online = state.rows.filter { $0.state == "online" }
-        guard let first = online.first, let last = online.last else {
-            return ("—", "Сеансов онлайн в этот день не было")
-        }
+        guard let first = online.first, let last = online.last else { return nil }
         let live = last.isOngoing && state.isToday
         let value = Fmt.time(first.start, tz: state.tz) + " – " + (live ? "сейчас" : Fmt.time(last.end, tz: state.tz))
         let longest = online.max(by: { $0.duration < $1.duration }) ?? first
-        let note = "Самый долгий сеанс " + Fmt.duration(longest.duration, detailed: true) + ", с " + Fmt.time(longest.start, tz: state.tz)
-        return (value, note)
+        return (value, "самый долгий сеанс " + Fmt.duration(longest.duration))
     }
 
     /// Пиковый час и среднее время в сети за полный день.
@@ -343,5 +244,13 @@ enum Insights {
             average = Fmt.duration(totals.reduce(0, +) / Double(totals.count) * 60)
         }
         return (peak, average)
+    }
+
+    /// Среднее время в сети за показанные полные дни.
+    static func historyAverage(rows: [Metrics], today: String) -> Double {
+        let complete = rows.filter { ($0.date ?? "") != today && ($0.coveragePercent ?? 0) > 0 }
+        let base = complete.isEmpty ? rows : complete
+        guard !base.isEmpty else { return 0 }
+        return base.reduce(0) { $0 + ($1.onlineSeconds ?? 0) } / Double(base.count)
     }
 }

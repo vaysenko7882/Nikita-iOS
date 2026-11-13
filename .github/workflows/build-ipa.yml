@@ -1,7 +1,7 @@
-name: Build Autismex 2.0 unsigned IPA
+name: Build Autismex 2.1 unsigned IPA
 on:
   push:
-    branches: [codex/autismex-ios-2-20261112]
+    branches: [codex/autismex-ios-2-1-20261113]
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,10 +29,10 @@ jobs:
       - name: Upload compiled IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Autismex-2.0-unsigned-IPA
+          name: Autismex-2.1-unsigned-IPA
           path: |
-            Autismex-2.0-unsigned.ipa
-            Autismex-2.0-unsigned.sha256
+            Autismex-2.1-unsigned.ipa
+            Autismex-2.1-unsigned.sha256
             build-info.txt
           if-no-files-found: error
           retention-days: 14

@@ -1,56 +1,46 @@
 import SwiftUI
 
 struct TotalsCard: View {
-    @EnvironmentObject private var store: PresenceStore
+    @Environment(PresenceStore.self) private var store
     let state: PresenceState
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let total = store.liveMetrics(at: context.date).total
-            VStack(alignment: .leading, spacing: 0) {
-                Text("За всё время")
-                    .font(.rounded(20))
-                    .foregroundStyle(Palette.ink)
-                Text(Fmt.duration(total.online))
-                    .font(.rounded(46))
-                    .tracking(-1.4)
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .contentTransition(.numericText())
-                    .padding(.top, 14)
-                Text("наблюдаемого онлайна")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Palette.ink2)
-                    .padding(.top, 6)
-                Rectangle()
-                    .fill(Palette.hair)
-                    .frame(height: 1)
-                    .padding(.top, 22)
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 20) {
-                    GridRow {
-                        stat(String(Int(total.sessions)), "онлайн-сеансы")
-                        stat(String(Int(total.pauses)), "паузы")
-                    }
-                    GridRow {
-                        stat(Fmt.duration(total.maxPause), "самая долгая пауза")
-                        stat(Fmt.percent(total.coverage), "покрытие наблюдениями")
-                    }
-                }
+        let total = store.liveMetrics(at: Date()).total
+
+        VStack(alignment: .leading, spacing: 0) {
+            Text("За всё время в сети")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Palette.ink2)
+            Text(Fmt.duration(total.online))
+                .font(.rounded(46))
+                .tracking(-1.4)
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .padding(.top, 8)
+            Rectangle()
+                .fill(Palette.hair)
+                .frame(height: 1)
                 .padding(.top, 20)
-                Text("История копится с момента первого запуска.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.ink2)
-                    .padding(.top, 20)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                GridRow {
+                    stat(String(Int(total.sessions)), "сеансы")
+                    stat(String(Int(total.pauses)), "паузы")
+                }
+                GridRow {
+                    stat(Fmt.duration(total.maxPause), "самая долгая пауза")
+                    stat(Fmt.percent(total.coverage), "полнота данных")
+                }
             }
-            .padding(EdgeInsets(top: 24, leading: 22, bottom: 22, trailing: 22))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .padding(.top, 18)
         }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
     private func stat(_ value: String, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(value)
                 .font(.rounded(22))
                 .monospacedDigit()
@@ -65,95 +55,102 @@ struct TotalsCard: View {
     }
 }
 
+/// Связь с Telegram. В свёрнутом виде не тикает; секундные «N с назад» идут только когда раскрыта.
 struct DiagnosticsCard: View {
-    @EnvironmentObject private var store: PresenceStore
+    @Environment(PresenceStore.self) private var store
     let state: PresenceState
     @Binding var isOpen: Bool
     var onCopy: () -> Void
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let now = store.serverNow(at: context.date)
-            let health = state.health
-            VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    withAnimation(.snappy) { isOpen.toggle() }
-                } label: {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Связь с Telegram")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Palette.ink)
-                            Text(summary(health, now: now))
-                                .font(.system(size: 13))
-                                .foregroundStyle(Palette.ink2)
-                                .multilineTextAlignment(.leading)
-                        }
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Palette.ink3)
-                            .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    }
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 16)
-                    .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.snappy) { isOpen.toggle() }
+            } label: {
+                HStack(spacing: 12) {
+                    Text("Связь с Telegram")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    Spacer(minLength: 8)
+                    Text(sourceName(state.health?.source))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.ink2)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Palette.ink3)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 22)
+                .frame(minHeight: 56)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
-                if isOpen {
-                    Rectangle().fill(Palette.hair).frame(height: 1)
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(health?.message ?? "Ждём подтверждение")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Palette.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
-                            GridRow {
-                                field("Сессия наблюдателя", health?.observer ?? "Проверяем")
-                                field("Последняя сверка", age(health?.lastPoll, now: now) + " · " + String(Int(health?.pollCount ?? 0)) + " ответов")
-                            }
-                            GridRow {
-                                field("События Telegram", age(health?.lastPush, now: now) + " · " + String(Int(health?.pushCount ?? 0)) + " событий")
-                                field("Интервал / ответ API", rateText(health))
-                            }
-                            GridRow {
-                                field("Цель в контактах", contactText(health))
-                                field("Полученный тип статуса", health?.rawType ?? "ещё не получен")
-                            }
-                        }
-                        let sources = (health?.sources ?? [:]).values.sorted { ($0.source ?? "") < ($1.source ?? "") }
-                        if !sources.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
-                                    Text(sourceLine(source, now: now))
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(Palette.ink2)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        }
-                        Text("Если на телефоне открыт Telegram, а здесь офлайн, проверь видимость «Последний визит и в сети» между своими аккаунтами. Панель показывает ответы API, а не активность отдельного устройства.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Palette.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button(action: onCopy) {
-                            Text("Скопировать диагностику")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Palette.ink)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                                .background(Palette.page, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(EdgeInsets(top: 16, leading: 22, bottom: 22, trailing: 22))
-                    .transition(.opacity)
+            if isOpen {
+                Rectangle().fill(Palette.hair).frame(height: 1)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    details(now: store.serverNow(at: context.date))
+                }
+                .transition(.opacity)
+            }
+        }
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+    }
+
+    private func details(now: Double) -> some View {
+        let health = state.health
+        let sources = (health?.sources ?? [:]).values.sorted { ($0.source ?? "") < ($1.source ?? "") }
+        return VStack(alignment: .leading, spacing: 16) {
+            Text(health?.message ?? "Ждём подтверждение")
+                .font(.system(size: 14))
+                .foregroundStyle(Palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
+                GridRow {
+                    field("Наблюдаем с", trackingText)
+                    field("Подтверждено", confirmedText)
+                }
+                GridRow {
+                    field("Сессия наблюдателя", health?.observer ?? "проверяем")
+                    field("Сверка", age(health?.lastPoll, now: now))
+                }
+                GridRow {
+                    field("Событие Telegram", age(health?.lastPush, now: now))
+                    field("Интервал и ответ", rateText(health))
+                }
+                GridRow {
+                    field("Цель в контактах", contactText(health))
+                    field("Тип статуса", health?.rawType ?? "ещё не получен")
                 }
             }
-            .background(Palette.panel, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            if !sources.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
+                        Text(sourceLine(source, now: now))
+                            .font(.system(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(Palette.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            Text("Если Telegram открыт, а здесь офлайн, проверь видимость «Последний визит и в сети» между своими аккаунтами.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: onCopy) {
+                Text("Скопировать диагностику")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(Palette.page, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
+        .padding(EdgeInsets(top: 16, leading: 22, bottom: 22, trailing: 22))
     }
 
     private func field(_ title: String, _ value: String) -> some View {
@@ -170,31 +167,34 @@ struct DiagnosticsCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var trackingText: String {
+        guard let started = state.trackingStarted else { return "—" }
+        return Fmt.dayText(Fmt.isoDay(started, tz: state.tz), "d MMM") + ", " + Fmt.time(started, tz: state.tz)
+    }
+
+    private var confirmedText: String {
+        guard let observed = state.current.lastObserved else { return "ожидаем Telegram" }
+        return "в " + Fmt.time(observed, tz: state.tz, seconds: true)
+    }
+
     private func sourceName(_ source: String?) -> String {
         switch source {
         case "push": return "Событие Telegram"
         case "users": return "users.getUsers"
         case "contacts": return "contacts.getStatuses"
-        default: return source ?? "Нет источника"
+        default: return source ?? "нет источника"
         }
     }
 
     private func age(_ timestamp: Double?, now: Double) -> String {
-        guard let timestamp else { return "ещё не получены" }
+        guard let timestamp else { return "ещё не было" }
         return Fmt.duration(now - timestamp, detailed: true) + " назад"
-    }
-
-    private func summary(_ health: Health?, now: Double) -> String {
-        guard let health else { return "Ждём первый ответ" }
-        let latest = health.source.flatMap { health.sources?[$0] }
-        let tail = latest.map { age($0.receivedAt, now: now) } ?? (health.mode ?? "—")
-        return sourceName(health.source) + " · " + tail
     }
 
     private func rateText(_ health: Health?) -> String {
         let poll = String(Int(health?.pollSeconds ?? 1)) + " с"
-        guard let latency = health?.rpcLatencyMs else { return poll + " / —" }
-        return poll + " / " + String(Int(latency)) + " мс"
+        guard let latency = health?.rpcLatencyMs else { return poll }
+        return poll + ", " + String(Int(latency)) + " мс"
     }
 
     private func contactText(_ health: Health?) -> String {
@@ -204,9 +204,9 @@ struct DiagnosticsCard: View {
     }
 
     private func sourceLine(_ source: SourceInfo, now: Double) -> String {
-        var line = sourceName(source.source) + " · " + (source.type ?? "—") + " · " + age(source.receivedAt, now: now)
-        if let lastSeen = source.lastSeen { line += " · Last Seen " + Fmt.time(lastSeen, tz: state.tz, seconds: true) }
-        if source.byMe == true { line += " · ограничение by_me" }
+        var line = sourceName(source.source) + ": " + (source.type ?? "—") + ", " + age(source.receivedAt, now: now)
+        if let lastSeen = source.lastSeen { line += ", Last Seen " + Fmt.time(lastSeen, tz: state.tz, seconds: true) }
+        if source.byMe == true { line += ", ограничение by_me" }
         return line
     }
 }
