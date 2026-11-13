@@ -51,6 +51,8 @@ final class PresenceStore {
     private(set) var streamOpen = false
     /// Пришёл ли хотя бы один свежий ответ после запуска.
     private(set) var bootstrapped = false
+    /// День, который уже выбран, но ещё загружается: панель дня показывает его сразу.
+    private(set) var pendingDate: String? = nil
 
     let api = PresenceAPI()
 
@@ -120,6 +122,12 @@ final class PresenceStore {
             guard number == requestNumber else { return }
             let message = (error as? LocalizedError)?.errorDescription ?? "Не удалось получить статистику. Проверь соединение с сайтом."
             if errorMessage != message { errorMessage = message }
+            // День не загрузился: возвращаем выбор к тому, что на экране.
+            if pendingDate != nil, let shown = state {
+                followToday = shown.isToday
+                requestedDate = shown.isToday ? nil : shown.date
+                pendingDate = nil
+            }
         }
     }
 
@@ -130,6 +138,7 @@ final class PresenceStore {
         lastSuccess = now
         if !bootstrapped { bootstrapped = true }
         if errorMessage != nil { errorMessage = nil }
+        if pendingDate != nil { pendingDate = nil }
         if next.isToday {
             followToday = true
             requestedDate = nil
@@ -175,7 +184,7 @@ final class PresenceStore {
     }
 
     func pick(_ day: String) {
-        guard let state, day <= state.today, day != state.date else { return }
+        guard let state, day <= state.today, day != (pendingDate ?? state.date) else { return }
         if day == state.today {
             followToday = true
             requestedDate = nil
@@ -183,12 +192,13 @@ final class PresenceStore {
             followToday = false
             requestedDate = day
         }
+        pendingDate = day
         Task { await refresh(force: true) }
     }
 
     func move(by days: Int) {
         guard let state else { return }
-        pick(Fmt.shiftDay(state.date, days))
+        pick(Fmt.shiftDay(pendingDate ?? state.date, days))
     }
 
     /// Не чаще одного запроса в 0,8 с, даже если сервер шлёт события подряд.
@@ -361,6 +371,20 @@ final class PresenceStore {
         default:
             let start = current.since ?? now
             return Fmt.duration(now - start, detailed: true) + ", с " + Fmt.time(start, tz: state.tz)
+        }
+    }
+
+    /// Сколько длится текущий статус: «3 мин 44 с». nil, если статус неизвестен.
+    func statusDuration(at date: Date) -> String? {
+        guard let state = latest else { return nil }
+        let now = serverNow(at: date)
+        switch liveState(at: date) {
+        case "online":
+            return Fmt.duration(now - (state.current.since ?? now), detailed: true)
+        case "offline":
+            return Fmt.duration(now - (state.current.pauseSince ?? state.current.since ?? now), detailed: true)
+        default:
+            return nil
         }
     }
 

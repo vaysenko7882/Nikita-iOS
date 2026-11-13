@@ -1,17 +1,22 @@
 import SwiftUI
 
 /// Плавающая панель дня у большого пальца. Смахивание по ней вбок листает дни.
+/// Подпись меняется сразу при нажатии, не дожидаясь ответа сервера, поэтому
+/// стрелку можно нажать несколько раз подряд.
 struct DateBar: View {
     @Environment(PresenceStore.self) private var store
     let state: PresenceState
     var onPickDate: () -> Void
 
     var body: some View {
+        let shown = store.pendingDate ?? state.date
+        let isToday = shown == state.today
+
         HStack(spacing: 4) {
             barButton("chevron.left", label: "Предыдущий день") { store.move(by: -1) }
             Button(action: onPickDate) {
                 HStack(spacing: 6) {
-                    Text(Fmt.shortDay(state.date, today: state.today))
+                    Text(Fmt.shortDay(shown, today: state.today))
                         .font(.rounded(17))
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
@@ -23,11 +28,11 @@ struct DateBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text("Выбрать дату, сейчас " + Fmt.dayText(state.date, "d MMMM")))
+            .accessibilityLabel(Text("Выбрать дату, сейчас " + Fmt.dayText(shown, "d MMMM")))
             barButton("chevron.right", label: "Следующий день") { store.move(by: 1) }
-                .disabled(state.isToday)
-                .opacity(state.isToday ? 0.25 : 1)
-            if !state.isToday {
+                .disabled(isToday)
+                .opacity(isToday ? 0.25 : 1)
+            if !isToday {
                 Button {
                     store.pick(state.today)
                 } label: {
@@ -50,15 +55,15 @@ struct DateBar: View {
         }
         .overlay(Capsule().strokeBorder(Palette.hair, lineWidth: 0.5))
         .frame(maxWidth: 440)
-        .animation(.snappy, value: state.isToday)
-        .sensoryFeedback(.selection, trigger: state.date)
+        .animation(.snappy, value: isToday)
+        .sensoryFeedback(.selection, trigger: shown)
         .gesture(
             DragGesture(minimumDistance: 24)
                 .onEnded { value in
                     guard abs(value.translation.width) > abs(value.translation.height) else { return }
                     if value.translation.width > 60 {
                         store.move(by: -1)
-                    } else if value.translation.width < -60 && !state.isToday {
+                    } else if value.translation.width < -60 && !isToday {
                         store.move(by: 1)
                     }
                 }

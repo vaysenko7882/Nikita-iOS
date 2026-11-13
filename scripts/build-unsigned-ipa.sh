@@ -31,8 +31,8 @@ find Payload -name '_CodeSignature' -type d -prune -exec rm -rf {} +
 find Payload -name 'embedded.mobileprovision' -type f -delete
 zip -qry Autismex-unsigned.ipa Payload
 unzip -t Autismex-unsigned.ipa
-mv Autismex-unsigned.ipa Autismex-2.2-unsigned.ipa
-shasum -a 256 Autismex-2.2-unsigned.ipa > Autismex-2.2-unsigned.sha256
+mv Autismex-unsigned.ipa Autismex-2.3-unsigned.ipa
+shasum -a 256 Autismex-2.3-unsigned.ipa > Autismex-2.3-unsigned.sha256
 printf 'commit=%s\nunsigned=true\nrequires_resigning=true\n' "${GITHUB_SHA:-local}" > build-info.txt
 rm -rf Payload
-echo "Готово: $(pwd)/Autismex-2.2-unsigned.ipa"
+echo "Готово: $(pwd)/Autismex-2.3-unsigned.ipa"

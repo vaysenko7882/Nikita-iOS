@@ -113,6 +113,7 @@ struct DialTouchLayer: UIViewRepresentable {
 /// на каждом отрезке. Короткое касание кольца — отрезок под пальцем.
 struct DialView: View {
     @Environment(PresenceStore.self) private var store
+    @Environment(Interaction.self) private var interaction
     let state: PresenceState
     @Binding var scrubbing: Bool
     var onLearned: () -> Void = {}
@@ -171,6 +172,16 @@ struct DialView: View {
         .onChange(of: state.date) { _, _ in
             inspection = nil
             runSweep()
+        }
+        // «Показать на циферблате» из плиток и хроники.
+        .onChange(of: interaction.focusToken) { _, _ in
+            guard let start = interaction.focusStart,
+                  let row = state.rows.first(where: { $0.start == start }) else { return }
+            let middle = (row.start + store.liveEnd(row)) / 2
+            withAnimation(.easeOut(duration: 0.2)) {
+                inspection = DialInspection(t: middle, rowStart: row.start, future: false)
+            }
+            release(after: 3.5)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Циферблат дня. В сети " + Fmt.duration(store.liveMetrics(at: Date()).day.online)))
@@ -315,7 +326,7 @@ struct DialCenter: View {
                 .foregroundStyle(Palette.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-            Text(observed > 0 ? Fmt.percent(metrics.online / observed * 100) + " времени" : "статус не подтверждён")
+            Text(observed > 0 ? Fmt.percent(metrics.online / observed * 100) + " дня" : "статус не подтверждён")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.ink2)
                 .lineLimit(2)

@@ -4,6 +4,7 @@ import SwiftUI
 /// Вся сетка — один Canvas и один жест касания: это 1 вью вместо 168.
 struct WeekSection: View {
     @Environment(PresenceStore.self) private var store
+    @Environment(Interaction.self) private var interaction
     let state: PresenceState
     @State private var picked: PickedCell?
 
@@ -61,6 +62,16 @@ struct WeekSection: View {
                 }
                 .frame(width: 48)
             }
+            // Полоса под строкой открытого дня.
+            .background(alignment: .top) {
+                if let index = days.firstIndex(where: { $0.date == state.date }) {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Palette.panel)
+                        .frame(height: rowHeight - 2)
+                        .padding(.horizontal, -8)
+                        .offset(y: headerHeight + CGFloat(index) * rowHeight + 1)
+                }
+            }
 
             footer(days: days, hourNow: hourNow)
                 .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
@@ -80,7 +91,9 @@ struct WeekSection: View {
         let current = day.date == state.date
         let dayNumber = Int(day.date.suffix(2)) ?? 0
         return Button {
+            guard !current else { return }
             store.pick(day.date)
+            interaction.scroll(to: "day")
         } label: {
             Text(Fmt.cap(Fmt.dayText(day.date, "EE")) + " " + String(dayNumber))
                 .font(.system(size: 13, weight: current ? .bold : .regular))

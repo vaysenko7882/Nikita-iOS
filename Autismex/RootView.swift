@@ -17,6 +17,7 @@ enum ActiveSheet: Identifiable {
 
 struct RootView: View {
     @Environment(PresenceStore.self) private var store
+    @Environment(Interaction.self) private var interaction
     @Environment(\.scenePhase) private var scenePhase
     @State private var scrubbing = false
     @State private var diagnosticsOpen = false
@@ -34,6 +35,9 @@ struct RootView: View {
                 DateBar(state: state, onPickDate: { sheet = .datePicker })
                     .padding(.horizontal, 14)
                     .padding(.bottom, 6)
+                MiniStatus()
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 4)
             } else {
                 LaunchView(message: store.errorMessage) {
                     Task { await store.refresh(force: true) }
@@ -62,10 +66,14 @@ struct RootView: View {
 
     /// Единственная прокрутка — вертикальная. Ширина содержимого жёстко равна ширине
     /// экрана, поэтому сдвинуть или «растянуть» экран вбок нельзя.
+    /// Порядок — от близкого к далёкому: сейчас → выбранный день → неделя → месяц → всё время.
     private func content(_ state: PresenceState, width: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id("top")
                     ForEach(store.notices, id: \.self) { text in
                         NoticeView(text: text).padding(.bottom, 10)
                     }
@@ -80,14 +88,14 @@ struct RootView: View {
                         }
                     )
                     DaySection(state: state, scrubbing: $scrubbing)
-                        .id("day")
                         .padding(.top, 44)
+                        .id("day")
+                    ChronicleSection(state: state, width: width - 40)
+                        .padding(.top, 40)
                     WeekSection(state: state)
                         .padding(.top, 56)
-                    ChronicleSection(state: state, width: width - 40)
-                        .padding(.top, 56)
                     HistorySection(state: state) {
-                        withAnimation(.snappy) { proxy.scrollTo("day", anchor: .top) }
+                        interaction.scroll(to: "day")
                     }
                     .padding(.top, 56)
                     TotalsCard(state: state)
@@ -106,7 +114,13 @@ struct RootView: View {
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .scrollDisabled(scrubbing)
+            .modifier(HeroTracker(interaction: interaction))
             .refreshable { await store.refresh(force: true) }
+            .onChange(of: interaction.scrollRequest) { _, request in
+                withAnimation(.snappy) {
+                    proxy.scrollTo(request.target, anchor: request.target == "dial" ? .center : .top)
+                }
+            }
         }
     }
 
@@ -239,7 +253,7 @@ struct FooterView: View {
     let state: PresenceState
 
     var body: some View {
-        Text("Presence 2.2. Время: " + zoneText)
+        Text("Presence 2.3. Время: " + zoneText)
             .font(.system(size: 12))
             .foregroundStyle(Palette.ink3)
             .frame(maxWidth: .infinity, alignment: .center)

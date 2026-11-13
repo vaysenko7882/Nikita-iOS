@@ -2,7 +2,9 @@ import SwiftUI
 
 /// Хроника дня в виде переписки: сеансы онлайн — исходящие сообщения,
 /// чем дольше сеанс, тем шире пузырь; паузы — короткие служебные плашки.
+/// Нажатие на сообщение показывает этот отрезок на циферблате.
 struct ChronicleSection: View {
+    @Environment(Interaction.self) private var interaction
     let state: PresenceState
     /// Ширина колонки содержимого (экран минус поля).
     let width: CGFloat
@@ -62,8 +64,10 @@ struct ChronicleSection: View {
             let fraction = CGFloat(0.54 + 0.38 * (row.duration / longest).squareRoot())
             let range = Fmt.time(row.start, tz: state.tz) + " – " + (live ? "сейчас" : Fmt.time(row.end, tz: state.tz))
             MessageBubble(row: row, range: range, live: live, width: max(150, min(inner - 4, inner * fraction)))
+                .onTapGesture { interaction.focus(row.start) }
         } else {
             PausePill(row: row, live: live)
+                .onTapGesture { interaction.focus(row.start) }
         }
     }
 }
