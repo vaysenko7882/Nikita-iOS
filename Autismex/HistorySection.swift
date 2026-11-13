@@ -12,9 +12,19 @@ struct HistorySection: View {
         let rows = Array(all.prefix(limit))
         let longest = max(1, rows.map { $0.onlineSeconds ?? 0 }.max() ?? 1)
         let average = Insights.historyAverage(rows: rows, today: state.today)
+        let week = Insights.weekTotals(history: all)
+        let record = Insights.recordDate(history: all)
 
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(title: "День за днём", note: average > 0 ? "Черта — среднее, " + Fmt.duration(average) : nil)
+
+            if week.current > 0 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { chips(week) }
+                    VStack(alignment: .leading, spacing: 8) { chips(week) }
+                }
+                .padding(.bottom, 14)
+            }
 
             if rows.isEmpty {
                 Text("История появится после первого наблюдения")
@@ -25,7 +35,7 @@ struct HistorySection: View {
             }
             VStack(spacing: 2) {
                 ForEach(rows, id: \.date) { day in
-                    HistoryRow(day: day, state: state, longest: longest, average: average) {
+                    HistoryRow(day: day, state: state, longest: longest, average: average, isRecord: day.date != nil && day.date == record) {
                         if let date = day.date {
                             store.pick(date)
                             onPick()
@@ -43,11 +53,23 @@ struct HistorySection: View {
     }
 }
 
+extension HistorySection {
+    @ViewBuilder
+    fileprivate func chips(_ week: (current: Double, previous: Double?)) -> some View {
+        FactChip(value: Fmt.duration(week.current), label: "за 7 дней")
+        if let previous = week.previous, abs(week.current - previous) >= 60 {
+            let more = week.current > previous
+            FactChip(value: (more ? "+" : "−") + Fmt.duration(abs(week.current - previous)), label: "к прошлой неделе")
+        }
+    }
+}
+
 struct HistoryRow: View {
     let day: Metrics
     let state: PresenceState
     let longest: Double
     let average: Double
+    let isRecord: Bool
     let action: () -> Void
 
     var body: some View {
@@ -90,6 +112,11 @@ struct HistoryRow: View {
                         Text("данные " + Fmt.percent(coverage))
                             .font(.system(size: 11))
                             .foregroundStyle(Palette.ink2)
+                            .lineLimit(1)
+                    } else if isRecord {
+                        Text("рекорд")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.on)
                             .lineLimit(1)
                     }
                 }

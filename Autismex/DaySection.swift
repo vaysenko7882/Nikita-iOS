@@ -34,7 +34,7 @@ struct DaySection: View {
             }
 
             if !hintSeen {
-                Text("Задержи палец на кольце и веди по нему")
+                Text("Задержи палец на кольце и веди по нему.\nЗелёные точки внутри — привычные часы недели.")
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.ink2)
                     .multilineTextAlignment(.center)
@@ -133,8 +133,7 @@ struct TilesView: View {
 
     private var pauseNote: String {
         guard metrics.maxPause > 0 else { return "пока не было" }
-        let source = metrics.maxPauseSource == "telegram_last_seen" ? " по Last Seen" : ""
-        return "до " + Fmt.duration(metrics.maxPause) + source
+        return "до " + Fmt.duration(metrics.maxPause)
     }
 }
 
@@ -244,6 +243,37 @@ enum Insights {
             average = Fmt.duration(totals.reduce(0, +) / Double(totals.count) * 60)
         }
         return (peak, average)
+    }
+
+    /// Привычный ритм: средняя доля онлайна в каждом часе за прошлые дни недели (0…1).
+    static func habit(state: PresenceState) -> [Double]? {
+        guard let days = state.heatmap else { return nil }
+        var sum = Array(repeating: 0.0, count: 24)
+        var count = Array(repeating: 0.0, count: 24)
+        for day in days where day.date != state.today {
+            for cell in day.cells where cell.hour >= 0 && cell.hour < 24 && cell.known > 0 {
+                sum[cell.hour] += min(60, cell.online)
+                count[cell.hour] += 1
+            }
+        }
+        guard count.contains(where: { $0 > 0 }) else { return nil }
+        return (0..<24).map { hour in count[hour] > 0 ? sum[hour] / count[hour] / 60 : 0 }
+    }
+
+    /// Сумма за последние 7 дней и за 7 дней до них (история идёт от новых к старым).
+    static func weekTotals(history: [Metrics]) -> (current: Double, previous: Double?) {
+        let current = history.prefix(7).reduce(0) { $0 + ($1.onlineSeconds ?? 0) }
+        guard history.count >= 14 else { return (current, nil) }
+        let previous = history.dropFirst(7).prefix(7).reduce(0) { $0 + ($1.onlineSeconds ?? 0) }
+        return (current, previous)
+    }
+
+    /// День с самым большим временем в сети.
+    static func recordDate(history: [Metrics]) -> String? {
+        guard history.count >= 3,
+              let best = history.max(by: { ($0.onlineSeconds ?? 0) < ($1.onlineSeconds ?? 0) }),
+              (best.onlineSeconds ?? 0) > 0 else { return nil }
+        return best.date
     }
 
     /// Среднее время в сети за показанные полные дни.

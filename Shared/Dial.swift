@@ -77,6 +77,7 @@ enum DialPainter {
         sweep: Double = 1,
         showLabels: Bool = true,
         showTicks: Bool = true,
+        habit: [Double]? = nil,
         knobAt: Double? = nil,
         knobState: String = "unknown"
     ) {
@@ -90,7 +91,23 @@ enum DialPainter {
         context.stroke(track, with: .color(Palette.ink3.opacity(0.55)),
                        style: StrokeStyle(lineWidth: max(1, 2.6 * u), lineCap: .round, dash: [0.01, max(3, 6.7 * u)]))
 
-        if showTicks {
+        if let habit, habit.count == 24 {
+            // Привычный ритм недели: точка в середине каждого часа, чем чаще в сети — тем крупнее и зеленее.
+            for hour in 0..<24 {
+                let a = (Double(hour) + 0.5) / 24 * Dial.tau - Double.pi / 2
+                let p = Dial.point(a, 103 * u, center)
+                let share = max(0, min(1, habit[hour]))
+                if share > 0.03 {
+                    let r: CGFloat = (1.6 + 2.8 * CGFloat(share.squareRoot())) * u
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                                 with: .color(Palette.on.opacity(0.35 + 0.65 * share)))
+                } else {
+                    let r: CGFloat = 1.1 * u
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                                 with: .color(Palette.ink3.opacity(0.5)))
+                }
+            }
+        } else if showTicks {
             for hour in 0..<24 {
                 let a = Double(hour) / 24 * Dial.tau - Double.pi / 2
                 let p = Dial.point(a, 104 * u, center)

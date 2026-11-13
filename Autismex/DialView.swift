@@ -13,6 +13,7 @@ struct DialCanvas: View, Animatable {
     let segments: [DialSegment]
     let dayStart: Double
     let dayEnd: Double
+    var habit: [Double]? = nil
 
     var animatableData: Double {
         get { sweep }
@@ -21,7 +22,7 @@ struct DialCanvas: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            DialPainter.paint(&context, size: size, segments: segments, dayStart: dayStart, dayEnd: dayEnd, sweep: sweep)
+            DialPainter.paint(&context, size: size, segments: segments, dayStart: dayStart, dayEnd: dayEnd, sweep: sweep, habit: habit)
         }
     }
 }
@@ -183,7 +184,7 @@ struct DialView: View {
             DialSegment(state: row.state, start: row.start, end: store.liveEnd(row, at: date))
         }
         return ZStack {
-            DialCanvas(sweep: sweep, segments: segments, dayStart: dayStart, dayEnd: dayEnd)
+            DialCanvas(sweep: sweep, segments: segments, dayStart: dayStart, dayEnd: dayEnd, habit: Insights.habit(state: state))
             if state.isToday {
                 NowKnob(state: store.liveState(at: date))
                     .frame(width: 24 * side / 340, height: 24 * side / 340)

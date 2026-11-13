@@ -4,6 +4,7 @@ import SwiftUI
 struct StatusCard: View {
     @Environment(PresenceStore.self) private var store
     let state: PresenceState
+    var onShare: () -> Void
     var onExport: () -> Void
     var onSite: () -> Void
     var onDiagnostics: () -> Void
@@ -59,15 +60,6 @@ struct StatusCard: View {
                 .foregroundStyle(Palette.ink2)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 6)
-
-            if let note = store.pauseNote(at: date) {
-                Text(note)
-                    .font(.system(size: 13))
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-            }
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -76,11 +68,19 @@ struct StatusCard: View {
                 .fill(live == "online" ? Palette.onSoft : Palette.panel)
         )
         .animation(.easeInOut(duration: 0.5), value: live)
+        // Тактильный отклик, когда статус меняется при открытом приложении.
+        .sensoryFeedback(trigger: live) { old, new in
+            guard old != "unknown" else { return nil }
+            if new == "online" { return .success }
+            if new == "offline" { return .impact(weight: .light) }
+            return nil
+        }
         .accessibilityElement(children: .combine)
     }
 
     private var menu: some View {
         Menu {
+            Button("Поделиться днём", systemImage: "square.and.arrow.up", action: onShare)
             Button("Экспорт CSV", systemImage: "square.and.arrow.down", action: onExport)
             Button("Открыть сайт", systemImage: "safari", action: onSite)
             Button("Связь с Telegram", systemImage: "antenna.radiowaves.left.and.right", action: onDiagnostics)

@@ -22,6 +22,7 @@ struct RootView: View {
     @State private var diagnosticsOpen = false
     @State private var sheet: ActiveSheet?
     @State private var toast: String?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -70,6 +71,7 @@ struct RootView: View {
                     }
                     StatusCard(
                         state: state,
+                        onShare: shareDay,
                         onExport: export,
                         onSite: { sheet = .site },
                         onDiagnostics: {
@@ -124,6 +126,35 @@ struct RootView: View {
                     store.pick(day)
                 }
             }
+        }
+    }
+
+    /// Картинка дня: циферблат и итог. Имя и ник на неё не попадают.
+    private func shareDay() {
+        guard let state = store.state else { return }
+        let metrics = store.liveMetrics(at: Date()).day
+        let sessions = Int(metrics.sessions)
+        let card = DayShareCard(
+            title: Fmt.cap(Fmt.dayText(state.date, "d MMMM, EEEE")),
+            online: Fmt.duration(metrics.online),
+            caption: String(sessions) + " " + Fmt.plural(sessions, "сеанс", "сеанса", "сеансов") + " в сети",
+            segments: state.rows.map { DialSegment(state: $0.state, start: $0.start, end: store.liveEnd($0)) },
+            dayStart: state.dayStart,
+            dayEnd: state.dayEnd
+        )
+        .environment(\.colorScheme, colorScheme)
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 3
+        guard let data = renderer.uiImage?.pngData() else {
+            show("Не удалось собрать картинку")
+            return
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("autismex-" + state.date + ".png")
+        do {
+            try data.write(to: url, options: .atomic)
+            sheet = .share(url)
+        } catch {
+            show("Не удалось собрать картинку")
         }
     }
 
@@ -208,7 +239,7 @@ struct FooterView: View {
     let state: PresenceState
 
     var body: some View {
-        Text("Presence 2.1. Время: " + zoneText)
+        Text("Presence 2.2. Время: " + zoneText)
             .font(.system(size: 12))
             .foregroundStyle(Palette.ink3)
             .frame(maxWidth: .infinity, alignment: .center)

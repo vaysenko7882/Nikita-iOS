@@ -1,5 +1,16 @@
 import WidgetKit
 import SwiftUI
+import AppIntents
+
+/// Кнопка «обновить» прямо в среднем виджете.
+struct RefreshPresenceIntent: AppIntent {
+    static let title: LocalizedStringResource = "Обновить статус"
+
+    func perform() async throws -> some IntentResult {
+        WidgetCenter.shared.reloadTimelines(ofKind: "AutismexPresence")
+        return .result()
+    }
+}
 
 // Виджеты читают тот же /api/state напрямую — общий контейнер приложений не нужен.
 // Приложение обновляет их, когда статус меняется, пока оно открыто.
@@ -194,11 +205,20 @@ struct MediumPresenceView: View {
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Text(String(snapshot.sessions) + " " + Fmt.plural(snapshot.sessions, "сеанс", "сеанса", "сеансов") + " · обновлено " + Fmt.time(snapshot.updated.timeIntervalSince1970, tz: snapshot.tz))
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.ink2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                HStack(spacing: 6) {
+                    Text(String(snapshot.sessions) + " " + Fmt.plural(snapshot.sessions, "сеанс", "сеанса", "сеансов") + ", в " + Fmt.time(snapshot.updated.timeIntervalSince1970, tz: snapshot.tz))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.ink2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Spacer(minLength: 0)
+                    Button(intent: RefreshPresenceIntent()) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Palette.ink2)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

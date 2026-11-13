@@ -28,8 +28,8 @@ struct TotalsCard: View {
                     stat(String(Int(total.pauses)), "паузы")
                 }
                 GridRow {
+                    stat(Fmt.duration(total.maxSession), "самый долгий сеанс")
                     stat(Fmt.duration(total.maxPause), "самая долгая пауза")
-                    stat(Fmt.percent(total.coverage), "полнота данных")
                 }
             }
             .padding(.top, 18)

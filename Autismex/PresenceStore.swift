@@ -364,12 +364,6 @@ final class PresenceStore {
         }
     }
 
-    func pauseNote(at date: Date) -> String? {
-        guard let state = latest, liveState(at: date) == "offline", state.current.pauseSource == "telegram_last_seen" else { return nil }
-        let observed = serverNow(at: date) - (state.current.since ?? state.now)
-        return "Начало по Last Seen. Сами наблюдаем " + Fmt.duration(observed, detailed: true) + "."
-    }
-
     /// Конец отрезка с учётом того, что текущий растёт прямо сейчас.
     func liveEnd(_ row: Interval, at date: Date = Date()) -> Double {
         guard let state = latest, row.isOngoing, state.isToday else { return row.end }
