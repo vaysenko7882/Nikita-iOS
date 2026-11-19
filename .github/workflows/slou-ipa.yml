@@ -1,0 +1,71 @@
+name: Build Slou IPA
+on:
+  push:
+    branches: [build/slou-ios-20261120]
+    paths:
+      - 'Slou-iOS/**'
+      - '.github/workflows/slou-ipa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          sparse-checkout: Slou-iOS
+          persist-credentials: false
+      - name: Select Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in /Applications/Xcode_27*.app /Applications/Xcode_26*.app /Applications/Xcode.app; do
+            if [[ -d "$app/Contents/Developer" ]]; then
+              export DEVELOPER_DIR="$app/Contents/Developer"
+              echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+              break
+            fi
+          done
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+      - name: Compile Release for iPhone
+        shell: bash
+        working-directory: Slou-iOS
+        run: |
+          set -euo pipefail
+          xcodebuild -project Slou.xcodeproj -target Slou -configuration Release -sdk iphoneos \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO SYMROOT="$RUNNER_TEMP/slou-products" OBJROOT="$RUNNER_TEMP/slou-objects" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            build 2>&1 | tee "$RUNNER_TEMP/slou-build.log"
+      - name: Verify and package Slou.ipa
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/slou-products/Release-iphoneos/Slou.app"
+          exe=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
+          test -x "$app/$exe"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = app.slou.watch
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms:0' "$app/Info.plist")" = iPhoneOS
+          xcrun lipo -verify_arch arm64 "$app/$exe"
+          file "$app/$exe"
+          mkdir -p "$RUNNER_TEMP/slou-ipa/Payload"
+          cd "$RUNNER_TEMP/slou-ipa"
+          ditto "$app" Payload/Slou.app
+          /usr/bin/zip -qry Slou.ipa Payload
+          /usr/bin/unzip -tq Slou.ipa
+          shasum -a 256 Slou.ipa
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Slou-ipa
+          path: ${{ runner.temp }}/slou-ipa/Slou.ipa
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: failure()
+        with:
+          name: Slou-build-log
+          path: ${{ runner.temp }}/slou-build.log
+          if-no-files-found: ignore
+          retention-days: 3

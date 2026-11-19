@@ -1,0 +1,50 @@
+# Запасной вариант: если Xcode вдруг не откроет Slou.xcodeproj —
+#   brew install xcodegen && xcodegen
+# и проект пересоздастся из этого файла.
+name: Slou
+options:
+  bundleIdPrefix: app.slou
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: ru
+targets:
+  Slou:
+    type: application
+    platform: iOS
+    sources:
+      - path: Slou
+    info:
+      path: Config/Info.plist
+      properties:
+        CFBundleDisplayName: слоу
+        CFBundleShortVersionString: "2.0"
+        CFBundleVersion: "2"
+        NSMicrophoneUsageDescription: Микрофон нужен для голосового чата в комнате — чтобы вы слышали друг друга во время просмотра.
+        SlouServer: "https://slows.best"
+        NSCameraUsageDescription: Камера нужна, чтобы снять фото или видео и сразу отправить его в чат комнаты.
+        NSPhotoLibraryUsageDescription: Доступ к фото нужен, чтобы отправлять снимки и видео в чат комнаты.
+        NSPhotoLibraryAddUsageDescription: Чтобы сохранять фото и видео из чата в приложение «Фото».
+        UIBackgroundModes: [audio]
+        UIUserInterfaceStyle: Dark
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations~iphone: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsArbitraryLoadsInWebContent: true
+        CFBundleURLTypes:
+          - CFBundleURLName: app.slou.watch
+            CFBundleURLSchemes: [slou]
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.slou.watch
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic

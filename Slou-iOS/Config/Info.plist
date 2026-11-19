@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Адрес сервера, который приложение открывает. Друзьям ничего вводить не нужно. Поменять: здесь или по ссылке slou://settings -->
+	<key>SlouServer</key>
+	<string>https://slows.best</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Камера нужна, чтобы снять фото или видео и сразу отправить его в чат комнаты.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Доступ к фото нужен, чтобы отправлять снимки и видео в чат комнаты.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Чтобы сохранять фото и видео из чата в приложение «Фото».</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.slou.watch</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>slou</string>
+			</array>
+		</dict>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>
