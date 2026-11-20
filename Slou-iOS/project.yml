@@ -18,7 +18,7 @@ targets:
       properties:
         CFBundleDisplayName: слоу
         CFBundleShortVersionString: "4.0"
-        CFBundleVersion: "5"
+        CFBundleVersion: "6"
         NSMicrophoneUsageDescription: Микрофон нужен для голосового чата в комнате — чтобы вы слышали друг друга во время просмотра.
         SlouServer: "https://slows.best"
         NSCameraUsageDescription: Камера нужна, чтобы снять фото или видео и сразу отправить его в чат комнаты.
