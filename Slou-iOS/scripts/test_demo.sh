@@ -50,5 +50,5 @@ fi
 wait "$installer" || { cat "$out/axe-install.log"; exit 1; }
 xcrun simctl bootstatus "$sim" -b
 xcrun simctl install "$sim" "$tmp/build/Build/Products/Debug-iphonesimulator/Slou.app"
-xcrun simctl launch "$sim" app.slou.watch -server http://localhost:1
+xcrun simctl launch "$sim" app.slou.watch -server ""
 python3 -u scripts/demo_walkthrough.py "$sim" "$out"

@@ -2,6 +2,8 @@
 
 import json
 import pathlib
+import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -12,12 +14,27 @@ out = pathlib.Path(output_dir)
 results = {}
 
 
+def receipt():
+    if not select.select([session.stdout], [], [], 85)[0]:
+        raise TimeoutError("Simulator input service stopped responding")
+    line = session.stdout.readline()
+    if not line:
+        raise RuntimeError("Simulator input service exited")
+    reply = json.loads(line)
+    if reply["didError"]:
+        error = reply["error"]
+        raise RuntimeError(f"{error['code']}: {error['message']}")
+    return reply["data"]["result"]
+
+
 def axe(*args):
-    return subprocess.check_output(["axe", *args, "--udid", sim], text=True, timeout=55)
+    session.stdin.write(shlex.join(args) + "\n")
+    session.stdin.flush()
+    return receipt()
 
 
 def read_tree():
-    return json.loads(axe("describe-ui", "--minimal-keys"))
+    return axe("describe-ui", "--minimal-keys")
 
 
 def elements(tree):
@@ -32,7 +49,14 @@ def elements(tree):
 def wait_for(identifier=None, label=None, accepts=lambda value: True, timeout=25):
     deadline = time.monotonic() + timeout
     while True:
-        tree = read_tree()
+        try:
+            tree = read_tree()
+        except RuntimeError as error:
+            if time.monotonic() >= deadline:
+                raise
+            print("Waiting for accessibility", error, flush=True)
+            time.sleep(1)
+            continue
         for element in elements(tree):
             ids = (element.get("AXUniqueId"), element.get("AXIdentifier"))
             value = str(element.get("AXLabel") or element.get("AXValue") or "")
@@ -59,7 +83,7 @@ def remember(key, value):
 
 
 def walkthrough():
-    wait_for("demo.enter", timeout=65)
+    wait_for("demo.enter", timeout=140)
     shot("home")
     with (out / "record.log").open("w") as log:
         recording = subprocess.Popen(["xcrun", "simctl", "io", sim, "recordVideo", "--codec=h264",
@@ -72,7 +96,7 @@ def walkthrough():
             time.sleep(0.7)
             tap("demo.enter")
             wait_for("demo.tournament")
-            wait_for(label="Бот Слоу")
+            wait_for(accepts=lambda s: "Бот Слоу" in s)
             time.sleep(0.5)
             shot("room")
         finally:
@@ -94,9 +118,9 @@ def walkthrough():
             "--until-id", tile, "--max-swipes", "10")
         tap(tile)
         progress = wait_for("arena.progress", accepts=lambda s: f"{title}, игра 1 из 1" in s)
-        remember(key, progress)
+        score = wait_for("arena.opponent.score", accepts=lambda s: s.isdecimal() and int(s) > 0, timeout=45)
+        remember(key, {"round": progress, "bot_points": int(score)})
         if key == "box":
-            score = wait_for("arena.opponent.score", accepts=lambda s: s.isdecimal() and int(s) > 0, timeout=40)
             axe("tap", "-x", "170", "-y", "445")
             shot("match")
             remember("bot_live_score", int(score))
@@ -113,9 +137,18 @@ def walkthrough():
     remember("returned_home", True)
 
 
-try:
-    walkthrough()
-except Exception:
-    shot("last-screen")
-    (out / "last-tree.json").write_text(json.dumps(read_tree(), ensure_ascii=False, indent=2))
-    raise
+with subprocess.Popen(["axe", "serve", "--udid", sim], stdin=subprocess.PIPE,
+                      stdout=subprocess.PIPE, text=True, bufsize=1) as session:
+    try:
+        if not receipt().get("ready"):
+            raise RuntimeError("Simulator input service did not start")
+        walkthrough()
+    except Exception:
+        shot("last-screen")
+        try:
+            (out / "last-tree.json").write_text(json.dumps(read_tree(), ensure_ascii=False, indent=2))
+        except (RuntimeError, TimeoutError) as error:
+            print("Last accessibility snapshot unavailable", error)
+        raise
+    finally:
+        session.stdin.close()
