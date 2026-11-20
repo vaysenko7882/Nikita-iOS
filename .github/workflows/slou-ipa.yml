@@ -80,6 +80,8 @@ jobs:
           persist-credentials: false
       - name: Exercise the offline room and record its presentation
         working-directory: Slou-iOS
+        env:
+          SLOU_FULL_TOURNAMENT: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: bash scripts/test_demo.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

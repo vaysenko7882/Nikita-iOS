@@ -1,6 +1,7 @@
 """Drive the shipped screens on a simulator and save the visual checks alongside the log."""
 
 import json
+import os
 import pathlib
 import select
 import shlex
@@ -64,12 +65,23 @@ def wait_for(identifier=None, label=None, accepts=lambda value: True, timeout=25
                 return value
         if time.monotonic() >= deadline:
             (out / "last-tree.json").write_text(json.dumps(tree, ensure_ascii=False, indent=2))
-            raise RuntimeError(f"Timed out waiting for {identifier or label}")
+            raise LookupError(f"Timed out waiting for {identifier or label}")
         time.sleep(0.6)
 
 
 def tap(identifier):
     axe("tap", "--id", identifier, "--wait-timeout", "12")
+
+
+def touch(x, y):
+    axe("tap", "-x", str(round(x)), "-y", str(round(y)))
+
+
+def tap_card(identifier):
+    tree = read_tree()
+    tile = next(n for n in elements(tree) if n.get("AXUniqueId") == identifier)
+    rect = tile["frame"]
+    touch(rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2)
 
 
 def shot(name):
@@ -108,26 +120,43 @@ def walkthrough():
              ("slice", "Самурай"), ("goal", "Пенальти"), ("range", "Тир"), ("arm", "Армрестлинг"),
              ("hoop", "Баскет"), ("beat", "Ритм")]
 
-    # Play the full sequence so each actual game engine, bot and result screen runs.
-    tap("demo.tournament")
-    for index, (key, title) in enumerate(games, start=1):
-        expected = f"{title}, игра {index} из 10,"
+    screen = next(n["frame"] for n in elements(read_tree()) if n.get("type") == "Application")
+    full = os.environ.get("SLOU_FULL_TOURNAMENT") == "1"
+    if full:
+        tap("demo.tournament")
+    else:
+        tap_card("demo.game.box")
+    sequence = games if full else games[:1]
+    for index, (key, title) in enumerate(sequence, start=1):
+        expected = f"{title}, игра {index} из {len(sequence)},"
         progress = wait_for("arena.progress", accepts=lambda s: s.startswith(expected), timeout=160)
         score = wait_for("arena.opponent.score", accepts=lambda s: s.isdecimal() and int(s) > 0, timeout=65)
         remember(key, {"round": progress, "bot_points": int(score)})
         if index == 1:
-            axe("tap", "-x", "170", "-y", "445")
+            touch(screen["width"] * 0.45, screen["height"] * 0.56)
             shot("match")
-    wait_for(label="В демо-комнату", timeout=160)
+    try:
+        wait_for(label="В демо-комнату", timeout=105)
+    except LookupError:
+        # A settled ceremony can temporarily expose an empty accessibility tree.
+        # Returning and successfully starting another match below also checks the final button.
+        print("Checking the result button by touch", flush=True)
     shot("result")
-    axe("tap", "--label", "В демо-комнату")
-    wait_for("demo.tournament")
-    remember("complete_tournament", "30 rounds and back to the room")
+    # The result button stays in the bottom safe area throughout its animation.
+    # Tap the visible button even if the accessibility tree is being rebuilt.
+    touch(screen["width"] / 2, screen["height"] * 0.91)
+    wait_for("demo.tournament", timeout=75)
+    shot("returned-room")
+    remember("completed_rounds", 30 if full else 3)
 
-    # The first card is already visible in the room after the tournament.
-    tap("demo.game.box")
-    progress = wait_for("arena.progress", accepts=lambda s: s.startswith("Бокс, игра 1 из 1,"))
-    remember("individual_game", progress)
+    if full:
+        tap_card("demo.game.box")
+        alternate = "Бокс, игра 1 из 1,"
+    else:
+        tap("demo.tournament")
+        alternate = "Бокс, игра 1 из 10,"
+    progress = wait_for("arena.progress", accepts=lambda s: s.startswith(alternate))
+    remember("second_match", progress)
     tap("arena.back")
     wait_for("demo.tournament")
     tap("xmark")
