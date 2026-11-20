@@ -20,12 +20,14 @@ struct Toast: Identifiable {
 /// Всё про битву за корону в приложении: вызов, ответ, арена, финал, тренировка с ботом.
 /// Страница сообщает события комнаты через мост, ответы уходят на сервер через её же roomWire.
 final class DuelCenter: ObservableObject {
+    static let demoOpponentName = "Бот Слоу"
+
     @Published var arena: Arena?
     @Published var ask: AskRequest?
     @Published var waiting: Date?
     @Published var toast: Toast?
     @Published var ceremony: Ceremony?
-    @Published var arcadeOpen = false
+    @Published private(set) var demoRoomOpen = false
     @Published var myFace: URL?
 
     weak var web: WebController?
@@ -39,6 +41,7 @@ final class DuelCenter: ObservableObject {
     // MARK: от страницы
 
     func handle(_ m: [String: Any]) {
+        guard !demoRoomOpen else { return }
         switch m["a"] as? String ?? "" {
         case "offline":
             show(Toast(title: "Создателя сейчас нет в сети"))
@@ -126,7 +129,7 @@ final class DuelCenter: ObservableObject {
                 a.conclude(c)
             } else if age < 60000 {
                 info { [weak self] room in
-                    guard let self else { return }
+                    guard let self, !self.demoRoomOpen else { return }
                     var solo = c
                     solo.meName = "Ты"
                     if let peer = room?.peerName, !peer.isEmpty { solo.opName = peer } else { solo.opName = "Соперник" }
@@ -179,7 +182,7 @@ final class DuelCenter: ObservableObject {
         web?.js("window.__slouNative.closeDialogs(); return 'ok'", [:]) { _ in }
         web?.js("return String(window.__slouNative.busy(true))", [:]) { _ in }
         info { [weak self] room in
-            guard let self, self.arena == nil else { return }
+            guard let self, self.arena == nil, !self.demoRoomOpen else { return }
             guard let room else {
                 self.show(Toast(title: "Нет комнаты"))
                 return
@@ -188,18 +191,31 @@ final class DuelCenter: ObservableObject {
         }
     }
 
-    /// Тренировка: все десять игр или одна, против бота, без сети
+    func enterDemoRoom() {
+        guard arena == nil, ceremony == nil, ask == nil, waiting == nil, model?.duel != true else { return }
+        model?.showSettings = false
+        guard !demoRoomOpen else { return }
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        buzz("light")
+        withAnimation(.easeOut(duration: 0.2)) {
+            toast = nil
+            demoRoomOpen = true
+        }
+    }
+
+    func leaveDemoRoom() {
+        guard demoRoomOpen else { return }
+        if let arena, arena.bot { arena.close() }
+        withAnimation(.easeOut(duration: 0.2)) { demoRoomOpen = false }
+    }
+
     func practice(_ game: Int? = nil) {
-        guard arena == nil else { return }
-        arcadeOpen = false
+        guard demoRoomOpen, arena == nil else { return }
+        if let game, !Arcade.games.indices.contains(game) { return }
         var room = RoomInfo()
         room.name = "Ты"
-        room.peerName = "Бот"
-        room.meFace = myFace
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            guard let self, self.arena == nil else { return }
-            self.open(Arena(duel: 0, me: "host", info: room, bot: true, from: game ?? 0, only: game))
-        }
+        room.peerName = Self.demoOpponentName
+        open(Arena(duel: 0, me: "host", info: room, bot: true, only: game))
     }
 
     private func open(_ a: Arena) {
@@ -207,16 +223,18 @@ final class DuelCenter: ObservableObject {
         Orientation.lockPortrait(true)
         UIApplication.shared.isIdleTimerDisabled = true
         withAnimation(.easeOut(duration: 0.3)) { arena = a }
-        model?.duel = true
+        if !a.bot { model?.duel = true }
     }
 
     func arenaClosed(_ a: Arena) {
         guard arena === a else { return }
         withAnimation(.easeIn(duration: 0.25)) { arena = nil }
-        model?.duel = false
+        if !a.bot {
+            model?.duel = false
+            web?.js("return String(window.__slouNative.busy(false))", [:]) { _ in }
+        }
         Orientation.lockPortrait(false)
         UIApplication.shared.isIdleTimerDisabled = model?.inRoom ?? false
-        web?.js("return String(window.__slouNative.busy(false))", [:]) { _ in }
         Sound.shared.stopAllLoops()
     }
 

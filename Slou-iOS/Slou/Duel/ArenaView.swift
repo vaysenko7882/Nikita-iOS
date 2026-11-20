@@ -91,6 +91,9 @@ struct ArenaHUD: View {
                 .animation(.spring(response: 0.35, dampingFraction: 0.7), value: arena.r)
             }
             .frame(width: 58)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(game.title), игра \(arena.only == nil ? arena.g + 1 : 1) из \(arena.only == nil ? Arcade.games.count : 1), раунд \(arena.r + 1) из 3")
+            .accessibilityIdentifier("arena.progress")
             plate(name: arena.info.peerName.isEmpty ? "Соперник" : arena.info.peerName, face: arena.info.peerFace, total: arena.totalOp, king: arena.op == "host", leading: false)
         }
         .foregroundStyle(.white)
@@ -162,6 +165,7 @@ struct ArenaFooter: View {
                     .contentTransition(.numericText())
                     .animation(.spring(response: 0.3, dampingFraction: 0.6), value: arena.oppLive)
                     .frame(minWidth: 30, alignment: .leading)
+                    .accessibilityIdentifier("arena.opponent.score")
             }
             .padding(.leading, 5)
             .padding(.trailing, 10)
@@ -173,10 +177,20 @@ struct ArenaFooter: View {
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if !arena.isOver {
-                HoldButton(title: arena.bot ? "Выйти" : "Сдаться") { arena.forfeit() }
+                if arena.bot {
+                    Button("В комнату") { arena.close() }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .slouGlass(in: Capsule(), interactive: true)
+                        .accessibilityHint("Вернуться к выбору игр")
+                        .accessibilityIdentifier("arena.back")
+                } else {
+                    HoldButton(title: "Сдаться") { arena.forfeit() }
+                }
             }
         }
-        .frame(height: 40)
+        .frame(minHeight: arena.bot ? 44 : 40)
     }
 }
 

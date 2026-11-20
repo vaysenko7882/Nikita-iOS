@@ -69,3 +69,22 @@ jobs:
           path: ${{ runner.temp }}/slou-build.log
           if-no-files-found: ignore
           retention-days: 3
+  demo:
+    name: Test the demo room on iPhone
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          sparse-checkout: Slou-iOS
+          persist-credentials: false
+      - name: Exercise the offline room and record its presentation
+        working-directory: Slou-iOS
+        run: bash scripts/test_demo.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: Slou-demo-check
+          path: ${{ runner.temp }}/slou-demo-check/
+          if-no-files-found: warn
+          retention-days: 3

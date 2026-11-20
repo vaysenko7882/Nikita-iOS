@@ -516,7 +516,7 @@ final class Arena: ObservableObject, Identifiable {
                 let won = my >= their
                 let line = won ? "Бот повержен. Корона — твоя (в тренировке)." : "Бот оказался сильнее. Реванш?"
                 self.conclude(Ceremony(iWon: won, myScore: my, theirScore: their, swap: false, line: line,
-                                    meName: "Ты", opName: "Бот", meFace: self.info.meFace, opFace: nil, practice: true))
+                                    meName: "Ты", opName: self.info.peerName, meFace: self.info.meFace, opFace: nil, practice: true))
             }
         } else {
             report(t, claim: false)
@@ -596,8 +596,10 @@ final class Arena: ObservableObject, Identifiable {
     private func botHear(_ m: [String: Any]) {
         guard (m["k"] as? String) == "go", let gg = jsonInt(m["g"]), let rr = jsonInt(m["r"]), let start = jsonNumber(m["at"]) else { return }
         let info = games[gg]
-        let skill = 0.5 + Double.random(in: 0...0.35)
-        let target = clamp(Int((skill * 100 - Double(rr) * 6 + Double.random(in: -20...20)).rounded()), 4, 98)
+        // Следующий раунд той же игры учитывает результат игрока. В новой игре начинаем со средней сложности.
+        let previous = rr > 0 ? mine[gg * 3 + rr - 1] : nil
+        let pace = previous.map { 0.65 * Double($0) + 0.35 * 58 } ?? 55
+        let target = clamp(Int((pace + Double(rr) * 2).rounded()) + Int.random(in: -9...9), 5, 98)
         let startIn = start - now()
         let length = info.duration * 1000 * Double.random(in: 0.55...0.95)
         for k in 1...5 {

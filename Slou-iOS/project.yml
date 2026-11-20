@@ -17,8 +17,8 @@ targets:
       path: Config/Info.plist
       properties:
         CFBundleDisplayName: слоу
-        CFBundleShortVersionString: "3.0"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "3.1"
+        CFBundleVersion: "4"
         NSMicrophoneUsageDescription: Микрофон нужен для голосового чата в комнате — чтобы вы слышали друг друга во время просмотра.
         SlouServer: "https://slows.best"
         NSCameraUsageDescription: Камера нужна, чтобы снять фото или видео и сразу отправить его в чат комнаты.
@@ -49,3 +49,22 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
+  SlouUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [SlouUITests]
+    dependencies:
+      - target: Slou
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.slou.watch.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        TEST_TARGET_NAME: Slou
+schemes:
+  Slou:
+    build:
+      targets:
+        Slou: all
+    test:
+      targets: [SlouUITests]

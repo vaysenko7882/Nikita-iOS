@@ -6,9 +6,18 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		9E62CA48A8216D50A086B86D = {isa = PBXContainerItemProxy; containerPortal = 46F86FAA6BBF9AC94A7E4595; proxyType = 1; remoteGlobalIDString = 42AEFBAE01D2DFD981F7DA7D; remoteInfo = Slou; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		47F7C38EB505CD8A2FBB3018 = {isa = PBXTargetDependency; target = 42AEFBAE01D2DFD981F7DA7D /* Slou */; targetProxy = 9E62CA48A8216D50A086B86D; };
+/* End PBXTargetDependency section */
+
 /* Begin PBXFileReference section */
 		D2A57DC1D883FD21FB995169 /* Slou.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Slou.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB5944C6515D6D2B678426AB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		08EFA5635AFC282E8C4C0A63 /* SlouUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SlouUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -17,6 +26,7 @@
 			path = Slou;
 			sourceTree = "<group>";
 		};
+		84FE933B9EE8052672AD44EB /* SlouUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = SlouUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -27,6 +37,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		787A6442A414E1AEA248AFD4 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -34,6 +45,7 @@
 			isa = PBXGroup;
 			children = (
 				DB0F6F37EBEB6EA094891243 /* Slou */,
+				84FE933B9EE8052672AD44EB /* SlouUITests */,
 				5386A2EAF0036C0154CF9012 /* Config */,
 				86024CAD1E83101D97359D73 /* Products */,
 			);
@@ -51,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				D2A57DC1D883FD21FB995169 /* Slou.app */,
+				08EFA5635AFC282E8C4C0A63 /* SlouUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -80,6 +93,18 @@
 			productReference = D2A57DC1D883FD21FB995169 /* Slou.app */;
 			productType = "com.apple.product-type.application";
 		};
+		889E0E0635751D88A986F620 /* SlouUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 45C3E42CAE3782E4EA07B358;
+			buildPhases = (6E3E40571E258F3A3A053CB4, 787A6442A414E1AEA248AFD4, 6E034FC97E79A7E1EBABF697);
+			buildRules = ();
+			dependencies = (47F7C38EB505CD8A2FBB3018);
+			fileSystemSynchronizedGroups = (84FE933B9EE8052672AD44EB /* SlouUITests */);
+			name = SlouUITests;
+			productName = SlouUITests;
+			productReference = 08EFA5635AFC282E8C4C0A63 /* SlouUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -90,6 +115,7 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					889E0E0635751D88A986F620 = {CreatedOnToolsVersion = 26.0; TestTargetID = 42AEFBAE01D2DFD981F7DA7D; };
 					42AEFBAE01D2DFD981F7DA7D = {
 						CreatedOnToolsVersion = 16.0;
 					};
@@ -111,6 +137,7 @@
 			projectRoot = "";
 			targets = (
 				42AEFBAE01D2DFD981F7DA7D /* Slou */,
+				889E0E0635751D88A986F620 /* SlouUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -123,6 +150,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		6E034FC97E79A7E1EBABF697 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -133,6 +161,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		6E3E40571E258F3A3A053CB4 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -201,7 +230,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -220,7 +249,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0;
+				MARKETING_VERSION = 3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.slou.watch;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -238,7 +267,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -257,7 +286,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0;
+				MARKETING_VERSION = 3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.slou.watch;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -266,6 +295,30 @@
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		4ED723BA2DA3FC4891A161F3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = app.slou.watch.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Slou;
+			};
+			name = Debug;
+		};
+		314E9DDFB0DF4C649A6CAC2E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = app.slou.watch.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Slou;
 			};
 			name = Release;
 		};
@@ -287,6 +340,12 @@
 				FA7C752E798F561D7D156D98 /* Debug */,
 				22F75101C717335ACF4089A0 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		45C3E42CAE3782E4EA07B358 /* Build configuration list for SlouUITests */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (4ED723BA2DA3FC4891A161F3 /* Debug */, 314E9DDFB0DF4C649A6CAC2E /* Release */);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};

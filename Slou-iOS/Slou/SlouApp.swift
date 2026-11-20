@@ -27,20 +27,72 @@ struct SlouApp: App {
 /// Корень: адрес сервера ещё не задан — экран настройки, задан — приложение
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @StateObject private var duel = DuelCenter()
+
+    private var hideChrome: Bool {
+        duel.arena != nil || duel.ceremony != nil || (!duel.demoRoomOpen && (model.duel || model.immersive))
+    }
 
     var body: some View {
         ZStack {
             Theme.paper.ignoresSafeArea()
-            if let url = model.serverURL {
-                MainView(server: url)
-                    .id(url.absoluteString)
-                    .transition(.opacity)
-            } else {
-                SetupView(first: true)
-                    .transition(.opacity)
+            VStack(spacing: 0) {
+                Group {
+                    if let url = model.serverURL {
+                        MainView(server: url, duel: duel).id(url.absoluteString)
+                    } else {
+                        SetupView(first: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if !model.inRoom && !model.immersive && !model.duel {
+                    Button(action: duel.enterDemoRoom) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "gamecontroller.fill")
+                                .foregroundStyle(Color(hex: 0xefc767))
+                            Text("Демо-комната").font(.headline)
+                            Spacer()
+                            Text("Играть с ботом").font(.subheadline)
+                            Image(systemName: "chevron.right").font(.caption.bold())
+                        }
+                        .foregroundStyle(Theme.ink)
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: 48)
+                        .slouGlass(in: Capsule(), interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("demo.enter")
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: 580)
+                }
             }
+            .allowsHitTesting(!duel.demoRoomOpen && duel.arena == nil)
+            .accessibilityHidden(duel.demoRoomOpen || duel.arena != nil || duel.ceremony != nil)
+            if duel.demoRoomOpen {
+                DemoRoomView(center: duel)
+                    .allowsHitTesting(duel.arena == nil)
+                    .accessibilityHidden(duel.arena != nil)
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
+            DuelLayer(center: duel)
+                .zIndex(2)
+                .allowsHitTesting(duel.arena != nil || duel.ceremony != nil || duel.ask != nil || duel.toast != nil)
         }
         .animation(.easeInOut(duration: 0.35), value: model.serverURL?.absoluteString ?? "")
+        .statusBarHidden(hideChrome)
+        .persistentSystemOverlays(hideChrome ? .hidden : .automatic)
+        .onAppear { duel.model = model }
+        .onReceive(NotificationCenter.default.publisher(for: .slouShake)) { _ in
+            if !model.showSettings { duel.enterDemoRoom() }
+        }
+        .onChange(of: model.requestsDemoRoom, initial: true) { _, requested in
+            guard requested else { return }
+            model.requestsDemoRoom = false
+            duel.enterDemoRoom()
+        }
         .sheet(isPresented: $model.showSettings) {
             SetupView(first: false)
                 .environmentObject(model)
@@ -53,15 +105,13 @@ struct RootView: View {
 /// Главный экран: весь «слоу» с сервера, поверх него — родные вещи айфона
 struct MainView: View {
     let server: URL
+    @ObservedObject var duel: DuelCenter
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var web = WebController()
-    @StateObject private var duel = DuelCenter()
     @State private var splashStart = Date()
     @State private var splashGone = false
     @State private var splashLeaving = false
-
-    private var hideChrome: Bool { model.duel || model.immersive }
 
     var body: some View {
         ZStack {
@@ -70,8 +120,6 @@ struct MainView: View {
             WebView(controller: web)
                 .ignoresSafeArea()
                 .opacity(web.failure == nil ? 1 : 0)
-
-            DuelLayer(center: duel)
 
             if let failure = web.failure {
                 FailureView(message: failure,
@@ -96,23 +144,10 @@ struct MainView: View {
                 }
             }
         }
-        .sheet(isPresented: $duel.arcadeOpen) {
-            ArcadeSheet(center: duel)
-                .presentationDragIndicator(.visible)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .slouShake)) { _ in openArcade() }
-        .onChange(of: model.showArcade) { _, on in
-            guard on else { return }
-            model.showArcade = false
-            openArcade()
-        }
-        .statusBarHidden(hideChrome)
-        .persistentSystemOverlays(hideChrome ? .hidden : .automatic)
         .onAppear {
             web.attach(model)
             web.duel = duel
             duel.web = web
-            duel.model = model
             web.open(server: server)
             if let path = model.pendingPath { web.open(path: path); model.pendingPath = nil }
         }
@@ -120,19 +155,14 @@ struct MainView: View {
         .onChange(of: web.failure) { _, failure in if failure != nil { leaveSplash(now: true) } }
         .onChange(of: model.pendingPath) { _, path in
             guard let path else { return }
+            duel.leaveDemoRoom()
             web.open(path: path)
             model.pendingPath = nil
         }
-        .onChange(of: model.inRoom) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
+        .onChange(of: model.inRoom) { _, on in
+            if duel.arena == nil { UIApplication.shared.isIdleTimerDisabled = on }
+        }
         .onChange(of: scenePhase) { _, phase in if phase == .active { web.resume() } }
-    }
-
-    /// Аркада: встряхнул телефон или открыл slou://arcade
-    private func openArcade() {
-        guard duel.arena == nil, duel.ceremony == nil, duel.ask == nil, !model.showSettings else { return }
-        buzz("medium")
-        duel.refreshFace()
-        duel.arcadeOpen = true
     }
 
     /// Заставка держится, пока буквы не упадут и страница не будет готова

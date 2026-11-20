@@ -48,7 +48,7 @@ struct CeremonyView: View {
                         .padding(.horizontal, 28)
                         .opacity(shown ? 1 : 0)
                     Spacer()
-                    Button(ceremony.practice ? "Готово" : "В комнату") {
+                    Button(ceremony.practice ? "В демо-комнату" : "В комнату") {
                         buzz("light")
                         done()
                     }

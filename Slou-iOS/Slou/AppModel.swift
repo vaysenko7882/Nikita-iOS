@@ -14,8 +14,8 @@ final class AppModel: ObservableObject {
     @Published var duel = false
     /// Плеер на весь экран — тоже прячем
     @Published var immersive = false
-    /// Открыть Аркаду (тренировку с ботом)
-    @Published var showArcade = false
+    /// Запрос из ссылки или из настроек. Комната доступна и без адреса сервера.
+    @Published var requestsDemoRoom = false
 
     init() {
         let preset = (Bundle.main.object(forInfoDictionaryKey: "SlouServer") as? String) ?? ""
@@ -37,7 +37,7 @@ final class AppModel: ObservableObject {
         return parts.url
     }
 
-    /// slou://r/КОД, slou://КОД, slou://settings, slou://arcade и обычная ссылка-приглашение ?join=КОД
+    /// slou://r/КОД, slou://КОД, slou://settings, slou://demo, slou://arcade и обычная ссылка-приглашение ?join=КОД
     func handle(url: URL) {
         let scheme = (url.scheme ?? "").lowercased()
         if scheme == "slou" {
@@ -48,8 +48,8 @@ final class AppModel: ObservableObject {
                 showSettings = true
                 return
             }
-            if parts.first?.lowercased() == "arcade" {
-                showArcade = true
+            if let route = parts.first?.lowercased(), route == "demo" || route == "arcade" {
+                requestsDemoRoom = true
                 return
             }
             if let last = parts.last {

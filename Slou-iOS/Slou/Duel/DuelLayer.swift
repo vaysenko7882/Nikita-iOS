@@ -182,56 +182,88 @@ struct AskCard: View {
     }
 }
 
-/// Аркада: любая игра против бота, без сети. Открывается встряской телефона
-struct ArcadeSheet: View {
+/// Локальная комната остаётся открытой между матчами.
+struct DemoRoomView: View {
     @ObservedObject var center: DuelCenter
-    @Environment(\.dismiss) private var dismiss
-    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    private let columns = [GridItem(.adaptive(minimum: 135, maximum: 230), spacing: 12)]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Аркада")
-                            .font(Theme.display(38))
-                        Text("Тренировка против бота — три раунда любой игры или все десять подряд")
-                            .font(.system(size: 14, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer()
-                    GlassIconButton(systemName: "xmark", size: 40) { dismiss() }
-                }
-                Button {
-                    center.practice(nil)
-                } label: {
-                    HStack(spacing: 12) {
-                        CrownGlyph(size: 34)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Битва за корону").font(.system(size: 17, weight: .bold, design: .rounded))
-                            Text("10 игр · 30 раундов · бот").font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(.black.opacity(0.6))
-                        }
-                        Spacer()
-                        Image(systemName: "play.fill")
-                    }
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 18)
-                    .frame(height: 70)
-                    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(LinearGradient(colors: [Color(hex: 0xfff1b8), Color(hex: 0xefc767)], startPoint: .topLeading, endPoint: .bottomTrailing)))
-                }
-                .buttonStyle(.plain)
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(Array(Arcade.games.enumerated()), id: \.element.id) { i, game in
-                        Button { center.practice(i) } label: { GameTile(game: game) }
-                            .buttonStyle(TileButtonStyle())
-                    }
-                }
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("Демо-комната")
+                    .font(Theme.display(36, relativeTo: .largeTitle))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                GlassIconButton(systemName: "xmark", size: 44) { center.leaveDemoRoom() }
+                    .accessibilityLabel("Выйти из демо-комнаты")
+                    .accessibilityIdentifier("demo.close")
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 14) {
+                        Label("Ты", systemImage: "person.fill")
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 3))
+                            .accessibilityHidden(true)
+                        Label(DuelCenter.demoOpponentName, systemImage: "cpu")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(hex: 0xffe8a8))
+                    Text("Играй без интернета. В каждой игре по три раунда.")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.72))
+
+                    Button { center.practice() } label: {
+                        HStack(spacing: 12) {
+                            CrownGlyph(size: 34)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Битва за корону").font(.headline)
+                                Text("Все 10 игр подряд · 30 раундов")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.black.opacity(0.72))
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "play.fill")
+                        }
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 18)
+                        .frame(maxWidth: .infinity, minHeight: 72)
+                        .background(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(LinearGradient(colors: [Color(hex: 0xfff1b8), Color(hex: 0xefc767)], startPoint: .topLeading, endPoint: .bottomTrailing)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("demo.tournament")
+
+                    Text("Выбрать игру")
+                        .font(.title3.bold())
+                        .padding(.top, 4)
+                        .accessibilityAddTraits(.isHeader)
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(Array(Arcade.games.enumerated()), id: \.element.id) { index, game in
+                            Button { center.practice(index) } label: { GameTile(game: game) }
+                                .buttonStyle(TileButtonStyle())
+                                .accessibilityLabel(game.title)
+                                .accessibilityHint(game.rules[0])
+                                .accessibilityIdentifier("demo.game." + game.id)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+            }
+            .accessibilityIdentifier("demo.games")
         }
+        .frame(maxWidth: 650)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(.white)
         .background(Color(hex: 0x09080b).ignoresSafeArea())
+        .accessibilityAction(.escape) { center.leaveDemoRoom() }
     }
 }
 

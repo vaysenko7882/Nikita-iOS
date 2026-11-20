@@ -40,7 +40,7 @@ final class WebController: NSObject, ObservableObject {
         config.allowsAirPlayForMediaPlayback = true
         config.allowsPictureInPictureMediaPlayback = true
         // Представляемся мобильным Safari: VK Видео и Кинопаб отдают обычный плеер, а не заглушку
-        config.applicationNameForUserAgent = "Version/26.0 Mobile/15E148 Safari/604.1 SlouApp/3"
+        config.applicationNameForUserAgent = "Version/26.0 Mobile/15E148 Safari/604.1 SlouApp/3.1"
         config.websiteDataStore = .default()
         config.preferences.isElementFullscreenEnabled = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
