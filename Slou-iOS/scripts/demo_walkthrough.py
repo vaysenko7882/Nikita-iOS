@@ -95,45 +95,46 @@ def walkthrough():
                 time.sleep(0.1)
             time.sleep(0.7)
             tap("demo.enter")
-            wait_for("demo.tournament")
-            wait_for(accepts=lambda s: "Бот Слоу" in s)
-            time.sleep(0.5)
-            shot("room")
+            time.sleep(0.9)
         finally:
             recording.send_signal(signal.SIGINT)
             recording.wait(timeout=30)
+    wait_for("demo.tournament")
+    wait_for(accepts=lambda s: "Бот Слоу" in s)
+    shot("room")
     remember("offline_entry", "Демо-комната")
-
-    tap("demo.tournament")
-    remember("tournament", wait_for("arena.progress", accepts=lambda s: "Бокс, игра 1 из 10" in s))
-    tap("arena.back")
 
     games = [("box", "Бокс"), ("race", "Гонка"), ("mines", "Минёр"), ("duel", "Дуэль"),
              ("slice", "Самурай"), ("goal", "Пенальти"), ("range", "Тир"), ("arm", "Армрестлинг"),
              ("hoop", "Баскет"), ("beat", "Ритм")]
-    for key, title in games:
-        wait_for("demo.close")
-        tile = "demo.game." + key
-        axe("swipe", "--start-x", "180", "--start-y", "620", "--end-x", "180", "--end-y", "270",
-            "--until-id", tile, "--max-swipes", "10")
-        tap(tile)
-        progress = wait_for("arena.progress", accepts=lambda s: f"{title}, игра 1 из 1" in s)
-        score = wait_for("arena.opponent.score", accepts=lambda s: s.isdecimal() and int(s) > 0, timeout=45)
+
+    # Play the full sequence so each actual game engine, bot and result screen runs.
+    tap("demo.tournament")
+    for index, (key, title) in enumerate(games, start=1):
+        expected = f"{title}, игра {index} из 10,"
+        progress = wait_for("arena.progress", accepts=lambda s: s.startswith(expected), timeout=160)
+        score = wait_for("arena.opponent.score", accepts=lambda s: s.isdecimal() and int(s) > 0, timeout=65)
         remember(key, {"round": progress, "bot_points": int(score)})
-        if key == "box":
+        if index == 1:
             axe("tap", "-x", "170", "-y", "445")
             shot("match")
-            remember("bot_live_score", int(score))
-            wait_for(label="В демо-комнату", timeout=110)
-            shot("result")
-            axe("tap", "--label", "В демо-комнату")
-            wait_for("demo.close")
-            remember("complete_match", "three rounds and back to the room")
-        else:
-            tap("arena.back")
-    wait_for("demo.close")
-    tap("demo.close")
+    wait_for(label="В демо-комнату", timeout=160)
+    shot("result")
+    axe("tap", "--label", "В демо-комнату")
+    wait_for("demo.tournament")
+    remember("complete_tournament", "30 rounds and back to the room")
+
+    # The first card is already visible in the room after the tournament.
+    tap("demo.game.box")
+    progress = wait_for("arena.progress", accepts=lambda s: s.startswith("Бокс, игра 1 из 1,"))
+    remember("individual_game", progress)
+    tap("arena.back")
+    wait_for("demo.tournament")
+    tap("xmark")
+    time.sleep(0.8)
     wait_for("demo.enter")
+    if any(n.get("AXUniqueId") == "demo.tournament" for n in elements(read_tree())):
+        raise RuntimeError("Room remained open after tapping its close control")
     remember("returned_home", True)
 
 
