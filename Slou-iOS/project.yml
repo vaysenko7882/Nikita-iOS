@@ -17,8 +17,8 @@ targets:
       path: Config/Info.plist
       properties:
         CFBundleDisplayName: слоу
-        CFBundleShortVersionString: "2.0"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "3.0"
+        CFBundleVersion: "3"
         NSMicrophoneUsageDescription: Микрофон нужен для голосового чата в комнате — чтобы вы слышали друг друга во время просмотра.
         SlouServer: "https://slows.best"
         NSCameraUsageDescription: Камера нужна, чтобы снять фото или видео и сразу отправить его в чат комнаты.
@@ -38,6 +38,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: app.slou.watch
             CFBundleURLSchemes: [slou]
+        CADisableMinimumFrameDurationOnPhone: true
         ITSAppUsesNonExemptEncryption: false
     settings:
       base:

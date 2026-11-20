@@ -48,6 +48,32 @@ struct SetupView: View {
                     .padding(.top, 10)
                     .padding(.horizontal, 6)
             }
+            if !first {
+                Button {
+                    Haptics.shared.play("medium")
+                    dismiss()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { model.showArcade = true }
+                } label: {
+                    HStack(spacing: 12) {
+                        CrownGlyph(size: 30)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Аркада").font(.system(size: 17, weight: .bold, design: .rounded))
+                            Text("10 игр против бота. Ещё её можно открыть, встряхнув телефон")
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.5))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .slouGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: true)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 22)
+            }
             Spacer(minLength: 24)
             Button("Подключиться", action: save)
                 .buttonStyle(PrimaryButtonStyle())

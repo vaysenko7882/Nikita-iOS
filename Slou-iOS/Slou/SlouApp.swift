@@ -1,8 +1,10 @@
 import SwiftUI
 import UIKit
+import Combine
 
 @main
 struct SlouApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
 
     init() {
@@ -54,6 +56,7 @@ struct MainView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var web = WebController()
+    @StateObject private var duel = DuelCenter()
     @State private var splashStart = Date()
     @State private var splashGone = false
     @State private var splashLeaving = false
@@ -67,6 +70,8 @@ struct MainView: View {
             WebView(controller: web)
                 .ignoresSafeArea()
                 .opacity(web.failure == nil ? 1 : 0)
+
+            DuelLayer(center: duel)
 
             if let failure = web.failure {
                 FailureView(message: failure,
@@ -82,10 +87,32 @@ struct MainView: View {
                     .transition(.opacity)
             }
         }
+        .background {
+            GeometryReader { geo in
+                Color.clear.onChange(of: geo.size.width > geo.size.height) { _, wide in
+                    // повернули телефон боком в комнате — фильм на весь экран
+                    guard UIDevice.current.userInterfaceIdiom == .phone, duel.arena == nil else { return }
+                    web.setLandscape(wide)
+                }
+            }
+        }
+        .sheet(isPresented: $duel.arcadeOpen) {
+            ArcadeSheet(center: duel)
+                .presentationDragIndicator(.visible)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .slouShake)) { _ in openArcade() }
+        .onChange(of: model.showArcade) { _, on in
+            guard on else { return }
+            model.showArcade = false
+            openArcade()
+        }
         .statusBarHidden(hideChrome)
         .persistentSystemOverlays(hideChrome ? .hidden : .automatic)
         .onAppear {
             web.attach(model)
+            web.duel = duel
+            duel.web = web
+            duel.model = model
             web.open(server: server)
             if let path = model.pendingPath { web.open(path: path); model.pendingPath = nil }
         }
@@ -98,6 +125,14 @@ struct MainView: View {
         }
         .onChange(of: model.inRoom) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
         .onChange(of: scenePhase) { _, phase in if phase == .active { web.resume() } }
+    }
+
+    /// Аркада: встряхнул телефон или открыл slou://arcade
+    private func openArcade() {
+        guard duel.arena == nil, duel.ceremony == nil, duel.ask == nil, !model.showSettings else { return }
+        buzz("medium")
+        duel.refreshFace()
+        duel.arcadeOpen = true
     }
 
     /// Заставка держится, пока буквы не упадут и страница не будет готова

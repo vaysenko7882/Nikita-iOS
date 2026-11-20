@@ -28,29 +28,10 @@ final class WebController: NSObject, ObservableObject {
 
     let webView: WKWebView
     private weak var model: AppModel?
+    weak var duel: DuelCenter?
     private var server: URL?
     private var loadedOnce = false
     private var observers: [NSObjectProtocol] = []
-
-    /// Выполняется до любого кода страницы: страница узнаёт, что она в приложении
-    private static let boot = """
-    (function () {
-      try {
-        var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.slou;
-        if (!h) return;
-        window.slouApp = { platform: 'ios', version: '2.0' };
-        document.documentElement.classList.add('is-app');
-        if (!navigator.share) {
-          navigator.share = function (d) {
-            d = d || {};
-            h.postMessage({ t: 'share', url: d.url || '', text: d.text || d.title || '' });
-            return Promise.resolve();
-          };
-          navigator.canShare = function () { return true; };
-        }
-      } catch (e) {}
-    })();
-    """
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -59,13 +40,14 @@ final class WebController: NSObject, ObservableObject {
         config.allowsAirPlayForMediaPlayback = true
         config.allowsPictureInPictureMediaPlayback = true
         // Представляемся мобильным Safari: VK Видео и Кинопаб отдают обычный плеер, а не заглушку
-        config.applicationNameForUserAgent = "Version/26.0 Mobile/15E148 Safari/604.1 SlouApp/2"
+        config.applicationNameForUserAgent = "Version/26.0 Mobile/15E148 Safari/604.1 SlouApp/3"
         config.websiteDataStore = .default()
         config.preferences.isElementFullscreenEnabled = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.defaultWebpagePreferences.preferredContentMode = .mobile
         let scripts = WKUserContentController()
-        scripts.addUserScript(WKUserScript(source: WebController.boot, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // мост приложения: родная битва за корону, Taptic, «Поделиться», поворот → кино на весь экран
+        scripts.addUserScript(WKUserScript(source: BridgeScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController = scripts
 
         let view = WKWebView(frame: .zero, configuration: config)
@@ -117,6 +99,21 @@ final class WebController: NSObject, ObservableObject {
     /// Вернулись из фона, после звонка или смены наушников — оживить звук, видео и связь
     func resume() {
         webView.evaluateJavaScript("window.slouResume && window.slouResume(); 0", completionHandler: nil)
+    }
+
+    /// Вызвать функцию страницы и получить строку в ответ (async-функции тоже работают)
+    func js(_ body: String, _ args: [String: Any], done: @escaping (String?) -> Void) {
+        webView.callAsyncJavaScript(body, arguments: args, in: nil, in: .page) { result in
+            switch result {
+            case .success(let value): done(value as? String)
+            case .failure: done(nil)
+            }
+        }
+    }
+
+    /// Телефон повернули боком — фильм на весь экран, вернули — обратно
+    func setLandscape(_ on: Bool) {
+        js("return window.__slouNative ? window.__slouNative.landscape(on) : 'none'", ["on": on]) { _ in }
     }
 
     /// Короткое сообщение внизу страницы — тем же способом, что и у сайта
@@ -192,6 +189,9 @@ extension WebController: WKScriptMessageHandler {
 
         case "settings":
             model?.showSettings = true
+
+        case "crown":
+            duel?.handle(body)
 
         default:
             break

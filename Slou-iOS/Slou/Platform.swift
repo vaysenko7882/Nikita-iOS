@@ -78,9 +78,18 @@ final class Haptics {
 
 /// Фирменный шрифт лежит в приложении — регистрируем его сами
 enum FontLoader {
+    /// Фирменный шрифт и шрифты игр (у каждой игры свой). Xcode кладёт их в корень приложения,
+    /// но на всякий случай смотрим и в папку Fonts.
     static func register() {
-        let urls = Bundle.main.urls(forResourcesWithExtension: "otf", subdirectory: nil) ?? []
-        for url in urls { CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) }
+        var seen = Set<String>()
+        for ext in ["otf", "ttf"] {
+            for dir in [nil, "Fonts"] as [String?] {
+                for url in Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: dir) ?? [] {
+                    guard seen.insert(url.lastPathComponent).inserted else { continue }
+                    CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+                }
+            }
+        }
     }
 }
 
