@@ -1,263 +1,92 @@
 import SwiftUI
 
-/// БАСКЕТ. Уличный автомат с неоновыми бортиками и пиксельным табло.
-/// Свайп вверх — бросок. Три подряд — мяч загорается, каждое попадание по 3 очка.
-final class HoopGame: GameBase {
-    private enum Res { case swish, inHoop, roll, bank, rim, board, miss
-        var scored: Bool { self == .swish || self == .inHoop || self == .roll || self == .bank }
+/// The shot uses a ballistic arc. Glass and rim contacts change the same velocity vector.
+final class HoopGame: StudioGame {
+    override var fieldID:String {"hoop"}
+    override var accent:Color {Color(hex:0xffb17d)}
+    private(set) var points=0
+    private(set) var streak=0
+    private var ball=CGPoint.zero,vel=CGVector.zero,rot=0.0
+    private var flying=false,banked=false,scored=false,ballAge=0.0,netAt = -3.0,lastRim = -3.0
+    private var aim:(id:Int,start:CGPoint,end:CGPoint)?,offset:CGFloat=0, shots=0
+    private let gravity:CGFloat=850
+    private var origin:CGPoint{P(width*(0.5+offset),height*0.80)}
+    private var hoop:CGPoint{P(width*(0.5+CGFloat(R)*0.065*sinv(elapsed*(0.72+roundScale*0.17))),height*0.355)}
+    private var rim:CGFloat{min(39,width*0.105)}
+    override func begin(){ball=origin}
+    override func score()->Int{min(100,points)}
+    private func launchVector(_ a:CGPoint,_ b:CGPoint)->CGVector {
+        // Vertical throw distance determines apex; horizontal movement aims the throw.
+        let pull=max(0,a.y-b.y),wanted=clamp(pull/(height*0.24),0.12,1.95)
+        let rise=(origin.y-hoop.y)*(0.66+0.54*wanted)
+        let vy = -sqrt(2*gravity*rise)
+        let crossing = (-vy+sqrt(max(1,vy*vy-2*gravity*(origin.y-hoop.y))))/gravity
+        let destination=origin.x+(b.x-a.x)*2.4
+        return CGVector(dx:(destination-origin.x)/max(0.45,crossing),dy:vy)
     }
-    private struct Shot {
-        var t: Double
-        var ax: CGFloat
-        var ay: CGFloat
-        var fire: Bool
-        var res: Res?
-        var hx: CGFloat = 0
-        var hy: CGFloat = 0
-        var tr: Double = 0
-        var gone = false
-        var X: CGFloat = 0
-        var Y: CGFloat = 0
-        var r: CGFloat = 0
-        var rot: Double = 0
-    }
-
-    private let orange = Color(hex: 0xff8a1f)
-    private let bx: CGFloat, by: CGFloat, br: CGFloat, rw: CGFloat
-    private let P0: CGFloat = 1300
-    private var amp: CGFloat = 0
-    private var ph: Double = 0
-    private var shots: [Shot] = []
-    private var points = 0
-    private var streak = 0
-    private var ready: Double = 0
-    private var netK: CGFloat = 0
-    private var trail: [CGPoint] = []
-
-    override init(_ c: GameContext) {
-        bx = c.w / 2
-        by = c.h * 0.86
-        br = 31 * c.s
-        rw = 50 * c.s
-        super.init(c)
-        amp = CGFloat([0, 0.17, 0.27][R]) * w
-        ph = c.rnd.next() * TAU
-    }
-
-    override func score() -> Int { Int((Double(points) * 100 / 32).rounded()) }
-
-    override func begin() { sfx("count", 0.6) }
-
-    private func hoop(_ at: Double) -> CGPoint {
-        let k = (at - t0) / 1000
-        let speed = [0, 1.3, 2.1][R]
-        let x = w / 2 + sinv(k * speed + ph) * amp
-        let y = h * 0.31 + (R == 2 ? sinv((at - t0) / 700) * 12 * S : 0)
-        return P(x, y)
-    }
-
-    override func onDown(_ p: CGPoint) { trail = [p] }
-
-    override func onMove(_ p: CGPoint, _ prev: CGPoint) {
-        trail.append(p)
-        if trail.count > 20 { trail.removeFirst() }
-    }
-
-    override func onSwipe(_ g: Gestures.Swipe) {
-        guard live, g.dy <= -40, now >= ready else { return }
-        let hp = hoop(now + 600)
-        let total = max(1, hypot(g.vx, g.vy))
-        let power = total * (abs(g.vy) / total)
-        var ax = bx + (g.dx / -g.dy) * (by - hp.y) * 0.95
-        var ay = hp.y + CGFloat(log(Double(P0 / max(300, power)))) * 95 * S
-        // доводчик: почти точный бросок чуть подтягивается к кольцу
-        if abs(ax - hp.x) < rw * 1.3 { ax += (hp.x - ax) * 0.4 }
-        if abs(ay - hp.y) < 60 * S { ay += (hp.y - ay) * 0.3 }
-        shots.append(Shot(t: now, ax: ax, ay: ay, fire: streak >= 3, res: nil))
-        ready = now + 280
-        sfx("whoosh", 0.7)
-        buzz("light")
-    }
-
-    private func resolve(_ i: Int) {
-        let hp = hoop(now)
-        let dx = shots[i].ax - hp.x
-        let dy = shots[i].ay - hp.y
-        var res: Res
-        if abs(dx) < rw * 0.7 && abs(dy) < 30 * S {
-            res = abs(dx) < rw * 0.22 && abs(dy) < 12 * S ? .swish : .inHoop
-        } else if abs(dx) < rw * 1.15 && abs(dy) < 46 * S {
-            res = Double.random(in: 0...1) < 0.35 ? .roll : .rim
-        } else if dy < -24 * S && dy > -120 * S && abs(dx) < rw * 1.6 {
-            res = abs(dx) < rw * 0.7 ? .bank : .board
-        } else {
-            res = .miss
+    override func handle(_ phase:TouchEvent.Phase,id:Int,p:CGPoint,time:Double){
+        guard !flying else{return}
+        switch phase{
+        case .began:if aim==nil && p.y>height*0.50 {aim=(id,p,p)}
+        case .moved:if aim?.id==id {aim?.end=p}
+        case .ended:
+            guard let a=aim,a.id==id else{return};aim=nil
+            guard a.start.y-p.y>22 else{return}
+            vel=launchVector(a.start,p);ball=origin;flying=true;banked=false;scored=false;ballAge=0;shots+=1;sfx("whoosh",0.59);buzz("light")
+        case .cancelled:aim=nil
         }
-        shots[i].res = res
-        shots[i].hx = hp.x
-        shots[i].hy = hp.y
-        shots[i].tr = now
-        if res.scored {
-            let v = shots[i].fire ? 3 : 2
-            points += v
-            streak += 1
-            netK = 1
-            sfx(res == .swish ? "swish" : "bounce")
-            if res == .roll || res == .bank { sfx("rim", 0.5) }
-            buzz(res == .swish ? "success" : "medium")
-            let word = res == .swish ? "SWISH" : res == .bank ? "BANK" : "+\(v)"
-            let font: GFont = res == .swish || res == .bank ? .silk : .pixel
-            pops.add(word, hp.x, hp.y - 50 * S, L(font, 34 * S, shots[i].fire ? Color(hex: 0xffcf40) : .white).outline(Color(hex: 0x2a0e02), 6))
-            if streak == 3 {
-                pops.add("OГOНЬ!", w / 2, h * 0.55, L(.pixel, 48 * S, orange).outline(Color(hex: 0x2a0e02), 7), life: 1.2)
-                sfx("fire")
-                buzz("heavy")
-            }
-            let colors = shots[i].fire ? [Color(hex: 0xffcf40), Color(hex: 0xff5a1f)] : [Color.white, orange]
-            parts.burst(hp.x, hp.y, n: 18, colors: colors, speed: 260 * S, gravity: 500, life: 0.6)
-        } else {
-            streak = 0
-            if res == .rim || res == .board {
-                sfx("rim")
-                buzz("rigid")
-                shake.kick(3 * S, 0.15)
+    }
+    override func simulate(_ dt:Double) {
+        guard flying else{ball=origin;return}
+        let old=ball,ring=hoop
+        vel.dy+=gravity*dt;ball.x+=vel.dx*dt;ball.y+=vel.dy*dt;rot+=dt*(3+Double(vel.dx)/40);ballAge+=dt
+        // Glass occupies the raised outer areas of the backboard. A descending bank redirects toward the rim.
+        if !banked,vel.dy>0,old.y<ring.y-36,ball.y>=ring.y-36,abs(ball.x-ring.x)>rim*0.48,abs(ball.x-ring.x)<rim*1.58 {
+            banked=true;vel.dx=(ring.x-ball.x)*3.4;vel.dy=max(53,vel.dy*0.55);sfx("bounce",0.53);buzz("light")
+        }
+        let rx=ball.x-ring.x
+        if !scored,vel.dy>0,old.y<=ring.y,ball.y>=ring.y {
+            if abs(rx)<rim-8 {scored=true;streak+=1;let gain=(banked ? 13:15)+(streak>=3 ? 6:0);points+=gain;netAt=elapsed
+                sfx("swish");buzz("success");toast(banked ? "От щита +\(gain)":"Чисто +\(gain)",color:accent)
+            }else if abs(abs(rx)-rim)<11 && elapsed-lastRim>0.18 {
+                lastRim=elapsed;vel.dy = -max(65,abs(vel.dy)*0.34);vel.dx+=(rx>0 ? 1:-1)*47;sfx("rim",0.65)
             }
         }
-        report()
-    }
-
-    override func update() {
-        netK = max(0, netK - CGFloat(dt * 2.5))
-        for i in shots.indices {
-            let k = (now - shots[i].t) / 1000 / 0.62
-            if shots[i].res == nil {
-                if k >= 1 { resolve(i) }
-                let e = CGFloat(min(1, k))
-                shots[i].X = bx + (shots[i].ax - bx) * e
-                shots[i].Y = by + (shots[i].ay - by) * e - 230 * S * 4 * e * (1 - e)
-                shots[i].r = br * (1 - 0.48 * e)
-            }
-            shots[i].rot = (now - shots[i].t) / 80
-            if let res = shots[i].res {
-                let q = CGFloat((now - shots[i].tr) / 1000)
-                let s = shots[i]
-                shots[i].r = br * 0.52
-                switch res {
-                case .swish, .inHoop:
-                    shots[i].X = s.hx + (s.ax - s.hx) * 0.4
-                    shots[i].Y = s.hy + q * q * 900 * S
-                case .roll:
-                    let a = Double(q) * 9
-                    shots[i].X = s.hx + cosv(a) * rw * 0.7 * max(0, 1 - q * 2)
-                    shots[i].Y = s.hy - 8 * S + (q > 0.5 ? (q - 0.5) * (q - 0.5) * 1800 * S : 0)
-                case .bank:
-                    shots[i].X = s.ax + (s.hx - s.ax) * min(1, q * 4)
-                    shots[i].Y = s.ay + q * q * 1200 * S
-                case .rim, .board:
-                    let away: CGFloat = s.ax >= s.hx ? 1 : -1
-                    shots[i].X = s.ax + away * q * 260 * S
-                    shots[i].Y = s.ay - q * 120 * S + q * q * 1300 * S
-                case .miss:
-                    shots[i].X = s.ax
-                    shots[i].Y = s.ay + q * q * 1400 * S
-                }
-                if q > 1.4 { shots[i].gone = true }
-            }
-        }
-        shots.removeAll { $0.gone }
-        if live && streak >= 3 && Double.random(in: 0...1) < 0.6 {
-            parts.burst(bx, by - br * 0.6, n: 1, colors: [Color(hex: 0xffcf40), Color(hex: 0xff5a1f)], speed: 60, angle: -Double.pi / 2, spread: 0.8, gravity: -200, size: 6, life: 0.5)
+        if ball.y>height+35 || ball.x < -40 || ball.x>width+40 || ballAge>3.3 {
+            if !scored{streak=0};flying=false;offset=CGFloat([0.0,-0.13,0.13,-0.20,0.18][shots%5]);ball=origin
         }
     }
-
-    private func ball(_ g: inout GraphicsContext, _ X: CGFloat, _ Y: CGFloat, _ r: CGFloat, _ rot: Double, _ fire: Bool) {
-        if fire {
-            let flame = G([(0, Color(hex: 0xffaa28, alpha: 0.6)), (1, Color(hex: 0xff3c00, alpha: 0))])
-            g.fill(Shape2.circle(P(X, Y), r * 2), with: radial(flame, P(X, Y), r * 0.5, r * 2))
-        }
-        var c = g
-        c.translateBy(x: X, y: Y)
-        c.rotate(by: .radians(rot))
-        let leather = G([(0, Color(hex: 0xffb066)), (0.6, Color(hex: 0xee6a12)), (1, Color(hex: 0x8a3404))])
-        c.fill(Shape2.circle(.zero, r), with: radial(leather, P(-r * 0.35, -r * 0.35), r * 0.1, r))
-        var seams = Shape2.line(P(-r, 0), P(r, 0))
-        seams.addPath(Shape2.line(P(0, -r), P(0, r)))
-        seams.addPath(Shape2.arc(P(-r * 1.25, 0), r * 0.9, -0.9, 0.9))
-        seams.addPath(Shape2.arc(P(r * 1.25, 0), r * 0.9, Double.pi - 0.9, Double.pi + 0.9))
-        var inside = c
-        inside.clip(to: Shape2.circle(.zero, r))
-        inside.strokeColor(seams, Color(hex: 0x2a1004), max(1, r * 0.07))
+    private func drawBall(_ g:inout GraphicsContext,p:CGPoint,r:CGFloat){
+        var a=g;a.translateBy(x:p.x,y:p.y);a.rotate(by:.radians(rot))
+        let shape=Shape2.circle(.zero,r)
+        a.fill(shape,with:radial(G([(0,Color(hex:0xf7b57d)),(0.45,Color(hex:0xd47840)),(1,Color(hex:0x713a28))]),P(-r*0.39,-r*0.49),0,r*1.6));a.clip(to:shape)
+        a.strokeColor(Shape2.ellipse(P(-r*0.54,0),r*0.50,r*1.04),Color(hex:0x372922),1.8)
+        a.strokeColor(Shape2.ellipse(P(r*0.54,0),r*0.50,r*1.04),Color(hex:0x372922),1.8)
+        strokeLine(&a,[P(-r,0),P(r,0)],Color(hex:0x372922),1.7)
     }
-
-    override func draw(_ g: inout GraphicsContext) {
-        let hp = hoop(live ? now : (t0 > 0 ? t0 : now))
-        var x = world(g)
-        // короб автомата: тёмная клетка в перспективе, неоновые бортики
-        x.fillColor(Shape2.rect(-20, -20, w + 40, h + 40), Color(hex: 0x0c0703))
-        let back = Shape2.poly([P(w * 0.14, h * 0.12), P(w * 0.86, h * 0.12), P(w, h), P(0, h)])
-        x.fill(back, with: linear(G([(0, Color(hex: 0x1d0f06)), (1, Color(hex: 0x060302))]), P(0, 0), P(0, h)))
-        var cage = Path()
-        for i in 0...12 {
-            let t = CGFloat(i) / 12
-            cage.addPath(Shape2.line(P(w * (0.14 + 0.72 * t), h * 0.12), P(w * t, h)))
-        }
-        for j in 0..<10 {
-            let t = CGFloat(j) / 10
-            let y = h * 0.12 + h * 0.88 * t * t
-            cage.addPath(Shape2.line(P(w * 0.14 * (1 - t * t), y), P(w - w * 0.14 * (1 - t * t), y)))
-        }
-        x.strokeColor(cage, orange.opacity(0.12), 1)
-        var rails = Shape2.line(P(w * 0.14, h * 0.12), P(0, h))
-        rails.addPath(Shape2.line(P(w * 0.86, h * 0.12), P(w, h)))
-        var neon = x
-        neon.addFilter(.shadow(color: orange, radius: 18))
-        neon.strokeColor(rails, orange, 4 * S)
-        // табло
-        let board = Shape2.rrect(w * 0.2, 6 * S, w * 0.6, 54 * S, 8 * S)
-        x.fillColor(board, Color(hex: 0x050302))
-        x.strokeColor(board, Color(hex: 0x3a1a06), 2)
-        let left = live ? max(0, 10 - (now - t0) / 1000) : 10
-        Lettering.draw(&x, String(format: "%02d", points), at: P(w * 0.36, 34 * S), L(.silk, 30 * S, orange).halo(orange, 14))
-        Lettering.draw(&x, String(format: "%.1f", left), at: P(w * 0.64, 34 * S), L(.silk, 24 * S, Color(hex: 0xff3d2e)).halo(Color(hex: 0xff3d2e), 14))
-        var lcd = Path()
-        var lx: CGFloat = 0
-        while lx < w * 0.6 { lcd.addRect(CGRect(x: w * 0.2 + lx, y: 6 * S, width: 1, height: 54 * S)); lx += 4 }
-        x.fillColor(lcd, Color.white.opacity(0.05))
-        // щит и кольцо
-        let bw = 150 * S, bh = 100 * S
-        let shield = Shape2.rrect(hp.x - bw / 2, hp.y - bh * 0.92, bw, bh, 6 * S)
-        x.fillColor(shield, Color.white.opacity(0.12))
-        x.strokeColor(shield, Color.white.opacity(0.75), 3 * S)
-        x.strokeColor(Shape2.rect(hp.x - 30 * S, hp.y - 50 * S, 60 * S, 44 * S), orange, 3 * S, cap: .butt)
-        // сетка
-        var net = Path()
+    override func render(_ g:inout GraphicsContext){
+        let p=hoop
+        let board=CGRect(x:p.x-rim*1.78,y:p.y-76,width:rim*3.56,height:75)
+        g.fillColor(Path(roundedRect:board,cornerRadius:4),Color(hex:0xbad9d9,alpha:0.32))
+        g.strokeColor(Path(roundedRect:board,cornerRadius:4),.white.opacity(0.86),3)
+        g.strokeColor(Shape2.rect(p.x-22,p.y-42,44,29),.white.opacity(0.87),2)
+        let stretch=max(0,1-(elapsed-netAt)/0.53)*12*sin((elapsed-netAt)*15)
+        let bottom=P(p.x,p.y+42+CGFloat(stretch))
         for i in 0...8 {
-            let t = CGFloat(i) / 8
-            let x0 = hp.x - rw + t * rw * 2
-            let x1 = hp.x - rw * 0.55 + t * rw * 1.1
-            net.move(to: P(x0, hp.y))
-            net.addQuadCurve(to: P(x1, hp.y + 56 * S + netK * 22 * S), control: P((x0 + x1) / 2, hp.y + 30 * S + netK * 16 * S))
+            let x = -rim+2*rim*CGFloat(i)/8
+            strokeLine(&g,[P(p.x+x,p.y),P(bottom.x+x*0.49+5,bottom.y)],.white.opacity(0.84),1.25)
+            strokeLine(&g,[P(p.x+x,p.y),P(bottom.x+x*0.49-5,bottom.y)],.white.opacity(0.78),1.25)
         }
-        for j in 1...3 {
-            let t = CGFloat(j) / 4
-            net.addPath(Shape2.ellipse(P(hp.x, hp.y + t * (56 + netK * 22) * S), rw * (1 - t * 0.45), 6 * S))
+        g.strokeColor(Shape2.ellipse(p,rim,5),Color(hex:0xb75a36),5)
+        if let a=aim,a.start.y-a.end.y>12 {
+            let v=launchVector(a.start,a.end)
+            for i in 1...13 {let t=CGFloat(i)*0.052;let q=P(origin.x+v.dx*t,origin.y+v.dy*t+gravity*t*t/2);g.fillColor(Shape2.circle(q,2.4),.white.opacity(0.90-Double(i)*0.045))}
         }
-        x.strokeColor(net, Color.white.opacity(0.75), 1.5)
-        // мячи, что уже прошли кольцо, — за ободом; летящие — перед ним
-        for s in shots where !s.gone && (s.res?.scored ?? false) { ball(&x, s.X, s.Y, s.r, s.rot, s.fire) }
-        var rim = x
-        rim.addFilter(.shadow(color: Color(hex: 0xff6a1a), radius: 10))
-        rim.strokeColor(Shape2.ellipse(hp, rw, 11 * S), Color(hex: 0xff6a1a), 6 * S)
-        for s in shots where !s.gone && !(s.res?.scored ?? false) { ball(&x, s.X, s.Y, s.r, s.rot, s.fire) }
-        if live && now >= ready { ball(&x, bx, by + sinv(now / 300) * 3 * S, br, 0, streak >= 3) }
-        if trail.count > 1 && live {
-            var tr = Path()
-            tr.addLines(trail)
-            x.strokeColor(tr, orange.opacity(0.35), 5 * S)
-        }
-        overlays(&g)
-        if streak >= 3 {
-            Lettering.draw(&g, "×2", at: P(30 * S, h * 0.9), L(.pixel, 34 * S, Color(hex: 0xffcf40)).lead().halo(orange).fade(0.7 + 0.3 * sin(now / 90)))
-        }
+        let depth=clamp((origin.y-ball.y)/max(100,origin.y-p.y),0,1)
+        drawBall(&g,p:ball,r:lerp(24,10,depth))
+        if scored && ball.y<p.y+32 {g.strokeColor(Shape2.ellipseArc(p,rim,5,0,Double.pi),Color(hex:0xef8a4c),4)}
+        hud(&g,left:"Дворовая лига",value:"\(points) очков",right:"Серия \(streak)")
+        shade(&g,at:height-77,height:77,top:0,bottom:0.52)
+        ink(&g,"Свайпни вверх · длина задаёт высоту",P(width/2,height-28),13)
     }
 }

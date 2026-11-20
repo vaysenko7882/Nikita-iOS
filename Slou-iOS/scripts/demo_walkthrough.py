@@ -82,6 +82,7 @@ def tap_card(identifier):
     tile = next(n for n in elements(tree) if n.get("AXUniqueId") == identifier)
     rect = tile["frame"]
     touch(rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2)
+    tap("demo.play")
 
 
 def shot(name):
@@ -144,7 +145,7 @@ def walkthrough():
     shot("result")
     # The result button stays in the bottom safe area throughout its animation.
     # Tap the visible button even if the accessibility tree is being rebuilt.
-    touch(screen["width"] / 2, screen["height"] * 0.91)
+    tap("arena.result.return")
     wait_for("demo.tournament", timeout=75)
     shot("returned-room")
     remember("completed_rounds", 30 if full else 3)
@@ -159,7 +160,7 @@ def walkthrough():
     remember("second_match", progress)
     tap("arena.back")
     wait_for("demo.tournament")
-    tap("xmark")
+    tap("demo.close")
     time.sleep(0.8)
     wait_for("demo.enter")
     if any(n.get("AXUniqueId") == "demo.tournament" for n in elements(read_tree())):

@@ -1,181 +1,93 @@
 import SwiftUI
+import AVFoundation
 
-/// РИТМ. Клуб с лазерами: три дорожки уходят к горизонту, ноты летят на тебя.
-/// Тапай по дорожке, когда нота на линии, — каждая точная нота сыграет свою ноту мелодии.
-final class BeatGame: GameBase {
-    private struct Note { var t: Double; var lane: Int; var j: Int?; var n: Int }
-
-    private let violet = Color(hex: 0x7d5cff)
-    private let magenta = Color(hex: 0xff4fd8)
-    private let beatMs: Double
-    private let lead: Double = 1900
-    private let fall: Double
-    private let endMs: Double = 10000
-    private let hitY: CGFloat
-    private let vanY: CGFloat
-    private var notes: [Note] = []
-    private var sum = 0
-    private var combo = 0
-    private var glow: [Double] = [0, 0, 0]
-    private var pulse: Double = 0
-    private var lastBeat = -1
-    private var lastHat = -1
-
-    override init(_ c: GameContext) {
-        let r = min(2, max(0, c.round))
-        beatMs = 60000 / [104.0, 122.0, 140.0][r]
-        fall = [1600.0, 1400.0, 1220.0][r]
-        hitY = c.h * 0.8
-        vanY = c.h * 0.08
-        super.init(c)
-        let scale = [0, 3, 5, 7, 10, 12]
-        var b = 0
-        while lead + Double(b) * beatMs < endMs - 300 {
-            let t = lead + Double(b) * beatMs
-            if b < 2 || c.rnd.next() < 0.8 { notes.append(Note(t: t, lane: c.rnd.int(3), j: nil, n: c.rnd.pick(scale))) }
-            if R == 2 && c.rnd.next() < 0.22 {
-                let l = c.rnd.int(3)
-                notes.append(Note(t: t, lane: (l + 1) % 3, j: nil, n: c.rnd.pick(scale)))
-            }
-            if R > 0 && c.rnd.next() < [0, 0.3, 0.4][R] {
-                notes.append(Note(t: t + beatMs / 2, lane: c.rnd.int(3), j: nil, n: c.rnd.pick(scale)))
-            }
-            b += 1
+final class BeatGame: StudioGame {
+    override var fieldID:String {"beat"}
+    override var accent:Color{Color(hex:0xd5f68a)}
+    private enum Judgement {case pending,held,done,missed}
+    private struct Note {let lane:Int,at:Double,length:Double;var state=Judgement.pending;var value=0}
+    private var chart:[Note]=[],hands:[Int:Int]=[:],sustains:[Int:Int]=[:]
+    private var soundtrack:AVAudioPlayer?,maximum=0,total=0,chain=0
+    private var flashes=[Double](repeating:-5,count:4)
+    private let colors=[Color(hex:0xd4f97f),Color(hex:0x88dccc),Color(hex:0xc0a7ff),Color(hex:0xf4a59b)]
+    private var rate:Double{[0.95,1.0,1.1][R]}
+    private var period:Double{60/(110*rate)}
+    private var strike:CGFloat{height*0.79}
+    private var clock:Double { if let t=soundtrack,t.isPlaying {return t.currentTime/rate};return max(0,gameNow()-t0/1000) }
+    override func begin(){
+        let phrase=[0,2,1,3,0,1,3,2,1,3,2,0,3,1,2,0]
+        var beat=3.0,i=0
+        while beat*period < duration-1.1 {
+            let sustain=i%8==4,span=sustain ? 1.25*period:0, lane=phrase[(i+R*3)%phrase.count]
+            chart.append(Note(lane:lane,at:beat*period,length:span));maximum+=sustain ? 3:2
+            if R>0 && i%8==6 {chart.append(Note(lane:(lane+2)%4,at:beat*period,length:0));maximum+=2}
+            beat += sustain ? 2 : (R==2 && i%6==2 ? 0.5:1);i+=1
+        }
+        if let url=Bundle.main.url(forResource:"pulse110",withExtension:"m4a") ?? Bundle.main.url(forResource:"pulse110",withExtension:"m4a",subdirectory:"Sounds") {
+            soundtrack=try? AVAudioPlayer(contentsOf:url);soundtrack?.enableRate=true;soundtrack?.rate=Float(rate);soundtrack?.volume=0.70*Sound.shared.master
+            soundtrack?.prepareToPlay();soundtrack?.play()
         }
     }
-
-    override func score() -> Int { Int((Double(sum) / Double(max(1, notes.count * 2)) * 100).rounded()) }
-
-    private func laneX(_ k: Int) -> (near: CGFloat, far: CGFloat) {
-        let d = CGFloat(k - 1)
-        return (w / 2 + d * w * 0.3, w / 2 + d * w * 0.045)
+    override func end(){soundtrack?.stop();soundtrack=nil;hands.removeAll();sustains.removeAll()}
+    override func score()->Int {maximum==0 ? 0:clamp(Int((Double(total)*100/Double(maximum)).rounded()),0,100)}
+    private func laneX(_ lane:Int,y:CGFloat)->CGFloat {
+        let t=clamp((y-height*0.16)/(strike-height*0.16),0,1.25)
+        return width/2+(CGFloat(lane)-1.5)*width*lerp(0.110,0.225,t)
     }
-
-    override func onDown(_ p: CGPoint) {
-        let lane = clamp(Int(p.x / (w / 3)), 0, 2)
-        hit(lane)
+    private func release(_ id:Int,cancelled:Bool) {
+        if let n=sustains.removeValue(forKey:id),chart[n].state == .held {
+            if !cancelled && clock>=chart[n].at+chart[n].length-0.12 {total+=1;chart[n].state = .done;chain+=1;toast("Удержано",color:accent,seconds:0.42)}
+            else {chart[n].state = .missed;chain=0}
+        };hands[id]=nil
     }
-
-    private func hit(_ lane: Int) {
-        guard live else { return }
-        glow[lane] = 1
-        let t = now - t0
-        var bestI: Int?
-        var bd: Double = 150
-        for i in notes.indices where notes[i].j == nil && notes[i].lane == lane {
-            let d = abs(notes[i].t - t)
-            if d < bd { bd = d; bestI = i }
+    override func handle(_ phase:TouchEvent.Phase,id:Int,p:CGPoint,time:Double){
+        switch phase{
+        case .began:
+            guard p.y>=height*0.48 else{return}
+            let lane=clamp(Int(p.x/(width/4)),0,3);hands[id]=lane;flashes[lane]=elapsed
+            let t=clock
+            guard let n=chart.indices.filter({chart[$0].lane==lane && chart[$0].state == .pending && abs(chart[$0].at-t)<0.18}).min(by:{abs(chart[$0].at-t)<abs(chart[$1].at-t)}) else{chain=0;return}
+            let exact=abs(chart[n].at-t)<0.09;total+=exact ? 2:1;chain+=1
+            if chart[n].length>0 {chart[n].state = .held;sustains[id]=n}else{chart[n].state = .done}
+            sfx("note\([0,3,7,10][lane])",0.55);buzz("light")
+            toast(exact ? "В долю":"Есть",color:colors[lane],seconds:0.38)
+        case .ended:release(id,cancelled:false)
+        case .cancelled:release(id,cancelled:true)
+        case .moved:break
         }
-        let L0 = laneX(lane)
-        guard let i = bestI else {
-            sum = max(0, sum - 1)
-            combo = 0
-            sfx("buzz", 0.5)
-            buzz("light")
-            report()
-            return
-        }
-        let j = bd <= 55 ? 2 : bd <= 120 ? 1 : 0
-        notes[i].j = j
-        if j > 0 {
-            sum += j
-            combo += 1
-            sfx("note\(notes[i].n)", j == 2 ? 1 : 0.7)
-            buzz(j == 2 ? "medium" : "light")
-            parts.burst(L0.near, hitY, n: j == 2 ? 16 : 8, colors: [.white, violet, magenta], speed: 300 * S, angle: -Double.pi / 2, spread: 1.8, gravity: 200, life: 0.45)
-            pops.add(j == 2 ? "ИДЕАЛЬНО" : "ХОРОШО", L0.near, hitY - 60 * S, L(.jura, (j == 2 ? 24 : 20) * S, j == 2 ? Color(hex: 0xfff27a) : Color(hex: 0xc9b6ff)), life: 0.5, from: 1.4, rise: 24)
-        } else {
-            combo = 0
-            sfx("buzz", 0.5)
-            pops.add("МИМО", L0.near, hitY - 60 * S, L(.jura, 20 * S, Color(hex: 0xff6b8b)), life: 0.5, from: 1.2)
-        }
-        report()
     }
-
-    override func update() {
-        let t = live ? now - t0 : 0
-        if live {
-            let b = Int(floor((t - lead) / beatMs))
-            if b >= 0 && b != lastBeat && t < endMs {
-                lastBeat = b
-                sfx("drum", 0.8)
-                pulse = 1
-                if b % 2 == 0 { sfx("bass\((b / 2) % 4)", 0.7) }
-            }
-            let hb = Int(floor((t - lead - beatMs / 2) / beatMs))
-            if hb >= 0 && hb != lastHat && t < endMs {
-                lastHat = hb
-                sfx("hat", 0.5)
-            }
-            for i in notes.indices where notes[i].j == nil && t - notes[i].t > 160 {
-                notes[i].j = 0
-                combo = 0
+    override func simulate(_ dt:Double){
+        let t=clock
+        for i in chart.indices {
+            if chart[i].state == .pending && t>chart[i].at+0.19 {chart[i].state = .missed;chain=0}
+            if chart[i].state == .held && t>=chart[i].at+chart[i].length {
+                chart[i].state = .done;total+=1;sfx("hat",0.35)
             }
         }
-        pulse = max(0, pulse - dt * 3.5)
-        for k in 0..<3 { glow[k] = max(0, glow[k] - dt * 5) }
     }
-
-    override func draw(_ g: inout GraphicsContext) {
-        let t = live ? now - t0 : 0
-        g.fillColor(Shape2.rect(0, 0, w, h), Color(hex: 0x07030f))
-        // эквалайзер
-        var eq = Path()
-        for i in 0..<18 {
-            let lvl = (sin(now / 160 + Double(i) * 1.7) * 0.5 + 0.5) * (0.25 + pulse * 0.75)
-            let hh = CGFloat(lvl) * h * 0.22
-            eq.addRect(CGRect(x: CGFloat(i) * w / 18 + 2, y: vanY + h * 0.3 - hh, width: w / 18 - 4, height: hh))
+    override func render(_ g:inout GraphicsContext){
+        let t=live ? clock:0, travel=period*3.6, start=height*0.16
+        for i in 0..<4{
+            let top=laneX(i,y:start),bottom=laneX(i,y:strike),hw=width*0.108
+            let path=Shape2.poly([P(top-width*0.050,start),P(top+width*0.050,start),P(bottom+hw,strike+15),P(bottom-hw,strike+15)])
+            g.fillColor(path,Color.black.opacity(0.54));strokeLine(&g,[P(top-width*0.050,start),P(bottom-hw,strike+15)],colors[i].opacity(0.33))
+            if t>0 && (hands.values.contains(i) || elapsed-flashes[i]<0.17){g.fillColor(path,colors[i].opacity(0.22))}
+            g.fillColor(Shape2.rrect(bottom-hw,strike-3,hw*2,6,3),colors[i])
+            let pad=CGRect(x:CGFloat(i)*width/4+5,y:strike+27,width:width/4-10,height:max(42,min(72,height-strike-42)))
+            g.fillColor(Path(roundedRect:pad,cornerRadius:12),colors[i].opacity(hands.values.contains(i) ? 0.66:0.19))
+            mark(&g,["circle","diamond","triangle","square"][i],CGRect(x:pad.midX-9,y:pad.midY-9,width:18,height:18),colors[i])
         }
-        g.fillColor(eq, violet.opacity(0.15 + pulse * 0.2))
-        // лазеры
-        for i in 0..<4 {
-            let a = sin(now / 900 + Double(i) * 1.6) * 0.9
-            let tip = P(w / 2 + sinv(a) * h * 1.2, h)
-            let col = i % 2 == 1 ? magenta : Color(hex: 0x40c8ff)
-            let beam = linear(G([(0, col.opacity(0.25)), (1, col.opacity(0))]), P(w / 2, 0), P(w / 2 + sinv(a) * h, h))
-            g.stroke(Shape2.line(P(w / 2, vanY), tip), with: beam, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        for note in chart where note.state == .pending || note.state == .held {
+            let k=1-(note.at-t)/travel
+            guard k>0 && k<1.92 else{continue}
+            let y=note.state == .held ? strike:min(strike+21,start+CGFloat(k*k)*(strike-start))
+            let x=laneX(note.lane,y:y),hw=lerp(9,width*0.09,CGFloat(clamp(k,0,1)))
+            if note.length>0 {
+                let tail=clamp(1-(note.at+note.length-t)/travel,0,1),yt=start+CGFloat(tail*tail)*(strike-start)
+                strokeLine(&g,[P(laneX(note.lane,y:yt),yt),P(x,y)],colors[note.lane].opacity(0.73),8)
+            }
+            g.fillColor(Shape2.rrect(x-hw,y-4,hw*2,9,4),colors[note.lane])
         }
-        // дорожки в перспективе
-        for k in 0..<3 {
-            let ln = laneX(k)
-            let half = w * 0.14, farHalf = w * 0.02
-            let shape = Shape2.poly([P(ln.far - farHalf, vanY), P(ln.far + farHalf, vanY), P(ln.near + half, h), P(ln.near - half, h)])
-            g.fill(shape, with: linear(G([(0, violet.opacity(0)), (1, violet.opacity(0.18 + glow[k] * 0.4))]), P(0, vanY), P(0, hitY)))
-            g.strokeColor(shape, magenta.opacity(0.35), 1.5)
-            var ring = g
-            ring.addFilter(.shadow(color: magenta, radius: 14 * CGFloat(0.4 + glow[k])))
-            ring.strokeColor(Shape2.ellipse(P(ln.near, hitY), half * 0.82, 12 * S), Color.white.opacity(0.5 + glow[k] * 0.5), 3)
-        }
-        // ноты
-        for n in notes {
-            if let j = n.j, j > 0 { continue }
-            let k = 1 - (n.t - t) / fall
-            if k < 0 || k > 1.15 { continue }
-            let p = CGFloat(pow(clamp(k, 0, 1.15), 2.2))
-            let ln = laneX(n.lane)
-            let X = ln.far + (ln.near - ln.far) * p
-            let Y = vanY + (hitY - vanY) * p
-            let W = w * 0.02 + (w * 0.22 - w * 0.02) * p
-            let H = (3 + 16 * p) * S
-            let missed = n.j == 0
-            var c = g
-            c.addFilter(.shadow(color: missed ? Color(hex: 0xff5a78) : magenta, radius: 16 * p))
-            c.fillColor(Shape2.rrect(X - W / 2, Y - H / 2, W, H, H / 2), missed ? Color(hex: 0xff5a78, alpha: 0.5) : .white)
-        }
-        overlays(&g)
-        // точность с хроматическим сдвигом
-        let sc = min(100, max(0, score()))
-        var add = g
-        add.blendMode = .plusLighter
-        Lettering.draw(&add, "\(sc)%", at: P(w / 2 - 2 * S, h * 0.2), L(.jura, 46 * S, Color(red: 1, green: 40 / 255, blue: 120 / 255, opacity: 0.8)))
-        Lettering.draw(&add, "\(sc)%", at: P(w / 2 + 2 * S, h * 0.2), L(.jura, 46 * S, Color(red: 40 / 255, green: 200 / 255, blue: 1, opacity: 0.8)))
-        Lettering.draw(&g, "\(sc)%", at: P(w / 2, h * 0.2), L(.jura, 46 * S, .white))
-        if combo >= 3 {
-            Lettering.draw(&g, "КОМБО \(combo)", at: P(w / 2, h * 0.27), L(.jura, 20 * S, Color(hex: 0xfff27a)).spaced(3), scale: CGFloat(1 + pulse * 0.08))
-        }
-        let arrows = ["←", "↓", "→"]
-        for k in 0..<3 {
-            Lettering.draw(&g, arrows[k], at: P(laneX(k).near, hitY + 46 * S), L(.jura, 22 * S, Color.white.opacity(0.35)))
-        }
+        hud(&g,left:"Синкопа",value:"Комбо ×\(chain)",right:"\(Int((110*rate).rounded())) BPM")
     }
 }

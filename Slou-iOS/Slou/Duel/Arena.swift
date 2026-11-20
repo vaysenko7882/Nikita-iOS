@@ -315,6 +315,11 @@ final class Arena: ObservableObject, Identifiable {
 
     // MARK: ход игры
 
+    private func roundDuration(_ game: GameInfo) -> Double {
+        guard bot else { return game.duration }
+        return only == nil ? max(15, game.duration * 1.55) : game.practiceDuration
+    }
+
     private func lead(_ g: Int, _ r: Int) -> Double { 1700 + (r == 0 ? 2700 : 0) }
 
     private func schedule(_ g: Int, _ r: Int, _ after: Double) {
@@ -363,7 +368,7 @@ final class Arena: ObservableObject, Identifiable {
             buzz("heavy")
             self.host?.start()
             let t0 = self.local()
-            self.runCheck(gg, rr, t0, info.duration * 1000)
+            self.runCheck(gg, rr, t0, self.roundDuration(info) * 1000)
         }
     }
 
@@ -372,7 +377,7 @@ final class Arena: ObservableObject, Identifiable {
         var size = stageSize
         if size.width < 50 || size.height < 50 { size = CGSize(width: 390, height: 560) }
         let mixed = SeededRandom.mix([Int(seed), gg + 1, rr + 1])
-        let ctx = GameContext(round: rr, size: size, seed: mixed)
+        let ctx = GameContext(round: rr, size: size, seed: mixed, duration: roundDuration(games[gg]))
         let key = gg * 3 + rr
         ctx.report = { [weak self] n in self?.reportLive(gg, rr, n) }
         ctx.opponent = { [weak self] in self?.oppLiveMap[key] }
@@ -430,7 +435,7 @@ final class Arena: ObservableObject, Identifiable {
         send(["k": "done", "g": gg, "r": rr, "pts": pts])
         if theirs[i] == nil {
             card = .waitOp(pts)
-            opTimer = later(9000) { [weak self] in
+            opTimer = later(bot ? roundDuration(games[gg]) * 1000 + 1500 : 9000) { [weak self] in
                 guard let self, self.theirs[i] == nil else { return }
                 self.opDone(gg, rr, 0, timeout: true)
             }
@@ -511,10 +516,14 @@ final class Arena: ObservableObject, Identifiable {
         setTotals()
         card = .tally(my, their)
         if bot {
+            if let only, mine.count == 3 {
+                let key = "slou.arcade.record." + games[only].id
+                UserDefaults.standard.set(max(my, UserDefaults.standard.integer(forKey: key)), forKey: key)
+            }
             later(1600) { [weak self] in
                 guard let self else { return }
                 let won = my >= their
-                let line = won ? "Бот повержен. Корона — твоя (в тренировке)." : "Бот оказался сильнее. Реванш?"
+                let line = won ? "Победа в демо-комнате" : "Матч завершён"
                 self.conclude(Ceremony(iWon: won, myScore: my, theirScore: their, swap: false, line: line,
                                     meName: "Ты", opName: self.info.peerName, meFace: self.info.meFace, opFace: nil, practice: true))
             }
@@ -601,7 +610,7 @@ final class Arena: ObservableObject, Identifiable {
         let pace = previous.map { 0.65 * Double($0) + 0.35 * 58 } ?? 55
         let target = clamp(Int((pace + Double(rr) * 2).rounded()) + Int.random(in: -9...9), 5, 98)
         let startIn = start - now()
-        let length = info.duration * 1000 * Double.random(in: 0.55...0.95)
+        let length = roundDuration(info) * 1000 * Double.random(in: 0.55...0.95)
         for k in 1...5 {
             later(startIn + length * Double(k) / 6) { [weak self] in
                 self?.liveScore(gg, rr, Int((Double(target) * Double(k) / 6).rounded()))

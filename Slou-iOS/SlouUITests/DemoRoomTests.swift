@@ -33,10 +33,12 @@ final class DemoRoomTests: XCTestCase {
             let tile = app.buttons["demo.game." + id]
             for _ in 0..<8 {
                 if tile.exists && tile.isHittable { break }
+                if id == "race" { app.scrollViews["demo.games"].swipeDown(); continue }
                 app.scrollViews["demo.games"].swipeUp(velocity: .slow)
             }
             XCTAssertTrue(tile.isHittable, title)
             tile.tap()
+            app.buttons["demo.play"].tap()
             XCTAssertTrue(progress.waitForExistence(timeout: 8), title)
             XCTAssertTrue(progress.label.contains("\(title), игра 1 из 1"), progress.label)
             XCTAssertTrue(app.staticTexts["Бот Слоу"].exists)
@@ -51,6 +53,7 @@ final class DemoRoomTests: XCTestCase {
         app.launch()
         app.buttons["demo.enter"].tap()
         app.buttons["demo.game.box"].tap()
+        app.buttons["demo.play"].tap()
         let score = app.staticTexts["arena.opponent.score"]
         let positive = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label MATCHES '[1-9][0-9]*'"), object: score)
         XCTAssertEqual(XCTWaiter.wait(for: [positive], timeout: 30), .completed)
@@ -60,7 +63,7 @@ final class DemoRoomTests: XCTestCase {
         add(inGame)
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
         let finish = app.buttons["В демо-комнату"]
-        XCTAssertTrue(finish.waitForExistence(timeout: 85))
+        XCTAssertTrue(finish.waitForExistence(timeout: 155))
         finish.tap()
         XCTAssertTrue(app.buttons["demo.tournament"].waitForExistence(timeout: 5))
     }

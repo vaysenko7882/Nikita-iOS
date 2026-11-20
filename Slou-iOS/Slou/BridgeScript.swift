@@ -12,7 +12,7 @@ enum BridgeScript {
   const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.slou;
   if (!h || window.__slouNative) return;
   const post = m => { try { h.postMessage(m); } catch (e) {} };
-  window.slouApp = {platform: 'ios', version: '3.1', native: true};
+  window.slouApp = {platform: 'ios', version: '4.0', native: true};
   const withRoot = fn => {
     if (document.documentElement) return fn(document.documentElement);
     new MutationObserver((_, o) => { if (document.documentElement) { o.disconnect(); fn(document.documentElement); } }).observe(document, {childList: true});

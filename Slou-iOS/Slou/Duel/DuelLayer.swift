@@ -182,118 +182,120 @@ struct AskCard: View {
     }
 }
 
-/// Локальная комната остаётся открытой между матчами.
 struct DemoRoomView: View {
     @ObservedObject var center: DuelCenter
-    private let columns = [GridItem(.adaptive(minimum: 135, maximum: 230), spacing: 12)]
+    @State private var preview: GameInfo?
+    @State private var queuedGame: Int?
+    private let columns = [GridItem(.adaptive(minimum:145, maximum:278),spacing:12)]
+    private let surface = Color(hex:0x131615)
 
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text("Демо-комната")
-                    .font(Theme.display(36, relativeTo: .largeTitle))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                GlassIconButton(systemName: "xmark", size: 44) { center.leaveDemoRoom() }
-                    .accessibilityLabel("Выйти из демо-комнаты")
-                    .accessibilityIdentifier("demo.close")
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 14) {
-                        Label("Ты", systemImage: "person.fill")
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 3))
-                            .accessibilityHidden(true)
-                        Label(DuelCenter.demoOpponentName, systemImage: "cpu")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color(hex: 0xffe8a8))
-                    Text("Играй без интернета. В каждой игре по три раунда.")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.72))
-
-                    Button { center.practice() } label: {
-                        HStack(spacing: 12) {
-                            CrownGlyph(size: 34)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Битва за корону").font(.headline)
-                                Text("Все 10 игр подряд · 30 раундов")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.black.opacity(0.72))
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "play.fill")
-                        }
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 18)
-                        .frame(maxWidth: .infinity, minHeight: 72)
-                        .background(RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(LinearGradient(colors: [Color(hex: 0xfff1b8), Color(hex: 0xefc767)], startPoint: .topLeading, endPoint: .bottomTrailing)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("demo.tournament")
-
-                    Text("Выбрать игру")
-                        .font(.title3.bold())
-                        .padding(.top, 4)
-                        .accessibilityAddTraits(.isHeader)
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(Array(Arcade.games.enumerated()), id: \.element.id) { index, game in
-                            Button { center.practice(index) } label: { GameTile(game: game) }
-                                .buttonStyle(TileButtonStyle())
-                                .accessibilityLabel(game.title)
-                                .accessibilityHint(game.rules[0])
-                                .accessibilityIdentifier("demo.game." + game.id)
-                        }
-                    }
+    var body:some View {
+        VStack(spacing:0) {
+            HStack {
+                VStack(alignment:.leading,spacing:3){
+                    Text("Демо-комната").font(.system(size:32,weight:.bold)).tracking(-1.2).accessibilityAddTraits(.isHeader)
+                    Label(DuelCenter.demoOpponentName,systemImage:"cpu").font(.subheadline).foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 24)
-            }
-            .accessibilityIdentifier("demo.games")
+                Spacer()
+                Button(action:center.leaveDemoRoom) {
+                    Image(systemName:"xmark").font(.system(size:16,weight:.semibold)).frame(width:44,height:44)
+                        .background(.white.opacity(0.085),in:Circle())
+                }.buttonStyle(.plain).accessibilityLabel("Выйти из демо-комнаты").accessibilityIdentifier("demo.close")
+            }.padding(.horizontal,20).padding(.vertical,10)
+            ScrollView {
+                VStack(alignment:.leading,spacing:18) {
+                    if let race=Arcade.games.first(where:{$0.id=="race"}) {
+                        Button {preview=race} label:{
+                            ZStack(alignment:.bottomLeading){
+                                ArcadeCover(id:race.id)
+                                LinearGradient(colors:[.clear,.clear,.black.opacity(0.82)],startPoint:.top,endPoint:.bottom)
+                                HStack(alignment:.bottom) {
+                                    VStack(alignment:.leading,spacing:3){
+                                        Text("Гонка").font(.subheadline.weight(.medium))
+                                        Text(race.edition).font(.system(size:35,weight:.bold)).tracking(-1.2)
+                                    }
+                                    Spacer()
+                                    Image(systemName:"play.fill").font(.body).foregroundStyle(.black).frame(width:43,height:43).background(.white,in:Circle())
+                                }.padding(16)
+                            }.frame(maxWidth:.infinity).aspectRatio(1.53,contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:19)).contentShape(Rectangle())
+                        }.buttonStyle(TileButtonStyle()).accessibilityLabel("Гонка, Серпантины").accessibilityIdentifier("demo.game.race")
+                    }
+                    Button {center.practice()} label:{
+                        HStack(spacing:13){
+                            Image(systemName:"crown.fill").foregroundStyle(Color(hex:0xead28d)).font(.title3)
+                            VStack(alignment:.leading,spacing:3){Text("Битва за корону").font(.headline);Text("10 игр подряд · 30 раундов").font(.subheadline).foregroundStyle(.secondary)}
+                            Spacer();Image(systemName:"chevron.right").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                        }.padding(15).frame(maxWidth:.infinity).background(surface,in:RoundedRectangle(cornerRadius:15)).contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityIdentifier("demo.tournament")
+                    Text("Выбрать игру").font(.title2.weight(.bold)).tracking(-0.6)
+                    LazyVGrid(columns:columns,alignment:.leading,spacing:20) {
+                        ForEach(Arcade.games.filter{$0.id != "race"}) {game in
+                            Button {preview=game} label:{GameTile(game:game)}
+                                .buttonStyle(TileButtonStyle()).accessibilityLabel("\(game.title), \(game.edition)")
+                                .accessibilityIdentifier("demo.game."+game.id)
+                        }
+                    }
+                }.padding(.horizontal,18).padding(.top,4).padding(.bottom,28)
+            }.accessibilityIdentifier("demo.games")
         }
-        .frame(maxWidth: 650)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .foregroundStyle(.white)
-        .background(Color(hex: 0x09080b).ignoresSafeArea())
-        .accessibilityAction(.escape) { center.leaveDemoRoom() }
+        .frame(maxWidth:700).frame(maxWidth:.infinity,maxHeight:.infinity)
+        .background(Color(hex:0x090c0b).ignoresSafeArea()).foregroundStyle(.white)
+        .accessibilityElement(children:.contain)
+        .accessibilityAction(.escape){center.leaveDemoRoom()}
+        .sheet(item:$preview,onDismiss:{
+            if let index=queuedGame {queuedGame=nil;center.practice(index)}
+        }){game in
+            ArcadeBriefing(game:game){
+                queuedGame=Arcade.games.firstIndex(where:{$0.id==game.id});preview=nil
+            }.presentationDetents([.large]).presentationDragIndicator(.visible)
+        }
     }
 }
 
-struct GameTile: View {
-    let game: GameInfo
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Canvas { g, size in
-                PosterArt.draw(game.id, &g, size, 0.6)
-                let st = game.titleStyle(min(size.width, size.height) * 0.26, width: size.width * 0.86)
-                Lettering.draw(&g, game.title.uppercased(), at: P(size.width / 2, size.height * 0.46), st)
-            }
-            Text(game.rules[0])
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.85))
-                .lineLimit(2)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom))
-        }
-        .aspectRatio(0.78, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(game.color.opacity(0.45), lineWidth: 1))
+struct GameTile:View {
+    let game:GameInfo
+    var body:some View {
+        VStack(alignment:.leading,spacing:6) {
+            ArcadeCover(id:game.id).aspectRatio(1.13,contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:13))
+            Text(game.title).font(.caption.weight(.semibold)).foregroundStyle(game.color).padding(.top,2)
+            Text(game.edition).font(.system(size:19,weight:.semibold)).tracking(-0.45).lineLimit(2)
+        }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
     }
 }
 
+private struct ArcadeBriefing:View {
+    let game:GameInfo
+    let play:()->Void
+    @Environment(\.dismiss) private var dismiss
+    var body:some View {
+        VStack(spacing:0){
+            ScrollView{
+                VStack(alignment:.leading,spacing:16){
+                    ZStack(alignment:.topTrailing){
+                        ArcadeCover(id:game.id).aspectRatio(1.14,contentMode:.fit)
+                        Button{dismiss()}label:{Image(systemName:"xmark").frame(width:42,height:42).background(.black.opacity(0.6),in:Circle())}
+                            .padding(16).accessibilityLabel("Закрыть")
+                    }
+                    VStack(alignment:.leading,spacing:10){
+                        Text(game.title).font(.headline).foregroundStyle(game.color)
+                        Text(game.edition).font(.system(size:38,weight:.bold)).tracking(-1.3)
+                        Text("3 раунда  ·  до \(Int(game.practiceDuration)) с каждый").font(.subheadline).foregroundStyle(.secondary)
+                        Divider().padding(.vertical,4)
+                        Text("Управление").font(.title3.weight(.semibold))
+                        ForEach(game.rules,id:\.self){rule in Text(rule).font(.body).fixedSize(horizontal:false,vertical:true)}
+                        let best=UserDefaults.standard.integer(forKey:"slou.arcade.record."+game.id)
+                        if best>0 {Label("Личный рекорд  \(best) / 300",systemImage:"laurel.leading").font(.callout.weight(.semibold)).foregroundStyle(game.color)}
+                    }.padding(.horizontal,22)
+                }.padding(.bottom,22)
+            }
+            Button(action:play){Label("Играть с ботом",systemImage:"play.fill").font(.headline).frame(maxWidth:.infinity,minHeight:52).background(game.color,in:RoundedRectangle(cornerRadius:15)).foregroundStyle(.black)}
+                .buttonStyle(.plain).padding(.horizontal,20).padding(.vertical,9).accessibilityIdentifier("demo.play")
+        }.background(Color(hex:0x101412).ignoresSafeArea()).foregroundStyle(.white).preferredColorScheme(.dark)
+    }
+}
 struct TileButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.95 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+        configuration.label.scaleEffect(configuration.isPressed ? 0.975:1)
+            .animation(.easeOut(duration:0.15),value:configuration.isPressed)
     }
 }

@@ -489,6 +489,7 @@ final class Gestures {
 /// Что игра получает от арены
 final class GameContext {
     let round: Int
+    let duration: Double
     let size: CGSize
     let s: CGFloat            // масштаб от макета 390×560
     var rnd: SeededRandom
@@ -496,7 +497,8 @@ final class GameContext {
     var opponent: () -> Int? = { nil }
     private(set) var finished: (pts: Int, at: Double)?
 
-    init(round: Int, size: CGSize, seed: UInt32) {
+    init(round: Int, size: CGSize, seed: UInt32, duration: Double = 12) {
+        self.duration = duration
         self.round = round
         self.size = size
         self.s = min(size.width / 390, size.height / 560)
@@ -539,7 +541,7 @@ final class GameHost {
 
     func frame(_ g: inout GraphicsContext) {
         let t = gameNow()
-        let dt = last == 0 ? 0 : min(0.05, t - last)
+        let dt = last == 0 ? 0 : min(0.18, t - last)
         last = t
         game.step(dt)
         game.draw(&g)
