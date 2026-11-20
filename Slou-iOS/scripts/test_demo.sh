@@ -12,14 +12,17 @@ out="${RUNNER_TEMP:-$tmp}/slou-demo-check"
 mkdir -p "$out"
 xcrun simctl list devices available --json > "$tmp/devices.json"
 read -r runtime device_type < <(python3 - "$tmp/devices.json" <<'PY'
-import json, sys
+import json, re, sys
 candidates = []
 for runtime, devices in json.load(open(sys.argv[1]))['devices'].items():
     if '.iOS-' not in runtime:
         continue
-    version = tuple(int(n) for n in runtime.rsplit('.iOS-',1)[1].split('-'))
+    match = re.search(r'\.iOS-(\d+(?:-\d+)*)', runtime)
+    if not match:
+        continue
+    version = tuple(map(int, match.group(1).split('-')))
     for device in devices:
-        if device['name'].startswith('iPhone') and device.get('isAvailable', True):
+        if device['name'].startswith('iPhone') and device.get('isAvailable', True) and device.get('deviceTypeIdentifier'):
             name = device['name']
             candidates.append((version, 'Max' not in name and 'Plus' not in name, 'Pro' in name, name, runtime, device['deviceTypeIdentifier']))
 if not candidates:
