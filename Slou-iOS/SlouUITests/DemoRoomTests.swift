@@ -1,10 +1,11 @@
 import XCTest
 
 final class DemoRoomTests: XCTestCase {
-    private let app = XCUIApplication()
+    private var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        app = XCUIApplication()
     }
 
     func testEveryGameAndTournamentFromHomeWithoutServer() {
