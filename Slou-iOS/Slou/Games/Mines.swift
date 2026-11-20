@@ -89,8 +89,40 @@ final class MinesGame: StudioGame {
             var ring=g;ring.clip(to:Shape2.rect(left,top,cell*6,cell*7))
             ring.strokeColor(Shape2.circle(sub,CGFloat(sonar)*cell*4.5),accent.opacity(1-sonar/1.6),2)
         }
-        g.fillColor(Shape2.circle(sub,cell*0.24),Color(hex:0xf3c475));mark(&g,"location.north.fill",CGRect(x:sub.x-7,y:sub.y-9,width:14,height:18),Color(hex:0x18343b))
+        g.fill(Shape2.circle(sub,cell*0.44),with:radial(G([(0,accent.opacity(0.30)),(1,.clear)]),sub,0,cell*0.44))
+        ArcadeArt.draw(&g,"piece_sub",CGRect(x:sub.x-cell*0.38,y:sub.y-cell*0.40,width:cell*0.76,height:cell*0.80))
         hud(&g,left:"Глубинная разведка",value:"\(collected) / 2 образца",right:"Корпус \(hull)/3")
         pill(&g,"Импульс сонара  ·  \(pulses)",CGRect(x:width/2-98,y:height-66,width:196,height:44),active:sonar<1.4)
+    }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        guard !ended else { return }
+        if pulses > 0 && (visited.count == 1 || pilot.random.chance(0.09)) {
+            pilot.tap(P(width/2,height-45))
+        }
+        let targets = samples.isEmpty ? Set([goal]) : samples
+        var queue = [position]
+        var previous = [position: position]
+        var cursor = 0
+        while cursor < queue.count {
+            let here = queue[cursor]
+            cursor += 1
+            if targets.contains(here) {
+                var next = here
+                while let parent = previous[next], parent != position { next = parent }
+                pilot.tap(center(next))
+                break
+            }
+            for (dx,dy) in [(0,-1),(-1,0),(1,0),(0,1)] {
+                let x = here%columns+dx, y = here/columns+dy
+                guard (0..<columns).contains(x), (0..<rows).contains(y) else { continue }
+                let next = index(x,y)
+                if !hazards.contains(next), previous[next] == nil {
+                    previous[next] = here
+                    queue.append(next)
+                }
+            }
+        }
+        pilot.wait(pilot.random.range(0.9,1.8)+(1-pilot.skill)*1.3)
     }
 }

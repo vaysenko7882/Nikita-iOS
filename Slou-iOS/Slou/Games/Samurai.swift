@@ -71,4 +71,13 @@ final class SamuraiGame: StudioGame {
         for seg in fading{let k=(seg.until-elapsed)/0.18;strokeLine(&g,[seg.a,seg.b],Color(hex:0x9b271e).opacity(k*0.85),CGFloat(1+4*k))}
         hud(&g,left:"Сад на ветру",value:"\(points) очков",right:"Комбо ×\(best)")
     }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        guard let f = fruits.first(where: { $0.kind >= 0 && $0.p.y < height*0.82 }) else { return }
+        let angle = f.axis ?? pilot.random.range(-0.4,0.4)
+        let dx = cosv(angle)*f.r*1.5, dy = sinv(angle)*f.r*1.5
+        let error = CGFloat(pilot.random.range(-1,1)*(1-pilot.skill)*76)
+        pilot.swipe(from:P(f.p.x-dx,f.p.y+error-dy),to:P(f.p.x+dx,f.p.y+error+dy))
+        pilot.wait(pilot.random.range(0.45,1.03)+(1-pilot.skill)*0.48)
+    }
 }

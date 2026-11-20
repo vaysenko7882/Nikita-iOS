@@ -58,11 +58,7 @@ final class HoopGame: StudioGame {
     }
     private func drawBall(_ g:inout GraphicsContext,p:CGPoint,r:CGFloat){
         var a=g;a.translateBy(x:p.x,y:p.y);a.rotate(by:.radians(rot))
-        let shape=Shape2.circle(.zero,r)
-        a.fill(shape,with:radial(G([(0,Color(hex:0xf7b57d)),(0.45,Color(hex:0xd47840)),(1,Color(hex:0x713a28))]),P(-r*0.39,-r*0.49),0,r*1.6));a.clip(to:shape)
-        a.strokeColor(Shape2.ellipse(P(-r*0.54,0),r*0.50,r*1.04),Color(hex:0x372922),1.8)
-        a.strokeColor(Shape2.ellipse(P(r*0.54,0),r*0.50,r*1.04),Color(hex:0x372922),1.8)
-        strokeLine(&a,[P(-r,0),P(r,0)],Color(hex:0x372922),1.7)
+        ArcadeArt.draw(&a, "piece_basketball", CGRect(x: -r, y: -r, width: 2*r, height: 2*r))
     }
     override func render(_ g:inout GraphicsContext){
         let p=hoop
@@ -88,5 +84,14 @@ final class HoopGame: StudioGame {
         hud(&g,left:"Дворовая лига",value:"\(points) очков",right:"Серия \(streak)")
         shade(&g,at:height-77,height:77,top:0,bottom:0.52)
         ink(&g,"Свайпни вверх · длина задаёт высоту",P(width/2,height-28),13)
+    }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        guard !flying else { return }
+        let error = 8 + (1-pilot.skill)*39
+        let aimX = (hoop.x-origin.x)/2.4 + CGFloat(pilot.random.range(-error,error))
+        let pull = height * CGFloat(pilot.random.range(0.18,0.38))
+        pilot.swipe(from:origin,to:P(origin.x+aimX,origin.y-pull))
+        pilot.wait(pilot.random.range(1.8,2.65))
     }
 }

@@ -13,7 +13,7 @@ final class BeatGame: StudioGame {
     private var rate:Double{[0.95,1.0,1.1][R]}
     private var period:Double{60/(110*rate)}
     private var strike:CGFloat{height*0.79}
-    private var clock:Double { if let t=soundtrack,t.isPlaying {return t.currentTime/rate};return max(0,gameNow()-t0/1000) }
+    private var clock:Double { if !c.effectsEnabled { return elapsed }; if let t=soundtrack,t.isPlaying {return t.currentTime/rate};return max(0,gameNow()-t0/1000) }
     override func begin(){
         let phrase=[0,2,1,3,0,1,3,2,1,3,2,0,3,1,2,0]
         var beat=3.0,i=0
@@ -23,6 +23,7 @@ final class BeatGame: StudioGame {
             if R>0 && i%8==6 {chart.append(Note(lane:(lane+2)%4,at:beat*period,length:0));maximum+=2}
             beat += sustain ? 2 : (R==2 && i%6==2 ? 0.5:1);i+=1
         }
+        guard c.effectsEnabled else { return }
         if let url=Bundle.main.url(forResource:"pulse110",withExtension:"m4a") ?? Bundle.main.url(forResource:"pulse110",withExtension:"m4a",subdirectory:"Sounds") {
             soundtrack=try? AVAudioPlayer(contentsOf:url);soundtrack?.enableRate=true;soundtrack?.rate=Float(rate);soundtrack?.volume=0.70*Sound.shared.master
             soundtrack?.prepareToPlay();soundtrack?.play()
@@ -89,5 +90,22 @@ final class BeatGame: StudioGame {
             g.fillColor(Shape2.rrect(x-hw,y-4,hw*2,9,4),colors[note.lane])
         }
         hud(&g,left:"Синкопа",value:"Комбо ×\(chain)",right:"\(Int((110*rate).rounded())) BPM")
+    }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        for id in Array(pilot.hands.keys) {
+            if let n = sustains[id], clock < chart[n].at + chart[n].length { continue }
+            pilot.up(id)
+        }
+        for i in chart.indices where chart[i].state == .pending && !pilot.attemptedNotes.contains(i) {
+            let late = clock-chart[i].at
+            guard late >= 0 && late < 0.15 else { continue }
+            pilot.attemptedNotes.insert(i)
+            if pilot.random.chance(0.44+0.53*pilot.skill) {
+                let note = chart[i]
+                pilot.down(note.lane+1,at:P(width*(CGFloat(note.lane)+0.5)/4,strike+45))
+            }
+        }
+        pilot.wait(0.035)
     }
 }

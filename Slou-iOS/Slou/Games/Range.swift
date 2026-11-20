@@ -64,4 +64,13 @@ final class RangeGame: StudioGame {
         for i in 0..<5 {g.fillColor(Shape2.rrect(18+CGFloat(i)*14,height-54,8,19,4),i<ammo ? accent:.white.opacity(0.26))}
         pill(&g,reloading ? "Заряжаю…":"Перезарядить",lever,active:reloading)
     }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        if ammo == 0 { pilot.tap(P(lever.midX,lever.midY)); pilot.wait(0.8); return }
+        guard !reloading, let toy = toys.first(where: { !$0.protected && $0.knocked == nil && $0.x > 21 && $0.x < width-21 }) else { return }
+        let p = location(toy)
+        let error = CGFloat(13 + 46*(1-pilot.skill))
+        pilot.tap(P(p.x+CGFloat(pilot.random.range(-1,1))*error,p.y+CGFloat(pilot.random.range(-1,1))*error))
+        pilot.wait(pilot.random.range(0.55,1.34))
+    }
 }

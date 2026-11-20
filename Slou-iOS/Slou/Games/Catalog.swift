@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// The display faces below contain a complete Cyrillic alphabet. Rules and controls use Dynamic Type.
+enum ArcadeType {
+    static func title(_ id: String, _ size: CGFloat) -> Font {
+        switch id {
+        case "race", "beat": return GFont.tektur.font(size)
+        case "mines": return GFont.mono.font(size * 0.90)
+        case "duel", "arm": return GFont.serif.font(size * 0.94)
+        case "slice": return GFont.plex.font(size)
+        case "range": return GFont.arsenal.font(size)
+        case "hoop": return .system(size: size, weight: .heavy, design: .rounded)
+        default: return GFont.inter.font(size)
+        }
+    }
+}
+
 struct GameInfo: Identifiable {
     let id: String
     let title: String
@@ -8,7 +23,7 @@ struct GameInfo: Identifiable {
     let duration: Double
     let practiceDuration: Double
     let rules: [String]
-    let make: (GameContext) -> ArcadeGame
+    let make: (GameContext) -> StudioGame
 
     func rule(_ round: Int) -> String { rules[min(rules.count-1,max(0,round))] }
 }
@@ -47,7 +62,7 @@ struct PosterView: View {
             LinearGradient(colors:[.clear,.black.opacity(0.18),.black.opacity(0.91)],startPoint:.top,endPoint:.bottom)
             VStack(alignment:.leading,spacing:9){
                 Text(label).font(.caption.weight(.semibold)).foregroundStyle(game.color)
-                Text(game.edition).font(.system(size:43,weight:.bold)).tracking(-1.6).minimumScaleFactor(0.63)
+                Text(game.edition).font(ArcadeType.title(game.id, 43)).tracking(-0.6).minimumScaleFactor(0.63)
                 Text(game.rule(0)).font(.callout).foregroundStyle(.white.opacity(0.88)).fixedSize(horizontal:false,vertical:true)
             }.padding(24)
         }.foregroundStyle(.white).clipped()

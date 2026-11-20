@@ -212,7 +212,7 @@ struct DemoRoomView: View {
                                 HStack(alignment:.bottom) {
                                     VStack(alignment:.leading,spacing:3){
                                         Text("Гонка").font(.subheadline.weight(.medium))
-                                        Text(race.edition).font(.system(size:35,weight:.bold)).tracking(-1.2)
+                                        Text(race.edition).font(ArcadeType.title(race.id, 35)).tracking(-0.5)
                                     }
                                     Spacer()
                                     Image(systemName:"play.fill").font(.body).foregroundStyle(.black).frame(width:43,height:43).background(.white,in:Circle())
@@ -258,7 +258,7 @@ struct GameTile:View {
         VStack(alignment:.leading,spacing:6) {
             ArcadeCover(id:game.id).aspectRatio(1.13,contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:13))
             Text(game.title).font(.caption.weight(.semibold)).foregroundStyle(game.color).padding(.top,2)
-            Text(game.edition).font(.system(size:19,weight:.semibold)).tracking(-0.45).lineLimit(2)
+            Text(game.edition).font(ArcadeType.title(game.id, 20)).tracking(-0.2).lineLimit(2)
         }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
     }
 }
@@ -278,7 +278,7 @@ private struct ArcadeBriefing:View {
                     }
                     VStack(alignment:.leading,spacing:10){
                         Text(game.title).font(.headline).foregroundStyle(game.color)
-                        Text(game.edition).font(.system(size:38,weight:.bold)).tracking(-1.3)
+                        Text(game.edition).font(ArcadeType.title(game.id, 38)).tracking(-0.4)
                         Text("3 раунда  ·  до \(Int(game.practiceDuration)) с каждый").font(.subheadline).foregroundStyle(.secondary)
                         Divider().padding(.vertical,4)
                         Text("Управление").font(.title3.weight(.semibold))

@@ -34,10 +34,10 @@ struct ArcadeCover: View {
                 Image(uiImage: art).resizable().scaledToFill()
                     .frame(width: geo.size.width, height: geo.size.height).clipped()
             }
-            if let name = ["box":"piece_fighter","race":"piece_coupe","arm":"piece_grip","goal":"piece_keeper","range":"piece_rivet","slice":"piece_fruit0"][id],
+            if let name = ["box":"piece_fighter","race":"piece_coupe","arm":"piece_grip","goal":"piece_keeper","range":"piece_rivet","slice":"piece_fruit0","mines":"piece_sub","hoop":"piece_basketball"][id],
                let art = ArcadeArt.bitmap(name) {
                 Image(uiImage: art).resizable().scaledToFit()
-                    .frame(width: geo.size.width * (id == "race" ? 0.84 : 0.68), height: geo.size.height * 0.77)
+                    .frame(width: geo.size.width * (id == "race" ? 0.84 : 0.68), height: geo.size.height * (["hoop","mines"].contains(id) ? 0.44 : 0.77))
                     .position(x: geo.size.width * 0.56, y: geo.size.height * 0.49)
             }
         }.clipped().accessibilityHidden(true)
@@ -106,8 +106,18 @@ class StudioGame: GameBase {
         let current = clamp(score(), 0, 100)
         if current != lastReport { lastReport = current; c.report(current) }
     }
+    func playTurn(_ pilot: ArcadePilot) {}
+    func sfx(_ name: String, _ volume: Float = 1, rate: Float = 1) {
+        if c.effectsEnabled { Sound.shared.play(name, volume: volume, rate: rate) }
+    }
+    func buzz(_ kind: String) {
+        if c.effectsEnabled { Haptics.shared.play(kind) }
+    }
     func simulate(_ dt: Double) {}
     func render(_ g: inout GraphicsContext) {}
+    func backdrop(_ g: inout GraphicsContext, in bounds: CGRect) {
+        ArcadeArt.draw(&g, "world_" + fieldID, bounds, fill: true)
+    }
     func handle(_ phase: TouchEvent.Phase, id: Int, p: CGPoint, time: Double) {}
     override func touch(_ e: TouchEvent) {
         guard live else { return }
@@ -118,7 +128,7 @@ class StudioGame: GameBase {
         view.scaleBy(x: unit,y: unit)
         let bounds = CGRect(x: 0, y: 0, width: width, height: height)
         view.fill(Path(bounds), with: .color(Color(hex: 0x11191c)))
-        ArcadeArt.draw(&view,"world_"+fieldID,bounds,fill:true)
+        backdrop(&view, in: bounds)
         render(&view)
         if noticeUntil > elapsed {
             var n = view
@@ -138,7 +148,8 @@ class StudioGame: GameBase {
     func hud(_ g: inout GraphicsContext, left: String, value: String, right: String = "") {
         shade(&g,at:0,height:92,top:0.76,bottom:0)
         ink(&g,left.uppercased(),P(16,15),10,.white.opacity(0.72),.semibold,anchor:.leading,mono:true)
-        ink(&g,value,P(16,40),24,.white,.bold,anchor:.leading)
+        let scoreLabel = Text(value).font(ArcadeType.title(fieldID, 23)).foregroundStyle(.white)
+        g.draw(scoreLabel, at: P(16,40), anchor: .leading)
         ink(&g,right.isEmpty ? "\(Int(ceil(remaining))) с" : right,P(width-16,23),15,.white,.semibold,anchor:.trailing,mono:true)
     }
     func pill(_ g: inout GraphicsContext, _ text: String, _ rect: CGRect, active: Bool = false) {

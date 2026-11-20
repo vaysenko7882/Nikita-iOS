@@ -82,10 +82,22 @@ final class GoalGame: StudioGame {
         let bp=shot.map{position($0,progress)} ?? ballOrigin
         let r=lerp(23,8,progress)
         g.fillColor(Shape2.ellipse(P(bp.x,lerp(ballOrigin.y+17,n.maxY+4,progress)),r*1.05,r*0.23),.black.opacity(0.36))
-        g.fill(Shape2.circle(bp,r),with:radial(G([(0,.white),(0.68,Color(hex:0xe2dac9)),(1,Color(hex:0x787c79))]),P(bp.x-r*0.3,bp.y-r*0.38),0,r*1.65))
-        var ball=g;ball.translateBy(x:bp.x,y:bp.y);ball.rotate(by:.radians(Double(progress)*7))
-        for i in 0..<5 {let a=Double(i)*TAU/5;ball.fillColor(Shape2.poly((0..<5).map{j in let b=Double(j)*TAU/5;return P(cosv(a)*r*0.59+cosv(b)*r*0.23,sinv(a)*r*0.59+sinv(b)*r*0.23)}),Color(hex:0x25333b))}
-        hud(&g,left:"Серия пенальти",value:"\(goals) \(goals==1 ? "гол":"голов")",right:"Удар \(min(5,attempts+1))/5")
+        var ball=g
+        ball.translateBy(x:bp.x,y:bp.y)
+        ball.rotate(by:.radians(Double(progress)*7))
+        ArcadeArt.draw(&ball, "piece_football", CGRect(x: -r, y: -r, width: 2*r, height: 2*r))
+        hud(&g,left:"Голы",value:"\(goals) из 5",right:"Удар \(min(5,attempts+1))/5")
         if state == .aim {ink(&g,"Свайп от мяча · дуга задаёт подкрутку",P(width/2,height-29),13,.white,.semibold)}
+    }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        guard state == .aim else { return }
+        let side: CGFloat = pilot.random.chance(0.5) ? -1:1
+        let pull = height*CGFloat(pilot.random.range(0.26,0.37))
+        let angle = CGFloat(pilot.random.range(0.21,0.47)) + CGFloat(1-pilot.skill)*0.055
+        let end = P(ballOrigin.x + side*pull*angle, ballOrigin.y-pull)
+        let mid = P((ballOrigin.x+end.x)/2-side*CGFloat(pilot.random.range(15,60)),ballOrigin.y-pull/2)
+        pilot.swipe(from:ballOrigin,through:mid,to:end)
+        pilot.wait(pilot.random.range(2.0,3.2))
     }
 }

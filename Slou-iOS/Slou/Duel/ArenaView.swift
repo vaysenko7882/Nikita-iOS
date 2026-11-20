@@ -8,7 +8,7 @@ struct ArenaView:View {
             VStack(spacing:0){
                 HStack(spacing:12){
                     VStack(alignment:.leading,spacing:2){
-                        Text(arena.game.edition).font(.system(size:21,weight:.bold)).tracking(-0.6).lineLimit(1)
+                        Text(arena.game.edition).font(ArcadeType.title(arena.game.id, 21)).tracking(-0.2).lineLimit(1)
                         Text(arena.only==nil ? "Игра \(arena.g+1) из 10":"\(arena.game.title) · матч").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()

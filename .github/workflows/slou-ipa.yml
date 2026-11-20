@@ -90,3 +90,24 @@ jobs:
           path: ${{ runner.temp }}/slou-demo-check/
           if-no-files-found: warn
           retention-days: 3
+  visuals:
+    name: Play all ten arcade games on iPhone
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          sparse-checkout: Slou-iOS
+          persist-credentials: false
+      - name: Test game physics and capture each game
+        working-directory: Slou-iOS
+        env:
+          SLOU_REVIEW: '1'
+        run: bash scripts/test_demo.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: Slou-arcade-check
+          path: ${{ runner.temp }}/slou-arcade-check/
+          if-no-files-found: warn
+          retention-days: 3

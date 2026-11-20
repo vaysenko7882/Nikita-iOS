@@ -103,6 +103,7 @@ final class Arena: ObservableObject, Identifiable {
     private var mine: [Int: Int] = [:]
     private var theirs: [Int: Int] = [:]
     private var oppLiveMap: [Int: Int] = [:]
+    private var botPilot: ArcadePilot?
     private var playing = -1
     private var shown = -1
     private var lastGo: (g: Int, r: Int, at: Double)?
@@ -242,7 +243,7 @@ final class Arena: ObservableObject, Identifiable {
     }
 
     private func send(_ m: [String: Any]) {
-        if bot { botHear(m); return }
+        if bot { return }
         var out = m
         out["t"] = "g"
         link?.send(out)
@@ -367,6 +368,7 @@ final class Arena: ObservableObject, Identifiable {
             sfx("go", 0.8)
             buzz("heavy")
             self.host?.start()
+            if self.bot { self.startOpponent(gg, rr) }
             let t0 = self.local()
             self.runCheck(gg, rr, t0, self.roundDuration(info) * 1000)
         }
@@ -385,6 +387,7 @@ final class Arena: ObservableObject, Identifiable {
     }
 
     private func stopGame() {
+        if let pilot = botPilot { _ = pilot.game.stop(); botPilot = nil }
         if let h = host, h.running { _ = h.game.stop(); h.halt() }
         Sound.shared.stopAllLoops()
     }
@@ -602,20 +605,42 @@ final class Arena: ObservableObject, Identifiable {
         later(1600) { [weak self] in self?.maybeBegin() }
     }
 
-    private func botHear(_ m: [String: Any]) {
-        guard (m["k"] as? String) == "go", let gg = jsonInt(m["g"]), let rr = jsonInt(m["r"]), let start = jsonNumber(m["at"]) else { return }
-        let info = games[gg]
-        // Следующий раунд той же игры учитывает результат игрока. В новой игре начинаем со средней сложности.
-        let previous = rr > 0 ? mine[gg * 3 + rr - 1] : nil
-        let pace = previous.map { 0.65 * Double($0) + 0.35 * 58 } ?? 55
-        let target = clamp(Int((pace + Double(rr) * 2).rounded()) + Int.random(in: -9...9), 5, 98)
-        let startIn = start - now()
-        let length = roundDuration(info) * 1000 * Double.random(in: 0.55...0.95)
-        for k in 1...5 {
-            later(startIn + length * Double(k) / 6) { [weak self] in
-                self?.liveScore(gg, rr, Int((Double(target) * Double(k) / 6).rounded()))
+    private func startOpponent(_ gg: Int, _ rr: Int) {
+        guard let host else { return }
+        let level = rr > 0 ? Double(mine[gg*3+rr-1] ?? 50)/100 : 0.55
+        let mixed = SeededRandom.mix([Int(seed),gg+1,rr+1])
+        let context = GameContext(round: rr, size: host.ctx.size, seed: mixed,
+                                  duration: host.ctx.duration, effectsEnabled: false)
+        let game = games[gg].make(context)
+        let pilot = ArcadePilot(game: game, skill: 0.31+0.5*level+Double(rr)*0.035, seed: mixed ^ 0xb0731a)
+        botPilot = pilot
+        if let local = host.game as? RaceGame, let rival = game as? RaceGame {
+            local.practiceRival = { [weak rival] in
+                guard let rival else { return nil }
+                return (rival.distance, rival.lateral)
             }
         }
-        later(startIn + length + 300) { [weak self] in self?.opDone(gg, rr, target, timeout: false) }
+        game.start()
+        let now = gameNow()
+        advanceOpponent(pilot, gg, rr, previous: now, deadline: now+context.duration)
+    }
+
+    private func advanceOpponent(_ pilot: ArcadePilot, _ gg: Int, _ rr: Int, previous: Double, deadline: Double) {
+        guard !closed, botPilot === pilot, phase == .play else { return }
+        let now = gameNow()
+        pilot.game.step(now-previous)
+        pilot.think()
+        let score = pilot.game.score()
+        liveScore(gg, rr, score)
+        if now >= deadline || pilot.game.c.finished != nil {
+            let final = pilot.game.stop()
+            botPilot = nil
+            opDone(gg, rr, final, timeout: false)
+        } else {
+            later(50) { [weak self, weak pilot] in
+                guard let self, let pilot else { return }
+                self.advanceOpponent(pilot, gg, rr, previous: now, deadline: deadline)
+            }
+        }
     }
 }

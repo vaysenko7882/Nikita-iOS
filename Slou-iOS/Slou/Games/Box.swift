@@ -62,14 +62,14 @@ final class BoxGame: StudioGame {
         actor.translateBy(x:anchor.x-CGFloat(dodge*dodgeSide)*45+CGFloat(hit*punchSide)*11,y:height*0.75)
         actor.rotate(by:.degrees(-punchSide*hit*4+sin(elapsed*1.7)*1.0))
         ArcadeArt.draw(&actor,"piece_fighter",CGRect(x:-size*0.43,y:-size+CGFloat(sinv(elapsed*3))*2,width:size*0.86,height:size))
-        if foeSwing>0 { glove(&g,at:P(anchor.x+CGFloat(foeSwing)*25,anchor.y+20),scale:0.45+CGFloat(foeSwing)*0.57,red:true) }
+        if foeSwing>0 { glove(&g,at:P(anchor.x+CGFloat(foeSwing)*25,anchor.y+20),scale:0.45+CGFloat(foeSwing)*0.57,side:1,opponent:true) }
         for side:CGFloat in [-1,1] {
             let jab=Double(side)==punchSide ? CGFloat(hit):0
             let lift=guarding ? height*0.11:0
-            glove(&g,at:P(width/2+side*(width*0.35-jab*width*0.17),height*(0.86-jab*0.27)-lift),scale:0.85-jab*0.2,red:false)
+            glove(&g,at:P(width/2+side*(width*0.35-jab*width*0.17),height*(0.86-jab*0.27)-lift),scale:0.94-jab*0.2,side:side,opponent:false)
         }
         if elapsed-recoil<0.22 {g.fillColor(Shape2.rect(0,0,width,height),Color.red.opacity(max(0,0.24-(elapsed-recoil))))}
-        hud(&g,left:"Ринг",value:"\(hits) попаданий")
+        hud(&g,left:"Попадания",value:"\(hits)")
         meter(&g,CGRect(x:16,y:63,width:width*0.44,height:4),CGFloat(health/100),.white)
         meter(&g,CGRect(x:width*0.52,y:63,width:width*0.44,height:4),CGFloat(opponentHealth/100),accent)
         if attack-elapsed<0.72 && attack>elapsed {
@@ -82,13 +82,27 @@ final class BoxGame: StudioGame {
         ink(&g,guarding ? "Блок" : "Выносливость",P(18,height-38),13,.white,.semibold,anchor:.leading)
         meter(&g,CGRect(x:16,y:height-23,width:width-32,height:4),CGFloat(stamina),accent)
     }
-    private func glove(_ g:inout GraphicsContext,at p:CGPoint,scale:CGFloat,red:Bool){
-        var a=g;a.translateBy(x:p.x,y:p.y);a.scaleBy(x:scale,y:scale)
-        let hi=red ? Color(hex:0xad4131):Color(hex:0x43828a),dark=red ? Color(hex:0x471a1a):Color(hex:0x102c38)
-        let shape=Shape2.ellipse(.zero,40,49,rotation:-0.20)
-        a.fill(shape,with:radial(G([(0,hi),(0.64,dark),(1,.black)]),P(-14,-24),0,83))
-        a.strokeColor(Shape2.ellipseArc(P(-3,-4),29,32,3.3,4.9),.white.opacity(0.27),2)
-        a.fillColor(Shape2.rrect(-27,30,52,27,8),dark)
-        strokeLine(&a,[P(-22,40),P(19,40)],.white.opacity(0.5),2)
+    private func glove(_ g: inout GraphicsContext, at p: CGPoint, scale: CGFloat, side: CGFloat, opponent: Bool) {
+        var sprite = g
+        sprite.translateBy(x: p.x, y: p.y)
+        sprite.scaleBy(x: side * scale, y: scale)
+        sprite.rotate(by: .degrees(opponent ? -18 : -11))
+        if opponent { sprite.addFilter(.colorMultiply(Color(red: 1, green: 0.69, blue: 0.59))) }
+        ArcadeArt.draw(&sprite, "piece_glove", CGRect(x: -52, y: -60, width: 104, height: 145))
+    }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        let hand = P(target.x + CGFloat(pilot.random.range(-24,24)), target.y+48)
+        if pilot.hands[1] != nil {
+            pilot.up(1)
+            pilot.wait(0.08)
+        } else if attack-elapsed < 0.52 && pilot.random.chance(0.35+pilot.skill*0.55) {
+            pilot.down(1, at:hand)
+            pilot.wait(max(0.22,attack-elapsed+0.10))
+        } else if stamina > 0.25 {
+            if pilot.random.chance(0.35) { pilot.swipe(from:hand,to:P(hand.x,hand.y-62)) }
+            else { pilot.tap(hand) }
+            pilot.wait(pilot.random.range(0.55,1.15) + (1-pilot.skill)*0.65)
+        } else { pilot.wait(0.4) }
     }
 }

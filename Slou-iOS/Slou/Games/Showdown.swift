@@ -73,4 +73,17 @@ final class ShowdownGame: StudioGame {
         let msg=state == .ready ? "Зажать до звонка" : state == .waiting ? "Жди звонка…" : state == .liveSignal ? "Веди к печати и отпускай" : "Следующая печать"
         pill(&g,msg,plate,active:state == .liveSignal)
     }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        switch state {
+        case .ready: pilot.down(1,at:P(plate.midX,plate.midY))
+        case .liveSignal:
+            let error = 15 + (1-pilot.skill)*52
+            let point = P(target.x+CGFloat(pilot.random.range(-error,error)),target.y+CGFloat(pilot.random.range(-error,error)))
+            pilot.move(1,to:point)
+            pilot.up(1,at:point)
+        case .waiting,.feedback: break
+        }
+        pilot.wait(pilot.random.range(0.15,0.37))
+    }
 }

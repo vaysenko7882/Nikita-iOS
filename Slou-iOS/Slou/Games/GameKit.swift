@@ -490,6 +490,7 @@ final class Gestures {
 final class GameContext {
     let round: Int
     let duration: Double
+    let effectsEnabled: Bool
     let size: CGSize
     let s: CGFloat            // масштаб от макета 390×560
     var rnd: SeededRandom
@@ -497,7 +498,8 @@ final class GameContext {
     var opponent: () -> Int? = { nil }
     private(set) var finished: (pts: Int, at: Double)?
 
-    init(round: Int, size: CGSize, seed: UInt32, duration: Double = 12) {
+    init(round: Int, size: CGSize, seed: UInt32, duration: Double = 12, effectsEnabled: Bool = true) {
+        self.effectsEnabled = effectsEnabled
         self.duration = duration
         self.round = round
         self.size = size
@@ -526,7 +528,7 @@ protocol ArcadeGame: AnyObject {
 final class GameHost {
     let info: GameInfo
     let ctx: GameContext
-    let game: ArcadeGame
+    let game: StudioGame
     private var last = 0.0
     private(set) var running = false
 

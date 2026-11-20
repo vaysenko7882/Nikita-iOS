@@ -17,6 +17,7 @@ final class RaceGame: StudioGame {
     private(set) var lateral = 0.0
     private(set) var steering = 0.0
     private(set) var passes = 0
+    var practiceRival: (() -> (distance: Double, lateral: Double)?)?
     private var sideways = 0.0
     private var wheelInput = 0.0
     private var wheelID: Int?
@@ -39,11 +40,11 @@ final class RaceGame: StudioGame {
                   pace: 8+Double(i%3)*1.8+roundScale, phase: c.rnd.range(0,6),
                   tint:[Color(hex:0x7ba6b8),Color(hex:0xe3c379),Color(hex:0xc7d5ca)][i%3])
         }
-        Sound.shared.loop("motor",volume:0.27)
+        if c.effectsEnabled { Sound.shared.loop("motor",volume:0.27) }
     }
     override func end() {
         gasID=nil; brakeID=nil; wheelID=nil; wheelInput=0
-        Sound.shared.stopLoop("motor")
+        if c.effectsEnabled { Sound.shared.stopLoop("motor") }
     }
     func bend(_ at: Double) -> Double {
         0.62*sin(at/134+roundScale*0.7) + 0.39*sin(at/65-0.7) + 0.24*sin(at/278+1.1)
@@ -87,7 +88,7 @@ final class RaceGame: StudioGame {
         }
         let next=clamp(Int(velocity/31)+1,1,6)
         if next != gear { if next>gear { sfx("tick",0.27); buzz("light") }; gear=next }
-        if elapsed-lastAudio>0.12 {
+        if c.effectsEnabled && elapsed-lastAudio>0.12 {
             lastAudio=elapsed
             Sound.shared.tune("motor",rate:Float(0.69+(velocity.truncatingRemainder(dividingBy:31)/47)+ratio*0.44),volume:Float(0.19+(gasID == nil ? 0.02:0.16)))
         }
@@ -104,13 +105,21 @@ final class RaceGame: StudioGame {
         let curve=(bend(distance+z*0.48)*0.50 + sin((distance+z)/216)*0.11)*k*k
         return (width*(0.5+CGFloat(curve)-CGFloat(lateral)*0.43*CGFloat(t)),horizon+(carY-horizon)*CGFloat(t),width*0.55*CGFloat(t))
     }
+    override func backdrop(_ g: inout GraphicsContext, in bounds: CGRect) {
+        let sceneHeight = max(height * 0.93, width * 1.65)
+        let sceneWidth = max(width * 1.21, sceneHeight * 0.67)
+        let pan = CGFloat(bend(distance + 70)) * width * 0.06
+        let skyline = CGRect(x: (width - sceneWidth)/2 - pan, y: horizon - sceneHeight*0.53,
+                             width: sceneWidth, height: sceneHeight)
+        ArcadeArt.draw(&g, "world_race", skyline, fill: true)
+    }
     override func render(_ g: inout GraphicsContext) {
         let strideZ=7.0, rem=distance.truncatingRemainder(dividingBy:strideZ)
         for i in stride(from:49,through:-1,by:-1) {
             let z=max(-5.4,Double(i)*strideZ-rem), zz=max(-5.3,Double(i+1)*strideZ-rem)
             let n=road(z), f=road(zz)
             let band=Int(floor((distance+z+0.1)/strideZ))
-            let ground=band%2==0 ? Color(hex:0x6b7663):Color(hex:0x77806b)
+            let ground=band%2==0 ? Color(hex:0x75684b):Color(hex:0x776a4d)
             g.fillColor(Shape2.rect(0,f.y-0.5,width,max(0.5,n.y-f.y+1)),ground)
             func strip(_ x1:CGFloat,_ x2:CGFloat,_ col:Color) {
                 g.fillColor(Shape2.poly([P(f.x+f.r*x1,f.y-0.4),P(f.x+f.r*x2,f.y-0.4),P(n.x+n.r*x2,n.y+0.4),P(n.x+n.r*x1,n.y+0.4)]),col)
@@ -119,6 +128,25 @@ final class RaceGame: StudioGame {
             strip(-1,1,band%2==0 ? Color(hex:0x3c4549):Color(hex:0x3e484c))
             strip(-0.965,-0.955,.white.opacity(0.81));strip(0.955,0.965,.white.opacity(0.81))
             if band%4<2 {strip(-0.012,0.012,Color(hex:0xf6e4a7))}
+            // Parallel rubber tracks, then rails and trees in the same perspective as the road.
+            for track: CGFloat in [-0.60, -0.36, 0.36, 0.60] {
+                strip(track-0.018, track+0.018, .black.opacity(0.07))
+            }
+            for side: CGFloat in [-1, 1] {
+                let railNear = P(n.x + side * n.r * 1.13, n.y - n.r*0.10)
+                let railFar = P(f.x + side * f.r * 1.13, f.y - f.r*0.10)
+                strokeLine(&g, [railNear, railFar], Color(hex:0x655043), max(0.8,n.r*0.028))
+                strokeLine(&g, [railNear, railFar], Color(hex:0xe8bd89), max(0.5,n.r*0.012))
+            }
+            if band >= 0, band % 4 == 1 {
+                let side: CGFloat = band % 8 == 1 ? -1 : 1
+                let treeHeight = f.r * (band % 3 == 0 ? 1.7 : 1.19)
+                let x = f.x + side*f.r*1.79
+                if x+treeHeight/2 > 0, x-treeHeight/2 < width {
+                    ArcadeArt.draw(&g, "piece_pine", CGRect(x:x-treeHeight*0.39, y:f.y-treeHeight,
+                                                            width:treeHeight*0.78, height:treeHeight))
+                }
+            }
             if band%5==0 {
                 for side:CGFloat in [-1.09,1.09] {
                     let x=f.x+side*f.r
@@ -134,6 +162,22 @@ final class RaceGame: StudioGame {
             let field=road(z), radius=field.r*0.38
             let px=field.x+field.r*CGFloat(rival.lane+0.10*sin(elapsed*0.65+rival.phase))
             drawCar(&g,center:P(px,field.y),wide:radius,tint:rival.tint,player:false)
+        }
+        if let rival = practiceRival?() {
+            let gap = rival.distance - distance
+            if gap > 2 && gap < 240 {
+                let lane = road(gap)
+                let wide = lane.r * 0.45
+                let x = lane.x + lane.r * CGFloat(rival.lateral)
+                var ghost = g
+                ghost.addFilter(.hueRotation(.degrees(170)))
+                drawCar(&ghost, center: P(x,lane.y), wide: wide, tint: .mint, player: false)
+                if wide > 28 {
+                    let marker = P(x, lane.y-wide*0.66)
+                    g.fillColor(Shape2.rrect(marker.x-16,marker.y-8,32,16,8),.black.opacity(0.8))
+                    ink(&g,"Бот",marker,10,.mint,.bold)
+                }
+            }
         }
         var chassis=g
         let lean=CGFloat(steering)*4
@@ -166,5 +210,24 @@ final class RaceGame: StudioGame {
                 g.fill(Shape2.circle(q,13),with:radial(G([(0,.red.opacity(0.9)),(1,.clear)]),q,0,13))
             }
         }
+    }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        let curve = bend(distance+22)
+        let cruise = 85 + 72*pilot.skill - abs(curve)*28
+        let wheel = P(width*0.225,controlsY)
+        let desiredLane = 0.25*sin(distance/68) + 0.09
+        let steer = clamp((desiredLane-lateral)*2.6 + curve*velocity/190, -1, 1)
+        pilot.down(1, at: wheel)
+        pilot.move(1, to: P(wheel.x+CGFloat(steer)*52,wheel.y))
+        if velocity < cruise-3 {
+            pilot.up(3)
+            pilot.down(2, at: P(width*0.84,controlsY))
+        } else {
+            pilot.up(2)
+            if velocity > cruise+9 { pilot.down(3, at: P(width*0.60,controlsY)) }
+            else { pilot.up(3) }
+        }
+        pilot.wait(0.13)
     }
 }

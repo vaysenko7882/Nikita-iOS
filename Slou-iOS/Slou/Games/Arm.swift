@@ -51,4 +51,14 @@ final class ArmGame: StudioGame {
         meter(&g,CGRect(x:width*0.16,y:height-112,width:width*0.68,height:5),CGFloat(stamina),stamina<0.2 ? Color(hex:0xfb886a):accent)
         pill(&g,counterReady ? "Перехватить" : telegraph && grip != nil ? "Отпусти хват" : grip != nil ? "Давишь" : "Удерживать хват",handleRect,active:grip != nil)
     }
+
+    override func playTurn(_ pilot: ArcadePilot) {
+        let press = P(handleRect.midX,handleRect.midY)
+        if counterReady || (pilot.hands[1] == nil && stamina > 0.62) {
+            pilot.down(1,at:press)
+        } else if stamina < 0.21 || (telegraph && pilot.random.chance(pilot.skill*0.5)) {
+            pilot.up(1)
+        }
+        pilot.wait(pilot.random.range(0.12,0.31))
+    }
 }

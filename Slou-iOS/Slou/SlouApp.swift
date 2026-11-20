@@ -15,7 +15,17 @@ struct SlouApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Group {
+                #if SLOU_ARCADE_REVIEW && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-arcade-review") {
+                    ArcadeReviewPane()
+                } else {
+                    RootView()
+                }
+                #else
+                RootView()
+                #endif
+            }
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
                 .tint(.white)
